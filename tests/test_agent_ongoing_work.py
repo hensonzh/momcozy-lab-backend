@@ -39,7 +39,10 @@ def test_workflow_context_projects_verified_pregnancy_form_without_internal_line
             "values": {"current_week": "25周", "fetus_count": "双胎", "age": 29},
         }
     }
-    assert projected[0]["next_transition"] == {"tool": "pregnancy_plan_intake_analyze"}
+    assert projected[0]["next_transition"] == {
+        "tool": "pregnancy_plan_workflow",
+        "command": "submit_form",
+    }
     serialized = str(projected)
     assert "internal-artifact-id" not in serialized
     assert "internal-submission-id" not in serialized

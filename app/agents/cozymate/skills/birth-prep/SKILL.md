@@ -62,7 +62,7 @@ Step3：推荐孕期计划服务
 要求：根据流畅度，可以和之前的Step合并
 
 分支2：用户已经有 active 孕期计划
-要求：不要再次邀约“制定一份孕期计划”，不要调用 `pregnancy_plan_propose` 重新生成；直接沿着用户上文的关键线索追问 1 个问题，帮助定位她现在卡在哪里，并继续围绕已有计划查看、推进或更新完成状态。
+要求：不要再次邀约“制定一份孕期计划”，不要调用 `pregnancy_plan_workflow(command=generate_plan)` 重新生成；直接沿着用户上文的关键线索追问 1 个问题，帮助定位她现在卡在哪里，并继续围绕已有计划查看、推进或更新完成状态。
 要求：追问要顺藤摸瓜，不要改成泛泛问卷；例如用户说“我好焦虑，不知道接下来怎么办”，可以问她现在最卡的是计划里的某一项、临近产检/入院安排，还是突然冒出来的新担心。
 
 [DONT]
@@ -92,18 +92,18 @@ Step3：推荐孕期计划服务
 - 把“不清楚/忘了/暂时没有/没有特殊情况”当成流程阻塞。
 
 [DO]
-要求：用户确认开始制定孕期计划后，调用 `pregnancy_plan_intake_start`，参数传 `{}`。不要先在聊天里收集 3 个字段，也不要自己手写表单。只有用户明确说“重新开始/放弃当前采集后重来”时，才传 `{"restart": true}`；不要静默覆盖仍在进行的采集。
-要求：用户明确说暂时不做、放弃这次孕期计划采集时，调用 `pregnancy_plan_intake_advance` 的 `abandon`，停止当前流程；之后若要继续，需要重新打开可信表单。
-要求：`pregnancy_plan_intake_start` 创建表单后，最终回复只需简短说明请完成表单；不要同时显示针对性分析、补充信息问题或计划预览。
-要求：当前用户消息包含应用侧校验过的 `birth_journey_basic_info_intake` 表单提交时，调用 `pregnancy_plan_intake_analyze`，参数传 `{}`；不要把表单 JSON 复制到工具参数或正文。
-要求：`pregnancy_plan_intake_analyze` 返回后，只执行工具给出的当前 `workflow_phase`：
-  1. `personalized_followup`：用简短、日常的语言说明 `current_followup` 和计划的关系，再只问 `current_followup.question`，每轮一个信息点。按工具给出的 `current_followup` 动态推进 0..3 轮；3 轮只是上限，不是目标，绝不重复 `asked_followups`。用户回答后调用 `pregnancy_plan_intake_advance` 的 `submit_personalized_followup`；只有用户明确要求跳过全部剩余追问时才调用 `finish_personalized_followups`。
-  2. `checkup_done_question`：孕早期先只确认是否做过产检；分别调用 `confirm_checkup_done`、`confirm_no_checkup_yet` 或 `confirm_checkup_unknown`。
-  3. `checkup_records_upload`：只请用户上传目前能找到的产检记录，或允许直接跳过。看到当前消息的真实图片/PDF附件时调用 `mark_checkup_records_uploaded`；仅口头说“上传了”或工具参数不能代替附件。没有附件时继续等待，用户明确跳过时调用 `skip_checkup_records`。
-  4. `final_plan_confirmation`：只原样问：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”用户无补充时调用 `confirm_ready_to_generate`；有最后补充时调用 `submit_final_additional_info` 并只传本轮新增信息。
-  5. `ready_to_generate`：同一轮立即调用 `pregnancy_plan_propose`，不要再问一次，也不要重新打开表单。
-要求：每次 `pregnancy_plan_intake_advance` 只提交当前可见步骤的一项动作；不得把内部 workflow、附件数量或 owner 信息放进模型参数。用户对当前个性化问题回答“不知道、还没确认、暂时没有”时，仍使用 `submit_personalized_followup` 记录这项答案；只有用户明确要求跳过全部剩余追问时才使用 `finish_personalized_followups`。
-要求：如果用户表示稍后再说、暂停，或本轮没有回答当前可见问题，不调用 `pregnancy_plan_intake_advance`，保留当前步骤；只有明确放弃整个孕期计划采集时才使用 `abandon`。
+要求：孕期计划全过程只调用 `pregnancy_plan_workflow`。用户确认开始时传 `{"command":"start_or_resume"}`；不要先在聊天里收集表单字段，也不要自己手写表单。只有用户明确要求放弃当前采集后重来时才同时传 `restart=true`，不要静默覆盖进行中的状态。
+要求：用户明确放弃整个流程时传 `{"command":"abandon"}`；只是稍后再说时传 `{"command":"pause"}`，之后可用 `{"command":"resume"}` 从原步骤恢复。
+要求：工具创建表单后，最终回复只需简短说明请完成表单；不要同时显示针对性分析、补充信息问题或计划预览。
+要求：当前消息包含应用侧校验过的 `birth_journey_basic_info_intake` 提交时，传 `{"command":"submit_form"}`；不要把表单 JSON 复制到参数或正文。
+要求：工具返回后只执行当前 `workflow_phase` 和 `next_transition`：
+  1. `personalized_followup`：用简短、日常语言说明当前问题和计划的关系，再只问 `visible_question`。按工具给出的内容动态推进 0..3 轮；用户回答后使用 `command=answer_current`，优先传工具给出的稳定 `choice_id`，自由文本只传用户本轮原话；用户明确跳过全部剩余追问时选择对应跳过选项。
+  2. `checkup_done_question`：只让用户从工具返回的“做过、还没做过、不确定”选项中选择，再用 `command=answer_current` 提交该 `choice_id`。
+  3. `checkup_records_upload`：只请用户上传能找到的产检记录或选择跳过；附件可信状态由 runtime 注入，模型不得伪造。
+  4. `final_plan_confirmation`：只原样问：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”按用户选择提交当前答案。
+  5. `ready_to_generate`：同一轮立即调用 `pregnancy_plan_workflow` 并传 `{"command":"generate_plan"}`，不要再问一次，也不要重新打开表单。
+要求：每次工具调用只提交一个 command；不得把内部 workflow、附件数量或 owner 信息放进模型参数。用户对当前问题回答“不知道、还没确认、暂时没有”仍是有效答案，不得擅自阻塞。
+要求：本轮没有回答当前可见问题、而是在问别的问题时，先回答该问题，不调用推进命令；持久流程保持原步骤。
 要求：不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断，包装成用户明确表达过的内容。只有用户真的说过焦虑、担心、心里没底等，才能说“你提到/刚才说”；如果只是客观信息提示风险，只能说“这个因素会影响计划重点，我会纳入安排/建议和医生确认”。
 要求：快捷回复由 runtime 在最终回复后统一生成；本技能不要调用快捷回复工具，也不要在正文里输出快捷回复候选。
 
@@ -118,10 +118,10 @@ Step3：推荐孕期计划服务
 - 为用户整理孕期计划，让用户知道当前展开阶段最该做什么、为什么是她要做，以及后续阶段会怎样一路推进到住院生产。
 
 [DO]
-要求：如果 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 显示已经存在 active 孕期计划，说明用户已经有计划；不要再次调用 `pregnancy_plan_propose` 重新生成。用户要求“生成/制定孕期计划”时，先说明已有计划，并围绕查看、继续推进或宝宝和我页面里的计划展开。
-要求：只有 `pregnancy_plan_intake_advance` 返回 `ready_to_generate` 后，才调用 `pregnancy_plan_propose` 整理孕期计划。
-要求：调用 `pregnancy_plan_propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办。
-要求：`pregnancy_plan_propose` 会在当前工具调用中同步写入。只有工具返回 `action_status=applied` / `write_succeeded=true` 后，才说明计划已经生成并同步到宝宝和我；结构化计划卡展示当前阶段待办，正文不要复述完整计划。若返回 `action_status=failed` / `write_succeeded=false`，必须明确说明未生成、未同步并可重试；不得创建成功假象或把未落库的卡片说成计划。
+要求：如果 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 显示已经存在 active 孕期计划，说明用户已经有计划；不要再次调用 `pregnancy_plan_workflow(command=generate_plan)`。用户要求“生成/制定孕期计划”时，先说明已有计划，并围绕查看、继续推进或宝宝和我页面里的计划展开。
+要求：只有 `pregnancy_plan_workflow` 返回 `ready_to_generate` 后，才用同一工具的 `generate_plan` 命令整理孕期计划。
+要求：调用 `generate_plan` 前不要输出用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒或完整待办。
+要求：`generate_plan` 仍通过 pregnancy.plan.create action 同步写入。只有工具返回 `action_status=applied` / `write_succeeded=true` 后，才说明计划已经生成并同步到宝宝和我；若写入失败，必须明确说明未生成、未同步并可重试。
 要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 的 `current_todos` 能用事项名或编号唯一定位到 `item_id`，调用 `pregnancy_plan_todo_propose`，同时传该计划的 `plan_id` 和 `version` 同步完成状态。
 要求：如果当前待办无法唯一定位，先追问编号或事项名；不要猜测，不要用普通 `PlanTask` 工具替代孕期计划卡片待办工具。
 要求：如果用户说“我完成了那个/检查那个”等无法唯一定位的表达，先追问编号或事项名，不要猜测。

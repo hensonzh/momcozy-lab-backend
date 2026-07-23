@@ -167,7 +167,7 @@ def test_tool_event_semantic_maps_confirmation_outputs() -> None:
     assert semantic["lifecycle"] == "completed"
 
 
-def test_plan_tool_event_semantics_use_single_preview_and_confirmation_lifecycle() -> None:
+def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_plan() -> None:
     milk_started = tool_event_semantic(
         event_type="tool.started",
         tool_name="plans_milk_plan_propose",
@@ -175,19 +175,19 @@ def test_plan_tool_event_semantics_use_single_preview_and_confirmation_lifecycle
     )
     pregnancy_completed = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="pregnancy_plan_propose",
-        safe_output={"requires_confirmation": True},
+        tool_name="pregnancy_plan_workflow",
+        safe_output={"status": "card_created"},
         effect_scope="user_resource",
     )
     existing_plan = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="pregnancy_plan_propose",
+        tool_name="pregnancy_plan_workflow",
         safe_output={"status": "existing_plan_found"},
         effect_scope="user_resource",
     )
 
     assert milk_started["label"] == "我先帮你整理奶量计划～"
-    assert pregnancy_completed["label"] == "我已经准备好预览，等你确认～"
+    assert pregnancy_completed["label"] == "孕期计划已生成"
     assert existing_plan["label"] == "我找到已有的孕期计划啦"
 
 

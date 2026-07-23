@@ -87,3 +87,50 @@ def test_client_context_preserves_workflow_reply_without_projecting_it_to_the_mo
         "step_token": "opaque-step-token",
     }
     assert project_cozymate_client_context(raw_context) == {"locale": "zh-CN"}
+
+
+def test_client_context_preserves_bounded_workflow_command_without_projecting_it_to_the_model() -> None:
+    raw_context = {
+        "locale": "zh-CN",
+        "workflow_command": {
+            "schema_version": "pregnancy_plan_command.v1",
+            "workflow_type": "pregnancy_plan",
+            "command": "answer_current",
+            "step_id": "checkup_done",
+            "choice_id": "confirm_no_checkup_yet",
+            "answer": "  用户补充  ",
+            "unexpected": "drop-me",
+        },
+    }
+
+    sanitized = sanitize_cozymate_client_context(raw_context)
+
+    assert sanitized["workflow_command"] == {
+        "schema_version": "pregnancy_plan_command.v1",
+        "workflow_type": "pregnancy_plan",
+        "command": "answer_current",
+        "step_id": "checkup_done",
+        "choice_id": "confirm_no_checkup_yet",
+        "answer": "用户补充",
+    }
+    assert project_cozymate_client_context(raw_context) == {"locale": "zh-CN"}
+
+
+def test_client_context_drops_unknown_or_versionless_workflow_commands() -> None:
+    assert sanitize_cozymate_client_context(
+        {
+            "workflow_command": {
+                "workflow_type": "pregnancy_plan",
+                "command": "answer_current",
+            }
+        }
+    ) == {}
+    assert sanitize_cozymate_client_context(
+        {
+            "workflow_command": {
+                "schema_version": "pregnancy_plan_command.v1",
+                "workflow_type": "pregnancy_plan",
+                "command": "delete_everything",
+            }
+        }
+    ) == {}

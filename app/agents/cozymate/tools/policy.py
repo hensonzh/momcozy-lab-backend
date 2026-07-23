@@ -29,6 +29,11 @@ _PREGNANCY_DIARY_PRIVATE_FIELDS = frozenset(
 
 
 class CozymateToolExecutionPolicy(ToolExecutionPolicy):
+    def effective_effect_scope(self, *, tool_name: str, args: dict[str, Any], default: str) -> str:
+        if tool_name == "pregnancy_plan_workflow" and args.get("command") != "generate_plan":
+            return "agent_internal"
+        return super().effective_effect_scope(tool_name=tool_name, args=args, default=default)
+
     def safe_args(self, *, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         safe = super().safe_args(tool_name=tool_name, args=args)
         if tool_name not in _PREGNANCY_DIARY_TOOLS:
@@ -65,9 +70,7 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
             "plans_task_complete_propose": "任务状态",
             "pregnancy_plan_todo_propose": "孕期计划事项",
             "pregnancy_plan_context_read": "孕期计划上下文",
-            "pregnancy_plan_intake_start": "孕期计划信息表",
-            "pregnancy_plan_intake_analyze": "孕期计划信息分析",
-            "pregnancy_plan_propose": "孕期计划草稿",
+            "pregnancy_plan_workflow": "孕期计划流程",
             "devices_pump_status_read": "设备状态",
             "devices_guidance_read": "设备指导资料",
             "devices_unboxing_advance": "设备开箱步骤",

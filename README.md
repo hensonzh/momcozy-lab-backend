@@ -214,8 +214,16 @@ environment on a server and you want DB, Redis, and MinIO to run as Docker
 containers. This is separate from production because it starts containerized
 infrastructure and stores data in compose volumes.
 
+The initial `20260723_0043` pregnancy-workflow rollout is a test-stage fresh
+cutover. Before that migration is applied to an existing server-test stack,
+delete its disposable Compose data with `make backend-test-reset`; this removes
+the server-test Postgres, Redis, and MinIO volumes. The migration intentionally
+fails if an old pregnancy workflow state remains. Do not use this reset target
+against an environment whose data must be retained.
+
 ```bash
 cp env/compose.test.env.example env/compose.test.env
+make backend-test-reset
 make backend-test-up
 ```
 

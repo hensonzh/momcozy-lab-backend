@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from app.core.errors import ApiError
@@ -64,7 +64,15 @@ class AgentRuntimeService:
         owner_user_id: UUID,
         thread_id: UUID,
         workflow_type: str,
+        lookup_scope: Literal["thread", "owner"] = "thread",
     ) -> AgentWorkflowState | None:
+        if lookup_scope == "owner":
+            return await self.repository.get_latest_workflow_state_for_owner(
+                owner_user_id=owner_user_id,
+                workflow_type=workflow_type,
+            )
+        if lookup_scope != "thread":
+            raise ValueError("lookup_scope must be 'thread' or 'owner'")
         return await self.repository.get_latest_workflow_state_for_thread(
             thread_id=thread_id,
             owner_user_id=owner_user_id,
@@ -83,6 +91,8 @@ class AgentRuntimeService:
         state: dict[str, Any],
         active_step: str,
         expires_at: datetime | None = None,
+        lookup_scope: Literal["thread", "owner"] = "thread",
+        transition_metadata: dict[str, Any] | None = None,
     ) -> AgentWorkflowState:
         return await self.state_store.upsert_active_workflow(
             thread_id=thread_id,
@@ -94,6 +104,8 @@ class AgentRuntimeService:
             state=state,
             active_step=active_step,
             expires_at=expires_at,
+            lookup_scope=lookup_scope,
+            transition_metadata=transition_metadata,
         )
 
     async def create_thread(
@@ -696,6 +708,17 @@ class AgentRuntimeService:
         if action is None:
             raise ApiError(code="not_found", message="Agent action not found.", status=404)
         return action
+
+    async def get_artifact_for_owner(
+        self,
+        *,
+        owner_user_id: UUID,
+        artifact_id: UUID,
+    ) -> AgentArtifact | None:
+        return await self.repository.get_artifact_for_owner(
+            artifact_id=artifact_id,
+            owner_user_id=owner_user_id,
+        )
 
     async def delete_artifact(self, *, owner_user_id: UUID, artifact_id: UUID) -> AgentArtifact:
         artifact = await self.repository.get_artifact_for_owner(artifact_id=artifact_id, owner_user_id=owner_user_id)

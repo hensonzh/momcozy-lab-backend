@@ -140,6 +140,84 @@ class AgentContextItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class AgentModelContextSnapshot(Base):
+    __tablename__ = "agent_model_context_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "sequence",
+            name="uq_agent_model_context_snapshots_run_sequence",
+        ),
+        Index(
+            "ix_agent_model_context_snapshots_run_sequence",
+            "run_id",
+            "sequence",
+        ),
+        Index(
+            "ix_agent_model_context_snapshots_owner_created",
+            "owner_user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_runs.id"),
+        nullable=False,
+    )
+    thread_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_threads.id"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[str] = mapped_column(
+        String(80),
+        default="model_context_snapshot.v1",
+        server_default="model_context_snapshot.v1",
+        nullable=False,
+    )
+    item_refs: Mapped[list[Any]] = mapped_column(
+        "item_refs_json",
+        postgresql.JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
+    )
+    dynamic_context: Mapped[dict[str, Any]] = mapped_column(
+        "dynamic_context_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    selection_policy: Mapped[dict[str, Any]] = mapped_column(
+        "selection_policy_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    input_item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    estimated_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
 class AgentImageAccess(Base):
     __tablename__ = "agent_image_accesses"
     __table_args__ = (
@@ -308,6 +386,16 @@ class AgentWorkflowState(Base):
     __table_args__ = (
         Index("ix_agent_workflow_states_thread_status", "thread_id", "status"),
         Index("ix_agent_workflow_states_owner_type_status", "owner_user_id", "workflow_type", "status"),
+        Index(
+            "uq_agent_workflow_states_owner_type_active",
+            "owner_user_id",
+            "workflow_type",
+            unique=True,
+            postgresql_where=text(
+                "workflow_type = 'pregnancy_plan' "
+                "AND status IN ('collecting', 'ready', 'waiting', 'paused')"
+            ),
+        ),
         Index("ix_agent_workflow_states_run_created", "run_id", "created_at"),
         Index("ix_agent_workflow_states_expires_at", "expires_at"),
     )
@@ -338,6 +426,64 @@ class AgentWorkflowState(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+class AgentWorkflowEvent(Base):
+    __tablename__ = "agent_workflow_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_state_id",
+            "sequence",
+            name="uq_agent_workflow_events_state_sequence",
+        ),
+        Index("ix_agent_workflow_events_state_sequence", "workflow_state_id", "sequence"),
+        Index(
+            "ix_agent_workflow_events_owner_type_created",
+            "owner_user_id",
+            "workflow_type",
+            "created_at",
+        ),
+        Index("ix_agent_workflow_events_run_created", "run_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workflow_state_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_workflow_states.id"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    thread_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_threads.id"),
+        nullable=False,
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_runs.id"),
+        nullable=True,
+    )
+    workflow_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    from_revision: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    to_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        "payload_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class AgentRunSummary(Base):

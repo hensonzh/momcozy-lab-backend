@@ -2265,7 +2265,7 @@ def test_pregnancy_plan_intake_start_creates_one_form_and_durable_workflow_state
     assert form_artifact.artifact_type == "form"
     assert runtime_service.workflow_state.workflow_type == "pregnancy_plan"
     assert runtime_service.workflow_state.status == "collecting"
-    assert runtime_service.workflow_state.active_step == "collecting_intake"
+    assert runtime_service.workflow_state.active_step == "basic_intake"
     assert runtime_service.workflow_state.state == {
         "phase": "collecting_intake",
         "source_form_artifact_id": str(form_artifact.id),
@@ -2318,16 +2318,6 @@ def test_pregnancy_plan_intake_start_reuses_existing_active_plan() -> None:
     ("workflow", "expected"),
     [
         (
-            {
-                "phase": "collecting_intake",
-                "source_form_artifact_id": "form-1",
-            },
-            {
-                "status": "pregnancy_plan_intake_already_started",
-                "form_artifact_id": "form-1",
-            },
-        ),
-        (
             {"phase": "awaiting_additional_information"},
             {
                 "status": "pregnancy_plan_intake_already_analyzed",
@@ -2355,6 +2345,89 @@ def test_pregnancy_plan_intake_start_does_not_reset_an_existing_workflow(
 
     assert result == expected
     assert runtime_service.calls == []
+
+
+def test_pregnancy_plan_intake_start_replays_the_owned_form_when_collecting_intake_resumes() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service)
+    started = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={
+                    "default_values": {"current_week": "32周", "age": 36},
+                    "runtime_plan_context": {"has_active_plan": False},
+                },
+            )
+        )
+    )
+    form_artifact = runtime_service.artifacts[-1]
+    artifact_count = len(runtime_service.artifacts)
+
+    resumed = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={
+                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_workflow_context": dict(runtime_service.workflow_state.state),
+                },
+            )
+        )
+    )
+
+    assert resumed["status"] == "pregnancy_plan_intake_already_started"
+    assert resumed["tool_name"] == "ui_form_create"
+    assert resumed["artifact_id"] == started["artifact_id"] == str(form_artifact.id)
+    assert resumed["form"] == started["form"]
+    assert len(runtime_service.artifacts) == artifact_count
+    assert resumed["_deferred_agent_events"] == [
+        {
+            "event_type": "artifact.created",
+            "payload": {
+                "artifact_id": str(form_artifact.id),
+                "artifact_type": "form",
+                "schema_version": "1.0",
+                "status": "created",
+                "artifact": {
+                    "id": str(form_artifact.id),
+                    "artifact_type": "form",
+                    "schema_version": "1.0",
+                    "status": "created",
+                    "payload": form_artifact.payload,
+                    "raw_payload_ref": "",
+                },
+                "form": started["form"],
+            },
+        }
+    ]
+
+
+def test_pregnancy_plan_intake_start_replaces_a_collecting_form_not_owned_by_the_actor() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    foreign_form_artifact = runtime_service.artifacts[0]
+
+    result = asyncio.run(
+        PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service).execute(
+            _context(
+                actor=actor,
+                args={
+                    "runtime_plan_context": {"has_active_plan": False},
+                    "runtime_workflow_context": {
+                        "phase": "collecting_intake",
+                        "source_form_artifact_id": str(foreign_form_artifact.id),
+                    },
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "form_created"
+    assert result["artifact_id"] != str(foreign_form_artifact.id)
+    assert runtime_service.artifacts[-1].owner_user_id == actor.user_id
+    assert runtime_service.workflow_state.state["source_form_artifact_id"] == result["artifact_id"]
 
 
 def test_pregnancy_plan_intake_start_creates_a_fresh_form_after_prior_intake_was_consumed() -> None:
@@ -2426,7 +2499,8 @@ def test_pregnancy_plan_intake_start_restarts_only_when_explicitly_requested() -
 
     assert result["status"] == "form_created"
     assert runtime_service.workflow_state.state["source_form_artifact_id"] != old_form_id
-    assert runtime_service.workflow_calls[-1]["expires_at"] > datetime.now(timezone.utc)
+    assert runtime_service.workflow_calls[-1]["expires_at"] is None
+    assert runtime_service.workflow_calls[-1]["lookup_scope"] == "owner"
 
 
 def test_pregnancy_plan_intake_can_be_abandoned_and_then_requires_fresh_intake() -> None:
@@ -2487,7 +2561,19 @@ def test_pregnancy_plan_intake_analyze_returns_verified_form_in_tool_result() ->
     result = asyncio.run(PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=runtime_service).execute(context))
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output == {
+    assert {
+        key: result.audit_output[key]
+        for key in (
+            "status",
+            "workflow_phase",
+            "next_step",
+            "focus_count",
+            "personalized",
+            "requires_user_reply",
+            "followup_round",
+            "followup_max_rounds",
+        )
+    } == {
         "status": "intake_in_progress",
         "workflow_phase": "personalized_followup",
         "next_step": "personalized_followup",
@@ -2497,6 +2583,7 @@ def test_pregnancy_plan_intake_analyze_returns_verified_form_in_tool_result() ->
         "followup_round": 1,
         "followup_max_rounds": 3,
     }
+    assert result.audit_output["workflow_context"]["current_step"]["id"].startswith("followup:")
     assert "甲状腺" not in str(result.audit_output)
     trusted = str(result.to_function_call_output())
     assert "甲状腺用药" in trusted
@@ -2510,7 +2597,7 @@ def test_pregnancy_plan_intake_analyze_returns_verified_form_in_tool_result() ->
     workflow = runtime_service.workflow_state
     assert workflow.workflow_type == "pregnancy_plan"
     assert workflow.status == "waiting"
-    assert workflow.active_step == "personalized_followup"
+    assert workflow.active_step == "followup:doctor_special_notes_followup"
     assert workflow.state["phase"] == "personalized_followup"
     assert workflow.state["analysis_run_id"] == str(run_id)
     assert workflow.state["source_form_submission_id"] == "submission-1"
@@ -2802,12 +2889,16 @@ def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_
     )
 
     assert isinstance(unverified, ToolResult)
-    assert unverified.audit_output == {
+    assert {
+        key: unverified.audit_output[key]
+        for key in ("status", "workflow_phase", "next_step", "requires_user_reply")
+    } == {
         "status": "checkup_attachment_required",
         "workflow_phase": "checkup_records_upload",
         "next_step": "checkup_records_upload",
         "requires_user_reply": True,
     }
+    assert unverified.audit_output["workflow_context"]["current_step"]["id"] == "checkup_records"
     assert runtime_service.workflow_state is None
 
     verified = asyncio.run(
@@ -2861,6 +2952,14 @@ def test_pregnancy_plan_intake_analyze_stops_for_urgent_signals_without_advancin
     assert result.audit_output["signal_ids"] == ["reduced_fetal_movement"]
     assert result.audit_output["blocks_plan_flow"] is True
     assert "孕期计划啦" not in result.audit_output["required_response"]
+    assert runtime_service.workflow_state.status == "paused"
+    assert runtime_service.workflow_state.active_step == "workflow_paused"
+    assert runtime_service.workflow_state.state["interrupted_by_safety_signal"] is True
+    assert runtime_service.workflow_state.state["paused"] is True
+    assert runtime_service.workflow_state.state["resume_phase"] == "collecting_intake"
+    assert runtime_service.workflow_state.state["safety_signal_ids"] == [
+        "reduced_fetal_movement"
+    ]
     assert len(runtime_service.artifacts) == 1
     assert runtime_service.calls == []
 
@@ -3428,10 +3527,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plans_task_update_propose",
         "plans_plan_delete_propose",
         "pregnancy_plan_context_read",
-        "pregnancy_plan_intake_analyze",
-        "pregnancy_plan_intake_advance",
-        "pregnancy_plan_intake_start",
-        "pregnancy_plan_propose",
+        "pregnancy_plan_workflow",
         "pregnancy_plan_todo_propose",
         "records_feeding_record_propose",
         "records_pumping_record_propose",
@@ -3971,6 +4067,17 @@ class FakeAgentRuntimeService:
         )
         self.artifacts.append(self.artifact)
         return self.artifact
+
+    async def get_artifact_for_owner(self, **kwargs):
+        return next(
+            (
+                artifact
+                for artifact in reversed(self.artifacts)
+                if artifact.id == kwargs["artifact_id"]
+                and artifact.owner_user_id == kwargs["owner_user_id"]
+            ),
+            None,
+        )
 
     async def create_artifact_once(self, **kwargs):
         existing = next(

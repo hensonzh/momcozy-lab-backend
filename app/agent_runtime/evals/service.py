@@ -331,21 +331,28 @@ def _tool_argument_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> l
 
 
 def _forbidden_tool_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:
-    forbidden_contracts = [_contract(tool_call) for tool_call in case.get("forbidden_tool_calls", []) if _contract(tool_call)]
-    if not forbidden_contracts:
-        return []
-    observed_contracts = {_observed_tool_contract(tool_call) for tool_call in trace.tool_calls}
-    observed_contracts.discard("")
-    return [
-        AgentEvalFailure(
-            category="forbidden_tool",
-            assertion="tool.forbidden",
-            expected=f"do not call {contract}",
-            observed=contract,
+    failures: list[AgentEvalFailure] = []
+    for forbidden_call in case.get("forbidden_tool_calls", []):
+        contract = _contract(forbidden_call)
+        if not contract:
+            continue
+        if not any(
+            _tool_call_matches_expected(
+                expected_call=forbidden_call,
+                observed_call=observed_call,
+            )
+            for observed_call in trace.tool_calls
+        ):
+            continue
+        failures.append(
+            AgentEvalFailure(
+                category="forbidden_tool",
+                assertion="tool.forbidden",
+                expected=f"do not call {contract}",
+                observed=contract,
+            )
         )
-        for contract in forbidden_contracts
-        if contract in observed_contracts
-    ]
+    return failures
 
 
 def _required_event_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> list[AgentEvalFailure]:

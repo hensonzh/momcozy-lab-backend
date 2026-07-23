@@ -483,57 +483,51 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "default_duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240, "default": 30},
         },
     },
-    "pregnancy_plan_propose": {
+    "pregnancy_plan_workflow": {
         "type": "object",
         "additionalProperties": False,
+        "required": ["command"],
         "properties": {
+            "command": {
+                "type": "string",
+                "enum": [
+                    "start_or_resume",
+                    "submit_form",
+                    "answer_current",
+                    "edit_answer",
+                    "pause",
+                    "resume",
+                    "abandon",
+                    "generate_plan",
+                ],
+                "description": "本次只执行一个状态机命令；不要自行推测或传入内部阶段。",
+            },
+            "choice_id": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "当前步骤展示的稳定选项 id；自由文本回答时可省略。",
+            },
+            "answer": {
+                "type": "string",
+                "maxLength": 2000,
+                "description": "用户本轮明确提供的自由文本答案；不得填入模型推断。",
+            },
+            "step_id": {
+                "type": "string",
+                "maxLength": 120,
+                "description": "仅 edit_answer 使用，必须来自工具返回的可编辑步骤 id。",
+            },
+            "restart": {
+                "type": "boolean",
+                "description": "仅当用户明确要求放弃当前采集并重新开始时为 true。",
+            },
             "summary": {"type": "string", "maxLength": 2000},
             "scope": {"type": "string", "enum": ["full", "prenatal_only", "short_range"]},
             "additional_info": {
                 "type": "string",
                 "maxLength": 2000,
-                "description": "用户在针对性分析后的最后一轮主动补充；没有补充时省略。",
+                "description": "生成阶段用户已确认的最后补充；没有补充时省略。",
             },
-        },
-    },
-    "pregnancy_plan_intake_start": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "restart": {
-                "type": "boolean",
-                "description": "仅当用户明确要求放弃当前采集并重新开始时设为 true。",
-            },
-        },
-    },
-    "pregnancy_plan_intake_analyze": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
-    },
-    "pregnancy_plan_intake_advance": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["action"],
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": [
-                    "submit_personalized_followup",
-                    "finish_personalized_followups",
-                    "confirm_checkup_done",
-                    "confirm_no_checkup_yet",
-                    "confirm_checkup_unknown",
-                    "mark_checkup_records_uploaded",
-                    "skip_checkup_records",
-                    "confirm_ready_to_generate",
-                    "submit_final_additional_info",
-                    "abandon",
-                ],
-            },
-            "answer": {"type": "string", "maxLength": 2000},
-            "summary": {"type": "string", "maxLength": 2000},
-            "additional_info": {"type": "string", "maxLength": 2000},
         },
     },
     "plans_task_create_propose": {

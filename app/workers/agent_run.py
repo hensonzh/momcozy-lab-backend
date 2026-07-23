@@ -201,6 +201,8 @@ class AgentRunWorker:
                 content: dict[str, Any] = {"text": result.final_text}
                 if result.workflow_reply:
                     content["workflow_reply"] = dict(result.workflow_reply)
+                if result.workflow_prompt:
+                    content["workflow_prompt"] = dict(result.workflow_prompt)
                 message = await self.repository.create_message(
                     message_id=result.assistant_message_id,
                     thread_id=run.thread_id,
@@ -233,6 +235,8 @@ class AgentRunWorker:
                 }
                 if result.workflow_reply:
                     payload["workflow_reply"] = dict(result.workflow_reply)
+                if result.workflow_prompt:
+                    payload["workflow_prompt"] = dict(result.workflow_prompt)
                 live_payload = dict(payload)
                 if _has_exactly_three_quick_replies(result.quick_replies):
                     live_payload["quick_replies"] = result.quick_replies

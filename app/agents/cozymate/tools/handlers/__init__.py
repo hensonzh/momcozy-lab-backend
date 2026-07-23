@@ -51,6 +51,7 @@ from .devices import (
     DeviceUnboxingAdvanceToolHandler,
     ConversationHistoryImageLoadToolHandler,
 )
+from .pregnancy_plan import PregnancyPlanWorkflowToolHandler
 from .registry import build_default_tool_handlers
 
 __all__ = [
@@ -93,6 +94,7 @@ __all__ = [
     "PregnancyPlanIntakeAnalyzeToolHandler",
     "PregnancyPlanIntakeStartToolHandler",
     "PregnancyPlanProposeToolHandler",
+    "PregnancyPlanWorkflowToolHandler",
     "PregnancyPlanTodoUpdateProposeToolHandler",
     "ProfileReadToolHandler",
     "ProfileUpdateToolHandler",

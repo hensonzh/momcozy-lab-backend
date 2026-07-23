@@ -22,6 +22,8 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
         "agent_artifacts",
         "agent_actions",
         "agent_workflow_states",
+        "agent_workflow_events",
+        "agent_model_context_snapshots",
         "agent_context_items",
         "agent_run_summaries",
         "agent_memories",
@@ -89,6 +91,8 @@ def test_agent_runtime_state_tables_have_required_indexes() -> None:
     runs = Base.metadata.tables["agent_runs"]
     actions = Base.metadata.tables["agent_actions"]
     workflow_states = Base.metadata.tables["agent_workflow_states"]
+    workflow_events = Base.metadata.tables["agent_workflow_events"]
+    model_context_snapshots = Base.metadata.tables["agent_model_context_snapshots"]
     context_items = Base.metadata.tables["agent_context_items"]
     run_summaries = Base.metadata.tables["agent_run_summaries"]
     memories = Base.metadata.tables["agent_memories"]
@@ -107,6 +111,19 @@ def test_agent_runtime_state_tables_have_required_indexes() -> None:
     assert "ix_agent_actions_run_status" in {index.name for index in actions.indexes}
     assert "ix_agent_actions_idempotency_key" in {index.name for index in actions.indexes}
     assert "ix_agent_workflow_states_owner_type_status" in {index.name for index in workflow_states.indexes}
+    assert "uq_agent_workflow_states_owner_type_active" in {index.name for index in workflow_states.indexes}
+    assert "uq_agent_workflow_events_state_sequence" in {
+        constraint.name for constraint in workflow_events.constraints
+    }
+    assert "ix_agent_workflow_events_owner_type_created" in {
+        index.name for index in workflow_events.indexes
+    }
+    assert "uq_agent_model_context_snapshots_run_sequence" in {
+        constraint.name for constraint in model_context_snapshots.constraints
+    }
+    assert "ix_agent_model_context_snapshots_owner_created" in {
+        index.name for index in model_context_snapshots.indexes
+    }
     assert "ix_agent_context_items_thread_sequence" in {index.name for index in context_items.indexes}
     assert "ix_agent_context_items_run_sequence" in {index.name for index in context_items.indexes}
     assert "uq_agent_run_summaries_run_type" in {constraint.name for constraint in run_summaries.constraints}

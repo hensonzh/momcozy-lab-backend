@@ -8,8 +8,10 @@ from app.agent_runtime.runs.models import (
     AgentContextItem,
     AgentEvent,
     AgentMessage,
+    AgentModelContextSnapshot,
     AgentRun,
     AgentToolCall,
+    AgentWorkflowEvent,
     AgentWorkflowState,
 )
 from app.agent_runtime.events.replay import AgentReplayService
@@ -40,6 +42,13 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
     assert bundle["artifacts"][0]["payload"] == {"title": "Birth plan"}
     assert bundle["checkpoints"] == []
     assert bundle["workflow_states"][0]["workflow_type"] == "milk_analysis_intake"
+    assert bundle["workflow_events"][0]["event_type"] == "workflow.answer_recorded"
+    assert bundle["workflow_events"][0]["payload"]["interaction"]["answer"] == "[redacted]"
+    assert bundle["workflow_events"][0]["payload"]["after"]["state"] == {"redacted": True}
+    assert bundle["model_context_snapshots"][0]["dynamic_context"] == {
+        "redacted": True
+    }
+    assert bundle["model_context_snapshots"][0]["model_input_sha256"] == "a" * 64
     assert "context_projections" not in bundle
 
 
@@ -195,6 +204,48 @@ class FakeReplayRepository:
             state={"current_field": "daily_volume"},
             active_step="collect_daily_volume",
         )
+        self.workflow_event = AgentWorkflowEvent(
+            id=uuid4(),
+            workflow_state_id=self.workflow_state.id,
+            owner_user_id=self.run.actor_user_id,
+            thread_id=self.run.thread_id,
+            run_id=self.run.id,
+            workflow_type=self.workflow_state.workflow_type,
+            sequence=1,
+            event_type="workflow.answer_recorded",
+            from_revision=1,
+            to_revision=2,
+            payload={
+                "command": "answer_current",
+                "interaction": {"answer": "private answer"},
+                "after": {
+                    "status": "waiting",
+                    "active_step": "next",
+                    "revision": 2,
+                    "state": {"answer": "private answer"},
+                },
+            },
+        )
+        self.model_context_snapshot = AgentModelContextSnapshot(
+            id=uuid4(),
+            run_id=self.run.id,
+            thread_id=self.run.thread_id,
+            owner_user_id=self.run.actor_user_id,
+            sequence=1,
+            schema_version="model_context_snapshot.v1",
+            item_refs=[
+                {
+                    "item_key": f"message:{self.message.id}",
+                    "sequence": 1,
+                    "model_input_position": 0,
+                }
+            ],
+            dynamic_context={"runtime_context": {"private": "health details"}},
+            selection_policy={"model_context_token_budget": 12000},
+            input_item_count=1,
+            estimated_input_tokens=12,
+            model_input_sha256="a" * 64,
+        )
         self.context_items = [
             AgentContextItem(
                 id=uuid4(),
@@ -243,3 +294,9 @@ class FakeReplayRepository:
 
     async def list_workflow_states_for_run(self, *, run_id):
         return [self.workflow_state] if run_id == self.run.id else []
+
+    async def list_workflow_events_for_run(self, *, run_id):
+        return [self.workflow_event] if run_id == self.run.id else []
+
+    async def list_model_context_snapshots_for_run(self, *, run_id):
+        return [self.model_context_snapshot] if run_id == self.run.id else []

@@ -532,13 +532,19 @@
           "timing": "before_intake"
         },
         {
-          "contract": "pregnancy_plan_intake_start",
-          "timing": "after_user_consent"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_user_consent",
+          "args_subset": {
+            "command": "start_or_resume"
+          }
         }
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_propose"
+          "contract": "pregnancy_plan_workflow",
+          "args_subset": {
+            "command": "generate_plan"
+          }
         }
       ]
     },
@@ -595,13 +601,19 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_intake_analyze",
-          "timing": "after_verified_submission"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_verified_submission",
+          "args_subset": {
+            "command": "submit_form"
+          }
         }
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_propose"
+          "contract": "pregnancy_plan_workflow",
+          "args_subset": {
+            "command": "generate_plan"
+          }
         }
       ]
     },
@@ -647,16 +659,25 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_intake_advance",
-          "timing": "after_followup_reply"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_followup_reply",
+          "args_subset": {
+            "command": "answer_current"
+          }
         }
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_intake_analyze"
+          "contract": "pregnancy_plan_workflow",
+          "args_subset": {
+            "command": "submit_form"
+          }
         },
         {
-          "contract": "pregnancy_plan_propose"
+          "contract": "pregnancy_plan_workflow",
+          "args_subset": {
+            "command": "generate_plan"
+          }
         }
       ]
     },
@@ -694,12 +715,16 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_propose"
+          "contract": "pregnancy_plan_workflow",
+          "args_subset": {
+            "command": "generate_plan"
+          }
         },
         {
-          "contract": "pregnancy_plan_intake_advance",
-          "args_contains": {
-            "action": "mark_checkup_records_uploaded"
+          "contract": "pregnancy_plan_workflow",
+          "args_subset": {
+            "command": "answer_current",
+            "choice_id": "mark_checkup_records_uploaded"
           }
         }
       ]
@@ -756,8 +781,11 @@
           "timing": "before_plan_proposal"
         },
         {
-          "contract": "pregnancy_plan_propose",
-          "timing": "after_supplemental_information_reply"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_supplemental_information_reply",
+          "args_subset": {
+            "command": "generate_plan"
+          }
         }
       ]
     },
@@ -2234,20 +2262,32 @@
           "timing": "before_intake"
         },
         {
-          "contract": "pregnancy_plan_intake_start",
-          "timing": "after_user_intent"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_user_intent",
+          "args_subset": {
+            "command": "start_or_resume"
+          }
         },
         {
-          "contract": "pregnancy_plan_intake_analyze",
-          "timing": "after_verified_submission"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_verified_submission",
+          "args_subset": {
+            "command": "submit_form"
+          }
         },
         {
-          "contract": "pregnancy_plan_intake_advance",
-          "timing": "after_followup_reply"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_followup_reply",
+          "args_subset": {
+            "command": "answer_current"
+          }
         },
         {
-          "contract": "pregnancy_plan_propose",
-          "timing": "after_ready_to_generate"
+          "contract": "pregnancy_plan_workflow",
+          "timing": "after_ready_to_generate",
+          "args_subset": {
+            "command": "generate_plan"
+          }
         }
       ],
       "expected_events": [
@@ -2266,6 +2306,210 @@
         {
           "type": "artifact.created",
           "artifact_type": "birth_journey_plan_card"
+        }
+      ]
+    },
+    {
+      "suite": "pregnancy_plan_side_question_resume",
+      "name": "a side question does not consume the pregnancy workflow step",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "你做过这次产检吗？"
+          },
+          {
+            "role": "user",
+            "content": "先告诉我孕晚期还能不能坐飞机？"
+          }
+        ],
+        "fixtures": {
+          "active_workflow_type": "pregnancy_plan",
+          "workflow_phase": "checkup_done_question",
+          "current_step_id": "checkup_done",
+          "workflow_cursor_attached": false
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_side_question_resume",
+        "route": "side_conversation_without_transition",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "answer_side_question",
+          "preserve_workflow_revision",
+          "return_latest_workflow_prompt"
+        ],
+        "must_not": [
+          "treat_side_question_as_step_answer",
+          "advance_workflow",
+          "discard_workflow"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy_plan_workflow"
+        }
+      ]
+    },
+    {
+      "suite": "pregnancy_plan_pause_resume",
+      "name": "pause and resume keep the same pregnancy workflow step",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "先暂停，我晚点继续。"
+          },
+          {
+            "role": "user",
+            "content": "继续刚才的孕期计划。"
+          }
+        ],
+        "fixtures": {
+          "active_workflow_type": "pregnancy_plan",
+          "workflow_phase": "checkup_records_upload",
+          "current_step_id": "checkup_records",
+          "valid_workflow_cursor": true
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_pause_resume",
+        "route": "deterministic_workflow_commands",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "pause_without_progress",
+          "resume_same_step",
+          "preserve_collected_answers"
+        ],
+        "must_not": [
+          "restart_intake",
+          "drop_history",
+          "generate_plan"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pregnancy_plan_workflow",
+          "timing": "on_pause_selection",
+          "args_subset": {
+            "command": "pause"
+          }
+        },
+        {
+          "contract": "pregnancy_plan_workflow",
+          "timing": "on_resume_selection",
+          "args_subset": {
+            "command": "resume"
+          }
+        }
+      ],
+      "expected_events": [
+        {
+          "type": "workflow.paused"
+        },
+        {
+          "type": "workflow.resumed"
+        }
+      ]
+    },
+    {
+      "suite": "pregnancy_plan_edit_history",
+      "name": "editing an earlier answer invalidates only its dependent tail",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "把是否做过产检改成还没做过。"
+          }
+        ],
+        "fixtures": {
+          "active_workflow_type": "pregnancy_plan",
+          "workflow_phase": "final_plan_confirmation",
+          "editable_step_id": "checkup_done",
+          "valid_workflow_cursor": true
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_edit_history",
+        "route": "revision_and_tail_rebuild",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "append_answer_revision",
+          "preserve_prior_history",
+          "invalidate_dependent_steps"
+        ],
+        "must_not": [
+          "rewrite_event_history",
+          "discard_basic_intake",
+          "generate_from_stale_tail"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pregnancy_plan_workflow",
+          "timing": "on_historical_choice",
+          "args_subset": {
+            "command": "edit_answer",
+            "step_id": "checkup_done",
+            "choice_id": "confirm_no_checkup_yet"
+          }
+        }
+      ],
+      "expected_events": [
+        {
+          "type": "workflow.answer_revised"
+        }
+      ]
+    },
+    {
+      "suite": "pregnancy_plan_stale_command_recovery",
+      "name": "a stale pregnancy workflow cursor returns the latest step without mutation",
+      "domain": "birth-prep",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "还没做过产检"
+          }
+        ],
+        "fixtures": {
+          "active_workflow_type": "pregnancy_plan",
+          "workflow_phase": "checkup_records_upload",
+          "submitted_step_id": "checkup_done",
+          "workflow_cursor_is_stale": true
+        }
+      },
+      "expected_behavior": {
+        "intent": "pregnancy_plan_stale_command_recovery",
+        "route": "stale_cursor_recovery",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "birth-prep",
+        "must_include": [
+          "latest_workflow_prompt",
+          "current_revision",
+          "no_state_mutation"
+        ],
+        "must_not": [
+          "execute_stale_command",
+          "advance_workflow",
+          "fail_active_workflow"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "pregnancy_plan_workflow"
         }
       ]
     },

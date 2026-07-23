@@ -105,10 +105,57 @@ def test_state_store_lists_only_repository_selected_active_workflows() -> None:
     assert repository.list_active_kwargs["limit"] == 3
 
 
+def test_state_store_owner_scoped_workflow_resumes_across_threads_and_appends_events() -> None:
+    repository = FakeStateRepository()
+    store = AgentRuntimeStateStore(repository=repository)
+    owner_user_id = uuid4()
+    first_thread_id = uuid4()
+    second_thread_id = uuid4()
+
+    created = asyncio.run(
+        store.upsert_active_workflow(
+            thread_id=first_thread_id,
+            owner_user_id=owner_user_id,
+            run_id=uuid4(),
+            workflow_type="pregnancy_plan",
+            status="waiting",
+            state={"phase": "checkup_done_question"},
+            active_step="checkup_done_question",
+            lookup_scope="owner",
+            transition_metadata={"event_type": "workflow.started", "command": "start_or_resume"},
+        )
+    )
+    updated = asyncio.run(
+        store.upsert_active_workflow(
+            thread_id=second_thread_id,
+            owner_user_id=owner_user_id,
+            run_id=uuid4(),
+            workflow_type="pregnancy_plan",
+            status="paused",
+            state={"phase": "checkup_done_question", "paused": True},
+            active_step="checkup_done_question",
+            lookup_scope="owner",
+            transition_metadata={"event_type": "workflow.paused", "command": "pause"},
+        )
+    )
+
+    assert updated is created
+    assert updated.thread_id == first_thread_id
+    assert len(repository.workflow_states) == 1
+    assert [event["event_type"] for event in repository.workflow_events] == [
+        "workflow.started",
+        "workflow.paused",
+    ]
+    assert repository.workflow_events[-1]["payload"]["before"]["status"] == "waiting"
+    assert repository.workflow_events[-1]["payload"]["after"]["status"] == "paused"
+    assert repository.workflow_events[-1]["payload"]["command"] == "pause"
+
+
 class FakeStateRepository:
     def __init__(self) -> None:
         self.workflow_states = []
         self.list_active_kwargs = {}
+        self.workflow_events = []
 
     async def create_workflow_state(self, **kwargs):
         workflow = AgentWorkflowState(id=uuid4(), **kwargs)
@@ -121,6 +168,15 @@ class FakeStateRepository:
             for workflow in self.workflow_states
             if workflow.thread_id == kwargs["thread_id"]
             and workflow.owner_user_id == kwargs["owner_user_id"]
+            and workflow.workflow_type == kwargs["workflow_type"]
+        ]
+        return matches[-1] if matches else None
+
+    async def get_latest_workflow_state_for_owner(self, **kwargs):
+        matches = [
+            workflow
+            for workflow in self.workflow_states
+            if workflow.owner_user_id == kwargs["owner_user_id"]
             and workflow.workflow_type == kwargs["workflow_type"]
         ]
         return matches[-1] if matches else None
@@ -138,3 +194,7 @@ class FakeStateRepository:
             for workflow in self.workflow_states
             if workflow.thread_id == kwargs["thread_id"] and workflow.owner_user_id == kwargs["owner_user_id"]
         ][: kwargs["limit"]]
+
+    async def append_workflow_event(self, **kwargs):
+        self.workflow_events.append(kwargs)
+        return kwargs

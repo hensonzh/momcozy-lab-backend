@@ -100,12 +100,24 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
     assert "load_service_skill" in plan_contracts
-    assert "pregnancy_plan_propose" in plan_contracts
+    assert "pregnancy_plan_workflow" in plan_contracts
+    assert by_suite["pregnancy_plan_creation"]["expected_tool_calls"][-1]["args_subset"] == {
+        "command": "generate_plan"
+    }
     assert by_suite["pregnancy_plan_creation"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "confirmation_card" in by_suite["pregnancy_plan_creation"]["expected_behavior"]["must_not"]
-    assert intake_contracts == {"load_service_skill", "pregnancy_plan_intake_start"}
-    assert analysis_contracts == {"pregnancy_plan_intake_analyze"}
-    assert followup_contracts == {"pregnancy_plan_intake_advance"}
+    assert intake_contracts == {"load_service_skill", "pregnancy_plan_workflow"}
+    assert by_suite["pregnancy_plan_intake_start"]["expected_tool_calls"][-1]["args_subset"] == {
+        "command": "start_or_resume"
+    }
+    assert analysis_contracts == {"pregnancy_plan_workflow"}
+    assert by_suite["pregnancy_plan_intake_analysis"]["expected_tool_calls"][0]["args_subset"] == {
+        "command": "submit_form"
+    }
+    assert followup_contracts == {"pregnancy_plan_workflow"}
+    assert by_suite["pregnancy_plan_personalized_followup"]["expected_tool_calls"][0]["args_subset"] == {
+        "command": "answer_current"
+    }
     assert by_suite["pregnancy_plan_intake_analysis"]["expected_behavior"]["must_include"] == [
         "plain_language_acknowledgement",
         "one_followup_question",
@@ -119,14 +131,30 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     ]
     assert "compound_followup_question" in by_suite["pregnancy_plan_personalized_followup"]["expected_behavior"]["must_not"]
     assert by_suite["pregnancy_plan_personalized_followup"]["forbidden_tool_calls"] == [
-        {"contract": "pregnancy_plan_intake_analyze"},
-        {"contract": "pregnancy_plan_propose"}
+        {
+            "contract": "pregnancy_plan_workflow",
+            "args_subset": {"command": "submit_form"},
+        },
+        {
+            "contract": "pregnancy_plan_workflow",
+            "args_subset": {"command": "generate_plan"},
+        },
     ]
     attachment_guard = by_suite["pregnancy_plan_checkup_attachment_guard"]
     assert attachment_guard["input"]["fixtures"]["current_run_authenticated_attachments"] == []
     assert "mark_uploaded_from_text_only" in attachment_guard["expected_behavior"]["must_not"]
-    assert by_suite["pregnancy_plan_intake_start"]["forbidden_tool_calls"] == [{"contract": "pregnancy_plan_propose"}]
-    assert by_suite["pregnancy_plan_intake_analysis"]["forbidden_tool_calls"] == [{"contract": "pregnancy_plan_propose"}]
+    assert by_suite["pregnancy_plan_intake_start"]["forbidden_tool_calls"] == [
+        {
+            "contract": "pregnancy_plan_workflow",
+            "args_subset": {"command": "generate_plan"},
+        }
+    ]
+    assert by_suite["pregnancy_plan_intake_analysis"]["forbidden_tool_calls"] == [
+        {
+            "contract": "pregnancy_plan_workflow",
+            "args_subset": {"command": "generate_plan"},
+        }
+    ]
     assert "load_service_skill" in task_contracts
     assert "plans_task_complete_propose" in task_contracts
     assert diary_contracts == {"pregnancy_diary_save"}
@@ -189,6 +217,52 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert record_exact["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
     assert record_exact["expected_behavior"]["requires_confirmation_before_write"] is False
     assert by_suite["feeding_record_delete_ambiguous"]["expected_tool_calls"] == []
+
+
+def test_product_agent_eval_seed_covers_resumable_pregnancy_workflow_controls() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    side_question = by_suite["pregnancy_plan_side_question_resume"]
+    pause_resume = by_suite["pregnancy_plan_pause_resume"]
+    edit_history = by_suite["pregnancy_plan_edit_history"]
+    stale_command = by_suite["pregnancy_plan_stale_command_recovery"]
+
+    assert side_question["expected_tool_calls"] == []
+    assert side_question["input"]["fixtures"]["workflow_cursor_attached"] is False
+    assert "preserve_workflow_revision" in side_question["expected_behavior"]["must_include"]
+    assert side_question["forbidden_tool_calls"] == [
+        {"contract": "pregnancy_plan_workflow"}
+    ]
+
+    assert [call["args_subset"] for call in pause_resume["expected_tool_calls"]] == [
+        {"command": "pause"},
+        {"command": "resume"},
+    ]
+    assert [event["type"] for event in pause_resume["expected_events"]] == [
+        "workflow.paused",
+        "workflow.resumed",
+    ]
+
+    assert edit_history["expected_tool_calls"] == [
+        {
+            "contract": "pregnancy_plan_workflow",
+            "timing": "on_historical_choice",
+            "args_subset": {
+                "command": "edit_answer",
+                "step_id": "checkup_done",
+                "choice_id": "confirm_no_checkup_yet",
+            },
+        }
+    ]
+    assert "invalidate_dependent_steps" in edit_history["expected_behavior"]["must_include"]
+
+    assert stale_command["expected_tool_calls"] == []
+    assert stale_command["input"]["fixtures"]["workflow_cursor_is_stale"] is True
+    assert "no_state_mutation" in stale_command["expected_behavior"]["must_include"]
+    assert stale_command["forbidden_tool_calls"] == [
+        {"contract": "pregnancy_plan_workflow"}
+    ]
 
 
 def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mixed_diary_parity() -> None:
@@ -306,10 +380,16 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
     pregnancy = by_suite["pregnancy_plan_end_to_end_workflow"]
     assert [call["contract"] for call in pregnancy["expected_tool_calls"]] == [
         "load_service_skill",
-        "pregnancy_plan_intake_start",
-        "pregnancy_plan_intake_analyze",
-        "pregnancy_plan_intake_advance",
-        "pregnancy_plan_propose",
+        "pregnancy_plan_workflow",
+        "pregnancy_plan_workflow",
+        "pregnancy_plan_workflow",
+        "pregnancy_plan_workflow",
+    ]
+    assert [call.get("args_subset") for call in pregnancy["expected_tool_calls"][1:]] == [
+        {"command": "start_or_resume"},
+        {"command": "submit_form"},
+        {"command": "answer_current"},
+        {"command": "generate_plan"},
     ]
     assert "internal_workflow_artifact" in pregnancy["expected_behavior"]["must_not"]
 

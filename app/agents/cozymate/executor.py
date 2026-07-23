@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -18,6 +19,11 @@ from app.infrastructure.object_storage.base import ObjectStorage
 from app.agent_runtime.actions.policy import AgentActionPolicy
 from app.agent_runtime.context.facts import AgentFactService
 from app.agent_runtime.context.items import ContextItemAppend
+from app.agent_runtime.context.selection import (
+    estimate_json_tokens,
+    select_bounded_context_items,
+)
+from app.agent_runtime.context.workflow_command import normalize_workflow_command
 from app.agent_runtime.context.workflow_reply import (
     build_workflow_reply_context,
     normalize_workflow_reply_context,
@@ -75,6 +81,7 @@ from .tools.hospital_bag_flow import (
 from .tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_WORKFLOW_TYPE,
     ensure_pregnancy_plan_final_question,
+    pregnancy_plan_workflow_context,
 )
 from .workflows.ongoing_work import project_workflow_context
 from .workflows.reply import guarded_workflow_type, workflow_accepts_reply
@@ -85,13 +92,11 @@ CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history_image_load"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 FORM_TOOL_IDS = {
-    "pregnancy_plan_intake_analyze": "birth_journey_basic_info_intake",
     "hospital_bag_card_create": "hospital_bag_intake",
     "labor_communication_card_create": "birth_plan_card_intake",
 }
-FORM_CREATION_TOOL_NAMES = {"pregnancy_plan_intake_start", "birth_plan_form_create", "hospital_bag_form_create"}
+FORM_CREATION_TOOL_NAMES = {"birth_plan_form_create", "hospital_bag_form_create"}
 FORM_CREATION_IDS = {
-    "pregnancy_plan_intake_start": "birth_journey_basic_info_intake",
     "hospital_bag_form_create": "hospital_bag_intake",
     "birth_plan_form_create": "birth_plan_card_intake",
 }
@@ -102,6 +107,22 @@ MODEL_IMAGE_CONTENT_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", 
 @dataclass(frozen=True)
 class CozymateAgentExecutorConfig:
     history_limit: int = 40
+    context_item_fetch_limit: int = 160
+    model_context_item_limit: int = 64
+    model_context_token_budget: int = 12_000
+    workflow_context_token_budget: int = 1_200
+
+    def __post_init__(self) -> None:
+        if self.history_limit < 1:
+            raise ValueError("history_limit must be positive")
+        if self.context_item_fetch_limit < 1:
+            raise ValueError("context_item_fetch_limit must be positive")
+        if self.model_context_item_limit < 1:
+            raise ValueError("model_context_item_limit must be positive")
+        if self.model_context_token_budget < 256:
+            raise ValueError("model_context_token_budget must be at least 256")
+        if self.workflow_context_token_budget < 256:
+            raise ValueError("workflow_context_token_budget must be at least 256")
 
 
 @dataclass
@@ -109,9 +130,14 @@ class _AgentTurnContext:
     current_message: AgentMessage
     messages: list[AgentMessage]
     context_items: list[dict[str, Any]]
+    context_item_refs: list[dict[str, Any]]
+    context_estimated_tokens: int
+    context_selection_policy: dict[str, Any]
+    runtime_context: dict[str, Any]
     trusted_form_submissions: dict[str, dict[str, Any]]
     checkup_attachment_count: int
     workflow_reply: dict[str, Any]
+    workflow_command: dict[str, Any]
     timings_ms: dict[str, float]
 
 
@@ -125,6 +151,9 @@ class _AgentTurnToolCatalog:
 class _PreparedModelTurn:
     user_context: dict[str, Any]
     model_input: list[dict[str, Any]]
+    item_refs: list[dict[str, Any]]
+    dynamic_context: dict[str, Any]
+    estimated_input_tokens: int
 
 
 @dataclass
@@ -213,9 +242,25 @@ class CozymateAgentExecutor:
                 before_sequence=turn_context.current_message.sequence,
             )
             turn_state.hospital_bag_cart_groups = _current_hospital_bag_cart_groups(turn_context.current_message)
-            tool_catalog = self._tool_catalog_for_turn()
             await self._append_progress(run=run, phase="context_ready", label="我先理解一下你的需求～")
+            deterministic_result = await self._run_structured_workflow_command(
+                run=run,
+                turn_context=turn_context,
+            )
+            if deterministic_result is not None:
+                return await self._finalize_turn_result(
+                    run=run,
+                    turn_context=turn_context,
+                    result=deterministic_result,
+                    run_started_at=run_started_at,
+                )
+            tool_catalog = self._tool_catalog_for_turn()
             prepared_turn = self._prepare_model_turn(turn_context=turn_context)
+            await self._persist_model_context_snapshot(
+                run=run,
+                turn_context=turn_context,
+                prepared_turn=prepared_turn,
+            )
             turn_state.local_date = _user_context_local_date(prepared_turn.user_context)
             turn_state.timezone = _text(prepared_turn.user_context, "timezone") or "UTC"
             result = await self._run_model_turn(
@@ -256,18 +301,51 @@ class CozymateAgentExecutor:
         await self._append_progress(run=run, phase="context_loading", label="我已经收到你的消息啦～")
         context_started_at = perf_counter()
         messages = await self.repository.list_messages_for_thread(thread_id=run.thread_id, limit=self.config.history_limit)
-        context_item_records = await self.repository.list_context_items_for_thread(thread_id=run.thread_id)
-        context_items = [dict(record.item) for record in context_item_records]
+        context_item_records = await self.repository.list_context_items_for_thread(
+            thread_id=run.thread_id,
+            limit=self.config.context_item_fetch_limit,
+        )
         current_message = next(
             (message for message in reversed(messages) if message.run_id == run.id and message.role == "user"),
             None,
         )
         if current_message is None:
             raise ApiError(code="missing_user_message", message="Agent run has no user message.", status=409)
-        if not context_items:
+        if not context_item_records:
             raise ApiError(
                 code="missing_context_items",
                 message="Agent run has no append-only context items.",
+                status=409,
+            )
+        current_item_key = f"message:{current_message.id}"
+        available_item_keys = {
+            str(getattr(record, "item_key", "") or "")
+            for record in context_item_records
+        }
+        required_item_keys = (
+            {current_item_key}
+            if current_item_key in available_item_keys
+            else set()
+        )
+        selection = select_bounded_context_items(
+            context_item_records,
+            required_item_keys=required_item_keys,
+            max_items=self.config.model_context_item_limit,
+            max_estimated_tokens=self.config.model_context_token_budget,
+        )
+        if not selection.items:
+            raise ApiError(
+                code="missing_context_items",
+                message="Agent run has no usable model context items.",
+                status=409,
+            )
+        if required_item_keys and current_item_key not in {
+            str(item.get("item_key") or "")
+            for item in selection.item_refs
+        }:
+            raise ApiError(
+                code="missing_current_context_item",
+                message="The current user message is outside the bounded model context.",
                 status=409,
             )
         self._turn_state(run.id).visible_image_urls = _visible_assistant_image_urls(
@@ -278,16 +356,257 @@ class CozymateAgentExecutor:
         trusted_form_submissions = _trusted_form_submissions(current_message)
         checkup_attachment_count = _runtime_checkup_attachment_count(current_message)
         workflow_reply = _workflow_reply_for_turn(current_message=current_message, messages=messages)
+        workflow_command = _workflow_command_for_turn(current_message=current_message)
+        workflow_states = await self._active_workflows_for_context(run=run)
+        projected_workflows = project_workflow_context(
+            workflow_states,
+            trusted_form_submissions=trusted_form_submissions,
+            checkup_attachment_count=checkup_attachment_count,
+            workflow_reply=workflow_reply,
+        )
+        bounded_workflows = _bounded_workflow_context(
+            projected_workflows,
+            max_estimated_tokens=self.config.workflow_context_token_budget,
+        )
+        runtime_context = (
+            {
+                "schema_version": "cozymate.runtime_context.v1",
+                "active_workflows": bounded_workflows,
+                "instruction": (
+                    "Treat active_workflows as authoritative process state. "
+                    "Answer unrelated requests normally without advancing a workflow; "
+                    "advance it only when the current user request is relevant."
+                ),
+            }
+            if bounded_workflows
+            else {}
+        )
+        selection_policy = {
+            "schema_version": "context_selection.v1",
+            "context_item_fetch_limit": self.config.context_item_fetch_limit,
+            "model_context_item_limit": self.config.model_context_item_limit,
+            "model_context_token_budget": self.config.model_context_token_budget,
+            "workflow_context_token_budget": self.config.workflow_context_token_budget,
+            "fetched_item_count": len(context_item_records),
+            "selected_item_count": len(selection.items),
+            "dropped_item_count": selection.dropped_item_count,
+            "base_estimated_tokens": selection.estimated_tokens,
+            "workflow_estimated_tokens": estimate_json_tokens(runtime_context),
+        }
 
         return _AgentTurnContext(
             current_message=current_message,
             messages=messages,
-            context_items=context_items,
+            context_items=selection.items,
+            context_item_refs=selection.item_refs,
+            context_estimated_tokens=selection.estimated_tokens,
+            context_selection_policy=selection_policy,
+            runtime_context=runtime_context,
             trusted_form_submissions=trusted_form_submissions,
             checkup_attachment_count=checkup_attachment_count,
             workflow_reply=workflow_reply,
+            workflow_command=workflow_command,
             timings_ms=timings_ms,
         )
+
+    async def _run_structured_workflow_command(
+        self,
+        *,
+        run: AgentRun,
+        turn_context: _AgentTurnContext,
+    ) -> SdkNodeResult | None:
+        command_context = turn_context.workflow_command
+        if not command_context:
+            return None
+        if _text(command_context, "workflow_type") != PREGNANCY_PLAN_WORKFLOW_TYPE:
+            raise ApiError(
+                code="unsupported_workflow_command",
+                message="The structured workflow command is not supported.",
+                status=422,
+            )
+
+        workflow = await self._latest_workflow_state(
+            run=run,
+            workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
+        )
+        if workflow is None:
+            raise ApiError(
+                code="pregnancy_plan_workflow_not_active",
+                message="An active pregnancy-plan workflow is required.",
+                status=409,
+            )
+        try:
+            validate_workflow_reply_context(workflow, turn_context.workflow_reply)
+        except ApiError as exc:
+            if exc.code not in {"missing_workflow_reply_context", "stale_workflow_step"}:
+                raise
+            self._turn_state(run.id).workflow_reply_recovery_type = PREGNANCY_PLAN_WORKFLOW_TYPE
+            recovery_text = "孕期计划的当前步骤已经更新，请按下方最新问题继续。"
+            self._turn_state(run.id).authoritative_final_text = recovery_text
+            return SdkNodeResult(final_text=recovery_text)
+
+        workflow_state = dict(workflow.state) if isinstance(workflow.state, dict) else {}
+        workflow_context = pregnancy_plan_workflow_context(
+            workflow_state,
+            checkup_attachment_count=turn_context.checkup_attachment_count,
+        )
+        command = _text(command_context, "command")
+        allowed_commands = {
+            str(item).strip()
+            for item in workflow_context.get("allowed_commands", [])
+            if isinstance(item, str) and str(item).strip()
+        }
+        if command not in allowed_commands:
+            raise ApiError(
+                code="pregnancy_plan_command_not_allowed",
+                message="The pregnancy-plan command is not allowed at the current step.",
+                status=409,
+            )
+        current_step = _dict(workflow_context, "current_step")
+        supplied_step_id = _text(command_context, "step_id")
+        if command == "answer_current" and supplied_step_id != _text(current_step, "id"):
+            self._turn_state(run.id).workflow_reply_recovery_type = PREGNANCY_PLAN_WORKFLOW_TYPE
+            recovery_text = "孕期计划的当前问题已经变化，请按下方最新问题继续。"
+            self._turn_state(run.id).authoritative_final_text = recovery_text
+            return SdkNodeResult(final_text=recovery_text)
+
+        args = {
+            key: command_context[key]
+            for key in ("command", "choice_id", "answer", "step_id", "restart", "scope")
+            if key in command_context
+        }
+        tool_calls: list[dict[str, Any]] = []
+        safe_output = await self._execute_structured_pregnancy_plan_tool(
+            run=run,
+            args=args,
+        )
+        tool_calls.append(
+            {
+                "tool_name": "pregnancy_plan_workflow",
+                "status": "completed",
+                "args": args,
+                "safe_output": safe_output,
+            }
+        )
+
+        next_context = _dict(safe_output, "workflow_context")
+        next_step = _dict(next_context, "current_step")
+        if (
+            command == "answer_current"
+            and _text(next_step, "id") == "generate_plan"
+            and "generate_plan"
+            in {
+                str(item).strip()
+                for item in next_context.get("allowed_commands", [])
+                if isinstance(item, str)
+            }
+        ):
+            generation_args = {
+                "command": "generate_plan",
+                **({"scope": args["scope"]} if "scope" in args else {}),
+            }
+            safe_output = await self._execute_structured_pregnancy_plan_tool(
+                run=run,
+                args=generation_args,
+            )
+            tool_calls.append(
+                {
+                    "tool_name": "pregnancy_plan_workflow",
+                    "status": "completed",
+                    "args": generation_args,
+                    "safe_output": safe_output,
+                }
+            )
+
+        final_text = _pregnancy_workflow_command_final_text(safe_output)
+        self._turn_state(run.id).authoritative_final_text = final_text
+        return SdkNodeResult(final_text=final_text, tool_calls=tool_calls)
+
+    async def _execute_structured_pregnancy_plan_tool(
+        self,
+        *,
+        run: AgentRun,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        guarded_types = self._turn_state(run.id).guarded_workflow_types
+        if not guarded_types or guarded_types[-1] != PREGNANCY_PLAN_WORKFLOW_TYPE:
+            guarded_types.append(PREGNANCY_PLAN_WORKFLOW_TYPE)
+        trusted_args = await self._trusted_tool_args(
+            run=run,
+            contract_name="pregnancy_plan_workflow",
+            args=args,
+        )
+        trusted_args = {
+            **trusted_args,
+            "runtime_structured_workflow_command": True,
+        }
+        execution = await self.tool_executor.execute(
+            actor=_run_actor(run),
+            run_id=run.id,
+            tool_name="pregnancy_plan_workflow",
+            call_id=f"ui-pregnancy-plan-{uuid4().hex}",
+            args=args,
+            trusted_args=trusted_args,
+        )
+        safe_output = dict(execution.safe_output or {})
+        if _text(safe_output, "status") == "urgent_care_required":
+            required_response = _text(safe_output, "required_response")
+            if required_response:
+                self._turn_state(run.id).authoritative_final_text = required_response
+        return safe_output
+
+    async def _active_workflows_for_context(
+        self,
+        *,
+        run: AgentRun,
+    ) -> list[AgentWorkflowState]:
+        thread_workflows: list[AgentWorkflowState] = []
+        thread_loader = getattr(
+            self.repository,
+            "list_active_workflow_states_for_thread",
+            None,
+        )
+        if callable(thread_loader):
+            thread_workflows = await thread_loader(
+                thread_id=run.thread_id,
+                owner_user_id=run.actor_user_id,
+                limit=5,
+            )
+
+        owner_workflows: list[AgentWorkflowState] = []
+        owner_loader = getattr(
+            self.repository,
+            "list_active_workflow_states_for_owner",
+            None,
+        )
+        if callable(owner_loader):
+            owner_workflows = await owner_loader(
+                owner_user_id=run.actor_user_id,
+                workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
+                limit=1,
+            )
+        else:
+            latest_owner_loader = getattr(
+                self.repository,
+                "get_latest_workflow_state_for_owner",
+                None,
+            )
+            if callable(latest_owner_loader):
+                workflow = await latest_owner_loader(
+                    owner_user_id=run.actor_user_id,
+                    workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
+                )
+                if workflow is not None:
+                    owner_workflows = [workflow]
+
+        merged: list[AgentWorkflowState] = []
+        seen_ids: set[UUID] = set()
+        for workflow in (*owner_workflows, *thread_workflows):
+            if workflow.id in seen_ids or not _workflow_is_active(workflow):
+                continue
+            seen_ids.add(workflow.id)
+            merged.append(workflow)
+        return merged
 
     def _tool_catalog_for_turn(self) -> _AgentTurnToolCatalog:
         tool_namespaces: tuple[ToolNamespace, ...] = (
@@ -308,9 +627,72 @@ class CozymateAgentExecutor:
         turn_context: _AgentTurnContext,
     ) -> _PreparedModelTurn:
         user_context = _user_context(current_message=turn_context.current_message, now=self.clock())
+        model_input = [dict(item) for item in turn_context.context_items]
+        item_refs = [dict(item) for item in turn_context.context_item_refs]
+        dynamic_context: dict[str, Any] = {}
+        if turn_context.runtime_context:
+            insertion_position = _current_message_context_position(
+                item_refs=item_refs,
+                items=model_input,
+                current_message_id=turn_context.current_message.id,
+            )
+            developer_item = {
+                "role": "developer",
+                "content": {
+                    "runtime_context": turn_context.runtime_context,
+                },
+            }
+            model_input.insert(insertion_position, developer_item)
+            for item_ref in item_refs:
+                selected_position = int(item_ref.get("position") or 0)
+                item_ref["model_input_position"] = (
+                    selected_position + 1
+                    if selected_position >= insertion_position
+                    else selected_position
+                )
+            dynamic_context = {
+                "model_input_position": insertion_position,
+                "item": developer_item,
+            }
+        else:
+            for item_ref in item_refs:
+                item_ref["model_input_position"] = int(item_ref.get("position") or 0)
         return _PreparedModelTurn(
             user_context=user_context,
-            model_input=[dict(item) for item in turn_context.context_items],
+            model_input=model_input,
+            item_refs=item_refs,
+            dynamic_context=dynamic_context,
+            estimated_input_tokens=estimate_json_tokens(model_input),
+        )
+
+    async def _persist_model_context_snapshot(
+        self,
+        *,
+        run: AgentRun,
+        turn_context: _AgentTurnContext,
+        prepared_turn: _PreparedModelTurn,
+    ) -> None:
+        append_snapshot = getattr(
+            self.repository,
+            "append_model_context_snapshot",
+            None,
+        )
+        if not callable(append_snapshot):
+            return
+        await append_snapshot(
+            run_id=run.id,
+            thread_id=run.thread_id,
+            owner_user_id=run.actor_user_id,
+            schema_version="model_context_snapshot.v1",
+            item_refs=prepared_turn.item_refs,
+            dynamic_context=prepared_turn.dynamic_context,
+            selection_policy={
+                **turn_context.context_selection_policy,
+                "estimated_input_tokens": prepared_turn.estimated_input_tokens,
+            },
+            input_item_count=len(prepared_turn.model_input),
+            estimated_input_tokens=prepared_turn.estimated_input_tokens,
+            model_input_sha256=_model_input_sha256(prepared_turn.model_input),
         )
 
     async def _run_model_turn(
@@ -443,7 +825,7 @@ class CozymateAgentExecutor:
             raise ApiError(code="empty_agent_response", message="Agent runtime returned an empty response.", status=502)
         finish_timings_ms = _timings_with_total(turn_context.timings_ms, run_started_at)
         workflow_finalization_started_at = perf_counter()
-        workflow_reply, quick_reply_workflow = await self._completed_turn_workflow_finalization(run=run)
+        workflow_reply, quick_reply_workflow, workflow_prompt = await self._completed_turn_workflow_finalization(run=run)
         finish_timings_ms["workflow_finalization"] = _elapsed_ms(workflow_finalization_started_at)
         quick_reply_started_at = perf_counter()
         if not authoritative_final_text and self.quick_reply_finalizer is not None:
@@ -478,6 +860,7 @@ class CozymateAgentExecutor:
             assistant_message_id=self._turn_state(run.id).assistant_message_id,
             quick_replies=quick_replies,
             workflow_reply=workflow_reply,
+            workflow_prompt=workflow_prompt,
             stream_segment_count=self._turn_state(run.id).text_segment_count,
         )
 
@@ -792,6 +1175,45 @@ class CozymateAgentExecutor:
             }
         if contract_name == "support_ticket_propose":
             return {"trusted_current_user_text": self._turn_state(run.id).current_user_text}
+        if contract_name == "pregnancy_plan_workflow":
+            facts = await self._birth_prep_business_facts(run=run)
+            workflow = await self._latest_pregnancy_plan_workflow(run=run)
+            trusted_args: dict[str, Any] = {
+                "runtime_plan_context": _pregnancy_runtime_plan_context(facts, workflow=workflow),
+                "runtime_workflow_context": _dict(workflow, "state"),
+                "trusted_current_user_text": self._turn_state(run.id).current_user_text,
+                "runtime_checkup_attachment_count": self._turn_state(run.id).checkup_attachment_count,
+            }
+            command = _text(args or {}, "command")
+            if command == "submit_form":
+                submission = self._turn_state(run.id).trusted_form_submissions.get(
+                    "birth_journey_basic_info_intake"
+                )
+                if submission is not None:
+                    trusted_args.update(
+                        {
+                            "confirmed_form_data": _dict(submission, "values"),
+                            "form_submission_id": _text(submission, "submission_id"),
+                            "form_artifact_id": _text(submission, "artifact_id"),
+                        }
+                    )
+            if command == "start_or_resume":
+                default_values = _birth_prep_form_default_values(facts)
+                if self.fact_service is not None:
+                    stored_defaults = await self.fact_service.form_defaults(
+                        owner_user_id=run.actor_user_id,
+                        form_id="birth_journey_basic_info_intake",
+                    )
+                    for key, value in stored_defaults.items():
+                        default_values.setdefault(key, value)
+                same_turn_defaults = _birth_prep_same_turn_form_default_values(
+                    self._turn_state(run.id).current_user_text
+                )
+                for key, value in same_turn_defaults.items():
+                    default_values.setdefault(key, value)
+                if default_values:
+                    trusted_args["default_values"] = default_values
+            return trusted_args
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
         if expected_form_id is not None:
             submission = self._turn_state(run.id).trusted_form_submissions.get(expected_form_id)
@@ -801,34 +1223,13 @@ class CozymateAgentExecutor:
                 "confirmed_form_data": _dict(submission, "values"),
                 "form_submission_id": _text(submission, "submission_id"),
             }
-            if contract_name == "pregnancy_plan_intake_analyze":
-                form_trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
-                facts = await self._birth_prep_business_facts(run=run)
-                workflow = await self._latest_pregnancy_plan_workflow(run=run)
-                form_trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
-                form_trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
-            elif contract_name == "hospital_bag_card_create":
+            if contract_name == "hospital_bag_card_create":
                 workflow = await self._latest_hospital_bag_workflow(run=run)
                 form_trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
                 workflow_state = _dict(workflow, "state")
                 if workflow_state:
                     form_trusted_args["runtime_workflow_context"] = workflow_state
             return form_trusted_args
-        if contract_name == "pregnancy_plan_propose":
-            facts = await self._birth_prep_business_facts(run=run)
-            workflow = await self._latest_pregnancy_plan_workflow(run=run)
-            return {
-                "runtime_plan_context": _pregnancy_runtime_plan_context(facts, workflow=workflow),
-                "runtime_workflow_context": _dict(workflow, "state"),
-                "trusted_current_user_text": self._turn_state(run.id).current_user_text,
-            }
-        if contract_name == "pregnancy_plan_intake_advance":
-            workflow = await self._latest_pregnancy_plan_workflow(run=run)
-            return {
-                "runtime_workflow_context": _dict(workflow, "state"),
-                "trusted_current_user_text": self._turn_state(run.id).current_user_text,
-                "runtime_checkup_attachment_count": self._turn_state(run.id).checkup_attachment_count,
-            }
         if contract_name in FORM_CREATION_TOOL_NAMES:
             facts = await self._birth_prep_business_facts(run=run)
             default_values = _birth_prep_form_default_values(facts)
@@ -843,11 +1244,7 @@ class CozymateAgentExecutor:
             for key, value in same_turn_defaults.items():
                 default_values.setdefault(key, value)
             creation_trusted_args: dict[str, Any] = {"default_values": default_values} if default_values else {}
-            if contract_name == "pregnancy_plan_intake_start":
-                workflow = await self._latest_pregnancy_plan_workflow(run=run)
-                creation_trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
-                creation_trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
-            elif contract_name == "hospital_bag_form_create":
+            if contract_name == "hospital_bag_form_create":
                 workflow = await self._latest_hospital_bag_workflow(run=run)
                 workflow_state = _dict(workflow, "state")
                 if workflow_state:
@@ -888,14 +1285,23 @@ class CozymateAgentExecutor:
         }
 
     async def _latest_workflow_state(self, *, run: AgentRun, workflow_type: str) -> AgentWorkflowState | None:
-        loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
+        loader = (
+            getattr(self.repository, "get_latest_workflow_state_for_owner", None)
+            if workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE
+            else None
+        )
+        owner_scoped = callable(loader)
+        if not owner_scoped:
+            loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
         if not callable(loader):
             return None
-        workflow = await loader(
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
-            workflow_type=workflow_type,
-        )
+        lookup_args: dict[str, Any] = {
+            "owner_user_id": run.actor_user_id,
+            "workflow_type": workflow_type,
+        }
+        if not owner_scoped:
+            lookup_args["thread_id"] = run.thread_id
+        workflow = await loader(**lookup_args)
         if workflow is None:
             return None
         expires_at = workflow.expires_at
@@ -905,15 +1311,32 @@ class CozymateAgentExecutor:
                 return None
         return cast(AgentWorkflowState, workflow)
 
-    async def _completed_turn_workflow_finalization(self, *, run: AgentRun) -> tuple[dict[str, Any], dict[str, Any]]:
+    async def _completed_turn_workflow_finalization(
+        self,
+        *,
+        run: AgentRun,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         loader = getattr(self.repository, "list_active_workflow_states_for_thread", None)
         if not callable(loader):
-            return {}, {}
+            return {}, {}, {}
         workflows = await loader(
             thread_id=run.thread_id,
             owner_user_id=run.actor_user_id,
             limit=10,
         )
+        owner_loader = getattr(self.repository, "list_active_workflow_states_for_owner", None)
+        if callable(owner_loader):
+            owner_workflows = await owner_loader(
+                owner_user_id=run.actor_user_id,
+                workflow_type=PREGNANCY_PLAN_WORKFLOW_TYPE,
+                limit=1,
+            )
+            known_ids = {workflow.id for workflow in workflows}
+            workflows.extend(
+                workflow
+                for workflow in owner_workflows
+                if workflow.id not in known_ids
+            )
         requested_type = _text(self._turn_state(run.id).workflow_reply, "workflow_type")
         recovery_type = self._turn_state(run.id).workflow_reply_recovery_type
         guarded_types = self._turn_state(run.id).guarded_workflow_types
@@ -922,6 +1345,12 @@ class CozymateAgentExecutor:
             *(workflow.workflow_type for workflow in workflows if workflow.run_id == run.id),
             *reversed(guarded_types),
             requested_type,
+            *(
+                workflow.workflow_type
+                for workflow in workflows
+                if workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE
+            ),
+            *(workflow.workflow_type for workflow in workflows),
         ]
         checked_types: set[str] = set()
         preferred_workflow: AgentWorkflowState | None = None
@@ -935,7 +1364,11 @@ class CozymateAgentExecutor:
             if preferred_workflow is None and matching:
                 preferred_workflow = matching[0]
             for workflow in matching:
-                if not workflow_accepts_reply(workflow):
+                accepts_structured_pregnancy_command = (
+                    workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE
+                    and workflow.status in {"collecting", "ready", "waiting", "paused"}
+                )
+                if not workflow_accepts_reply(workflow) and not accepts_structured_pregnancy_command:
                     continue
                 reply = build_workflow_reply_context(workflow)
                 if reply:
@@ -947,14 +1380,22 @@ class CozymateAgentExecutor:
 
         selected_workflow = reply_workflow or preferred_workflow
         if selected_workflow is None:
-            return workflow_reply, {}
+            return workflow_reply, {}, {}
         projected = project_workflow_context(
             [selected_workflow],
             trusted_form_submissions=self._turn_state(run.id).trusted_form_submissions,
             checkup_attachment_count=self._turn_state(run.id).checkup_attachment_count,
             workflow_reply=workflow_reply,
         )
-        return workflow_reply, dict(projected[0]) if projected else {}
+        workflow_prompt = (
+            pregnancy_plan_workflow_context(
+                dict(selected_workflow.state) if isinstance(selected_workflow.state, dict) else {},
+                checkup_attachment_count=self._turn_state(run.id).checkup_attachment_count,
+            )
+            if selected_workflow.workflow_type == PREGNANCY_PLAN_WORKFLOW_TYPE
+            else {}
+        )
+        return workflow_reply, dict(projected[0]) if projected else {}, workflow_prompt
 
     async def _latest_hospital_bag_cart_groups(self, *, run: AgentRun) -> list[dict[str, Any]] | None:
         loader = getattr(self.repository, "get_latest_artifact_for_thread", None)
@@ -1150,6 +1591,169 @@ def _latest_assistant_text_before(*, messages: list[AgentMessage], before_sequen
     )
 
 
+def _workflow_is_active(workflow: AgentWorkflowState) -> bool:
+    if workflow.status not in {"collecting", "ready", "waiting", "paused"}:
+        return False
+    expires_at = workflow.expires_at
+    if expires_at is None:
+        return True
+    normalized = (
+        expires_at
+        if expires_at.tzinfo is not None
+        else expires_at.replace(tzinfo=timezone.utc)
+    )
+    return normalized > datetime.now(timezone.utc)
+
+
+def _current_message_context_position(
+    *,
+    item_refs: list[dict[str, Any]],
+    items: list[dict[str, Any]],
+    current_message_id: UUID,
+) -> int:
+    current_item_key = f"message:{current_message_id}"
+    for item_ref in item_refs:
+        if str(item_ref.get("item_key") or "") == current_item_key:
+            position = item_ref.get("position")
+            if isinstance(position, int) and not isinstance(position, bool):
+                return max(0, min(position, len(items)))
+    for position in range(len(items) - 1, -1, -1):
+        if items[position].get("role") == "user":
+            return position
+    return len(items)
+
+
+def _bounded_workflow_context(
+    workflows: list[dict[str, Any]],
+    *,
+    max_estimated_tokens: int,
+) -> list[dict[str, Any]]:
+    bounded = [
+        cast(
+            dict[str, Any],
+            _bounded_runtime_value(workflow, max_string_length=600),
+        )
+        for workflow in workflows[:5]
+    ]
+    if estimate_json_tokens(bounded) <= max_estimated_tokens:
+        return bounded
+
+    for workflow in bounded:
+        completed = workflow.get("completed_followups")
+        if isinstance(completed, list):
+            workflow["completed_followups"] = completed[-2:]
+        analysis = workflow.get("analysis")
+        if isinstance(analysis, dict):
+            focuses = analysis.get("focuses")
+            workflow["analysis"] = {
+                "stage": analysis.get("stage") if isinstance(analysis.get("stage"), dict) else {},
+                "focuses": [
+                    {
+                        key: focus[key]
+                        for key in ("id", "title")
+                        if key in focus
+                    }
+                    for focus in focuses[:6]
+                    if isinstance(focus, dict)
+                ]
+                if isinstance(focuses, list)
+                else [],
+            }
+    bounded = cast(
+        list[dict[str, Any]],
+        _bounded_runtime_value(bounded, max_string_length=300),
+    )
+    if estimate_json_tokens(bounded) <= max_estimated_tokens:
+        return bounded
+
+    for workflow in bounded:
+        workflow.pop("analysis", None)
+        completed = workflow.get("completed_followups")
+        if isinstance(completed, list):
+            workflow["completed_followups"] = completed[-1:]
+    bounded = cast(
+        list[dict[str, Any]],
+        _bounded_runtime_value(bounded, max_string_length=180),
+    )
+    while len(bounded) > 1 and estimate_json_tokens(bounded) > max_estimated_tokens:
+        bounded.pop()
+    if estimate_json_tokens(bounded) <= max_estimated_tokens:
+        return bounded
+
+    essential_keys = (
+        "workflow_type",
+        "status",
+        "phase",
+        "current_message_relation",
+        "collected_facts",
+        "current_input",
+        "current_step",
+        "editable_steps",
+        "allowed_commands",
+        "next_transition",
+        "instruction",
+    )
+    minimal = [
+        {
+            key: workflow[key]
+            for key in essential_keys
+            if key in workflow
+        }
+        for workflow in bounded[:1]
+    ]
+    for max_string_length in (120, 60, 30):
+        candidate = cast(
+            list[dict[str, Any]],
+            _bounded_runtime_value(
+                minimal,
+                max_string_length=max_string_length,
+            ),
+        )
+        if estimate_json_tokens(candidate) <= max_estimated_tokens:
+            return candidate
+        minimal = candidate
+    return []
+
+
+def _bounded_runtime_value(
+    value: Any,
+    *,
+    max_string_length: int,
+) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key)[:120]: _bounded_runtime_value(
+                item,
+                max_string_length=max_string_length,
+            )
+            for key, item in list(value.items())[:40]
+        }
+    if isinstance(value, list):
+        return [
+            _bounded_runtime_value(
+                item,
+                max_string_length=max_string_length,
+            )
+            for item in value[:12]
+        ]
+    if isinstance(value, str):
+        return " ".join(value.split())[:max_string_length].strip()
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:max_string_length]
+
+
+def _model_input_sha256(model_input: list[dict[str, Any]]) -> str:
+    canonical = json.dumps(
+        model_input,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _visible_assistant_image_urls(*, messages: list[AgentMessage], before_sequence: int) -> tuple[str, ...]:
     urls: list[str] = []
     seen: set[str] = set()
@@ -1239,8 +1843,9 @@ def _elapsed_ms(started_at: float) -> float:
 
 def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> bool:
     return any(
-        _text(tool_call, "tool_name") == "pregnancy_plan_intake_analyze"
-        and _text(_dict(tool_call, "safe_output"), "status") == "intake_analyzed"
+        _text(tool_call, "tool_name") == "pregnancy_plan_workflow"
+        and _text(_dict(tool_call, "safe_args"), "command") == "submit_form"
+        and _text(_dict(tool_call, "safe_output"), "status") in {"intake_analyzed", "intake_in_progress"}
         for tool_call in tool_calls
     )
 
@@ -1281,10 +1886,7 @@ def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> 
 
 SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
     ServiceSkillId.BIRTH_PREP: (
-        "pregnancy_plan_intake_start",
-        "pregnancy_plan_intake_analyze",
-        "pregnancy_plan_intake_advance",
-        "pregnancy_plan_propose",
+        "pregnancy_plan_workflow",
         "pregnancy_plan_todo_propose",
         "plans_plan_delete_propose",
         "plans_task_update_propose",
@@ -1437,9 +2039,21 @@ def _workflow_reply_for_turn(
         content = message.content if isinstance(message.content, dict) else {}
         reply = normalize_workflow_reply_context(content.get("workflow_reply"))
         if reply:
+            # Pregnancy-plan free text is a side conversation by default. Only
+            # an explicit App workflow command may carry its reply cursor.
+            if _text(reply, "workflow_type") == PREGNANCY_PLAN_WORKFLOW_TYPE:
+                return {}
             return reply
         break
     return {}
+
+
+def _workflow_command_for_turn(*, current_message: AgentMessage) -> dict[str, Any]:
+    content = current_message.content if isinstance(current_message.content, dict) else {}
+    client_context = content.get("client_context")
+    if not isinstance(client_context, dict):
+        return {}
+    return normalize_workflow_command(client_context.get("workflow_command"))
 
 
 def _trusted_form_submissions(message: AgentMessage) -> dict[str, dict[str, Any]]:
@@ -1487,6 +2101,31 @@ def _runtime_checkup_attachment_count(message: AgentMessage) -> int:
         elif attachment_type == "file" and content_type == "application/pdf" and _text(attachment, "file_id"):
             count += 1
     return count
+
+
+def _pregnancy_workflow_command_final_text(safe_output: dict[str, Any]) -> str:
+    required_response = _text(safe_output, "required_response")
+    if required_response:
+        return required_response
+    status = _text(safe_output, "status")
+    if safe_output.get("write_succeeded") is True:
+        return "孕期计划已生成，并同步到「宝宝和我」。"
+    if status == "action_failed":
+        return "这次孕期计划没有生成或同步成功，你可以稍后重试。"
+    if status == "form_created":
+        return "请先填写下方的孕期基础信息表。提交后，我会按当前状态继续下一步。"
+    if status == "pregnancy_plan_intake_abandoned":
+        return "已结束这次孕期计划采集。以后需要时可以重新开始。"
+    if status == "existing_plan_found":
+        return "你已经有一份进行中的孕期计划，我不会重复创建。"
+    workflow_context = _dict(safe_output, "workflow_context")
+    current_step = _dict(workflow_context, "current_step")
+    question = _text(current_step, "question")
+    if question:
+        return question
+    if _text(current_step, "id") == "generate_plan":
+        return "信息已经确认，可以开始生成孕期计划。"
+    return "孕期计划已更新，请按下方当前步骤继续。"
 
 
 def _current_hospital_bag_cart_groups(message: AgentMessage) -> list[dict[str, Any]] | None:

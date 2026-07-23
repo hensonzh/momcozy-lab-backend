@@ -66,25 +66,27 @@ def test_workflow_reply_guard_accepts_the_current_cursor() -> None:
 
 
 @pytest.mark.parametrize(
-    ("tool_name", "action", "workflow_type"),
+    ("tool_name", "args", "workflow_type"),
     [
-        ("pregnancy_plan_intake_advance", "submit_personalized_followup", "pregnancy_plan"),
-        ("pregnancy_plan_intake_advance", "skip_checkup_records", "pregnancy_plan"),
-        ("records_milk_analysis_intake", "answer", "milk_analysis"),
-        ("devices_unboxing_advance", "complete_current", "device_unboxing"),
-        ("devices_unboxing_advance", "cancel", "device_unboxing"),
-        ("records_milk_analysis_intake", "start", None),
-        ("records_milk_analysis_intake", "resume", None),
-        ("devices_unboxing_advance", "start", None),
-        ("devices_unboxing_advance", "resume", None),
+        ("pregnancy_plan_workflow", {"command": "answer_current"}, "pregnancy_plan"),
+        ("pregnancy_plan_workflow", {"command": "edit_answer"}, "pregnancy_plan"),
+        ("pregnancy_plan_workflow", {"command": "start_or_resume"}, None),
+        ("pregnancy_plan_workflow", {"command": "resume"}, None),
+        ("records_milk_analysis_intake", {"action": "answer"}, "milk_analysis"),
+        ("devices_unboxing_advance", {"action": "complete_current"}, "device_unboxing"),
+        ("devices_unboxing_advance", {"action": "cancel"}, "device_unboxing"),
+        ("records_milk_analysis_intake", {"action": "start"}, None),
+        ("records_milk_analysis_intake", {"action": "resume"}, None),
+        ("devices_unboxing_advance", {"action": "start"}, None),
+        ("devices_unboxing_advance", {"action": "resume"}, None),
     ],
 )
 def test_only_reply_driven_workflow_actions_require_a_cursor(
     tool_name: str,
-    action: str,
+    args: dict[str, str],
     workflow_type: str | None,
 ) -> None:
-    assert guarded_workflow_type(tool_name, {"action": action}) == workflow_type
+    assert guarded_workflow_type(tool_name, args) == workflow_type
 
 
 def _workflow(*, workflow_type: str, revision: int, step_token: str) -> AgentWorkflowState:

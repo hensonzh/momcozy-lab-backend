@@ -44,6 +44,49 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.failures[0].observed == "profile_update"
 
 
+def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_command() -> None:
+    case = {
+        "expected_tool_calls": [],
+        "forbidden_tool_calls": [
+            {
+                "contract": "pregnancy_plan_workflow",
+                "args_subset": {"command": "generate_plan"},
+            }
+        ],
+        "expected_behavior": {},
+    }
+
+    allowed = create_cozymate_eval_assertion_engine().evaluate(
+        case=case,
+        trace=AgentEvalTrace(
+            tool_calls=[
+                {
+                    "tool_name": "pregnancy_plan_workflow",
+                    "status": "completed",
+                    "safe_args": {"command": "answer_current", "choice_id": "no_checkup_records"},
+                }
+            ],
+        ),
+    )
+    forbidden = create_cozymate_eval_assertion_engine().evaluate(
+        case=case,
+        trace=AgentEvalTrace(
+            tool_calls=[
+                {
+                    "tool_name": "pregnancy_plan_workflow",
+                    "status": "completed",
+                    "safe_args": {"command": "generate_plan"},
+                }
+            ],
+        ),
+    )
+
+    assert allowed.passed is True
+    assert forbidden.passed is False
+    assert forbidden.failures[0].category == "forbidden_tool"
+    assert forbidden.failures[0].observed == "pregnancy_plan_workflow"
+
+
 def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(

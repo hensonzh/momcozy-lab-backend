@@ -9,7 +9,7 @@ from typing import Any
 
 PREGNANCY_PLAN_INTAKE_FORM_ID = "birth_journey_basic_info_intake"
 PREGNANCY_PLAN_WORKFLOW_TYPE = "pregnancy_plan"
-PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION = "v2"
+PREGNANCY_PLAN_WORKFLOW_SCHEMA_VERSION = "v3"
 PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS = 3
 PREGNANCY_PLAN_CHECKUP_DONE_QUESTION = (
     "你目前有没有做过产检？做过的话我再请你上传能找到的记录；还没做过或不确定也可以直接说。"
@@ -299,6 +299,384 @@ def pregnancy_plan_current_followup(workflow: dict[str, Any]) -> dict[str, Any] 
     return None
 
 
+def pregnancy_plan_current_step(
+    workflow: dict[str, Any],
+    *,
+    checkup_attachment_count: int = 0,
+) -> dict[str, Any]:
+    """Return the bounded, user-visible command contract for the current step."""
+
+    if workflow.get("paused") is True:
+        return {
+            "id": "workflow_paused",
+            "phase": str(workflow.get("resume_phase") or workflow.get("phase") or ""),
+            "kind": "paused",
+            "question": "孕期计划已暂停，随时可以从这里继续。",
+            "allow_free_text": False,
+            "options": [{"id": "resume", "label": "继续孕期计划"}],
+        }
+
+    phase = str(workflow.get("phase") or "")
+    question = str(workflow.get("visible_question") or "").strip()
+    if phase == PregnancyPlanPhase.COLLECTING_INTAKE.value:
+        return _workflow_step(
+            step_id="basic_intake",
+            phase=phase,
+            kind="form",
+            question=question,
+            allow_free_text=False,
+        )
+    if phase == PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
+        current = pregnancy_plan_current_followup(workflow) or {}
+        topic_id = str(current.get("id") or "").strip()
+        labels = current.get("reply_options")
+        options = [
+            {
+                "id": f"followup:{topic_id}:option:{index}",
+                "label": str(label).strip(),
+            }
+            for index, label in enumerate(labels if isinstance(labels, (list, tuple)) else ())
+            if str(label).strip()
+        ]
+        options.append({"id": "finish_personalized_followups", "label": "跳过剩余问题"})
+        records = _followup_records(workflow)
+        return _workflow_step(
+            step_id=f"followup:{topic_id}",
+            phase=phase,
+            kind="choice_or_text",
+            question=str(current.get("question") or question).strip(),
+            allow_free_text=True,
+            options=options,
+            progress={
+                "completed": len(records),
+                "total": min(PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS, len(_followup_topics(workflow))),
+            },
+        )
+    if phase == PregnancyPlanPhase.CHECKUP_DONE_QUESTION.value:
+        return _workflow_step(
+            step_id="checkup_done",
+            phase=phase,
+            kind="single_choice",
+            question=question or PREGNANCY_PLAN_CHECKUP_DONE_QUESTION,
+            allow_free_text=False,
+            options=[
+                {"id": "confirm_checkup_done", "label": "做过产检"},
+                {"id": "confirm_no_checkup_yet", "label": "还没做过"},
+                {"id": "confirm_checkup_unknown", "label": "不确定"},
+            ],
+        )
+    if phase == PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value:
+        checkup_options: list[dict[str, str]] = []
+        if max(0, int(checkup_attachment_count)) > 0:
+            checkup_options.append({"id": "mark_checkup_records_uploaded", "label": "使用已上传记录"})
+        checkup_options.append({"id": "skip_checkup_records", "label": "暂时跳过"})
+        return _workflow_step(
+            step_id="checkup_records",
+            phase=phase,
+            kind="upload_or_choice",
+            question=question or PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
+            allow_free_text=False,
+            options=checkup_options,
+        )
+    if phase == PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value:
+        return _workflow_step(
+            step_id="final_confirmation",
+            phase=phase,
+            kind="choice_or_text",
+            question=question or PREGNANCY_PLAN_FINAL_QUESTION,
+            allow_free_text=True,
+            options=[
+                {"id": "confirm_ready_to_generate", "label": "没有了，开始制定"},
+                {"id": "submit_final_additional_info", "label": "我还有补充"},
+            ],
+        )
+    if phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
+        return _workflow_step(
+            step_id="generate_plan",
+            phase=phase,
+            kind="action",
+            question="",
+            allow_free_text=False,
+            options=[{"id": "generate_plan", "label": "生成孕期计划"}],
+        )
+    return _workflow_step(
+        step_id=phase or "unknown",
+        phase=phase,
+        kind="unknown",
+        question=question,
+        allow_free_text=False,
+    )
+
+
+def pregnancy_plan_workflow_context(
+    workflow: dict[str, Any],
+    *,
+    checkup_attachment_count: int = 0,
+) -> dict[str, Any]:
+    """Bounded context shared by tool output, model projection, and App cards."""
+
+    records = _followup_records(workflow)
+    editable_steps: list[dict[str, str]] = []
+    if str(workflow.get("source_form_submission_id") or "").strip():
+        editable_steps.append({"id": "basic_intake", "label": "基础信息", "answer": "已提交"})
+    editable_steps.extend(
+        {
+            "id": f"followup:{str(record.get('topic') or '').strip()}",
+            "label": f"个性化问题 {index}",
+            "answer": str(record.get("answer") or "").strip()[:240],
+        }
+        for index, record in enumerate(records, start=1)
+        if str(record.get("topic") or "").strip()
+    )
+    if workflow.get("checkup_done_confirmed") is True or str(workflow.get("checkup_status") or "").strip():
+        editable_steps.append(
+            {
+                "id": "checkup_done",
+                "label": "是否做过产检",
+                "answer": (
+                    "做过产检"
+                    if workflow.get("checkup_done_confirmed") is True
+                    else str(workflow.get("checkup_status") or "").strip()[:240]
+                ),
+            }
+        )
+    checkup_status = str(workflow.get("checkup_status") or "").strip()
+    if workflow.get("checkup_records_uploaded") is True or checkup_status == "暂不上传":
+        editable_steps.append(
+            {
+                "id": "checkup_records",
+                "label": "产检记录",
+                "answer": "已上传" if workflow.get("checkup_records_uploaded") is True else "暂不上传",
+            }
+        )
+    if workflow.get("final_plan_confirmed") is True:
+        plan_context = _dict(workflow, "plan_context")
+        editable_steps.append(
+            {
+                "id": "final_confirmation",
+                "label": "最后补充",
+                "answer": str(plan_context.get("final_additional_info") or "没有其他补充").strip()[:240],
+            }
+        )
+
+    current_step = pregnancy_plan_current_step(
+        workflow,
+        checkup_attachment_count=checkup_attachment_count,
+    )
+    phase = str(workflow.get("phase") or "")
+    return {
+        "schema_version": "pregnancy_plan_workflow_context.v1",
+        "workflow_type": PREGNANCY_PLAN_WORKFLOW_TYPE,
+        "status": "paused" if workflow.get("paused") is True else "active",
+        "phase": phase,
+        "current_step": current_step,
+        "editable_steps": editable_steps[-12:],
+        "progress": {
+            "followups_completed": len(records),
+            "followups_max": PREGNANCY_PLAN_FOLLOWUP_MAX_ROUNDS,
+            "ready_to_generate": phase == PregnancyPlanPhase.READY_TO_GENERATE.value,
+        },
+        "allowed_commands": _allowed_workflow_commands(workflow),
+    }
+
+
+def resolve_pregnancy_plan_answer(
+    workflow: dict[str, Any],
+    *,
+    choice_id: str,
+    free_text: str,
+    checkup_attachment_count: int = 0,
+) -> tuple[str, dict[str, str]]:
+    """Validate a displayed choice and translate it to one legacy transition."""
+
+    step = pregnancy_plan_current_step(
+        workflow,
+        checkup_attachment_count=checkup_attachment_count,
+    )
+    normalized_choice = str(choice_id or "").strip()
+    normalized_text = str(free_text or "").strip()
+    phase = str(workflow.get("phase") or "")
+    if workflow.get("paused") is True:
+        raise ValueError("pregnancy_plan_workflow_is_paused")
+    if phase == PregnancyPlanPhase.PERSONALIZED_FOLLOWUP.value:
+        if normalized_choice == "finish_personalized_followups":
+            return "finish_personalized_followups", {}
+        options = {
+            str(option.get("id") or ""): str(option.get("label") or "").strip()
+            for option in step.get("options", [])
+            if isinstance(option, dict)
+        }
+        if normalized_choice and normalized_choice not in options:
+            raise ValueError("invalid_pregnancy_plan_choice")
+        answer = normalized_text or options.get(normalized_choice, "")
+        if not answer:
+            raise ValueError("missing_pregnancy_plan_followup_answer")
+        return "submit_personalized_followup", {"answer": answer[:2000]}
+
+    option_ids = {
+        str(option.get("id") or "")
+        for option in step.get("options", [])
+        if isinstance(option, dict)
+    }
+    if not normalized_choice or normalized_choice not in option_ids:
+        raise ValueError("invalid_pregnancy_plan_choice")
+    if phase == PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value:
+        if normalized_choice == "submit_final_additional_info":
+            if not normalized_text:
+                raise ValueError("missing_pregnancy_plan_final_additional_info")
+            return normalized_choice, {"additional_info": normalized_text[:2000]}
+        return normalized_choice, {}
+    if phase in {
+        PregnancyPlanPhase.CHECKUP_DONE_QUESTION.value,
+        PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value,
+    }:
+        return normalized_choice, {}
+    raise ValueError("pregnancy_plan_workflow_action_not_allowed")
+
+
+def pause_pregnancy_plan_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    updated = deepcopy(workflow)
+    phase = str(updated.get("phase") or "")
+    if not phase or phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
+        raise ValueError("pregnancy_plan_workflow_cannot_pause")
+    if updated.get("paused") is True:
+        return updated
+    updated["paused"] = True
+    updated["resume_phase"] = phase
+    return updated
+
+
+def resume_pregnancy_plan_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    updated = deepcopy(workflow)
+    if updated.get("paused") is not True and updated.get("interrupted_by_safety_signal") is not True:
+        return _with_current_visible_question(updated)
+    resume_phase = str(updated.pop("resume_phase", "") or updated.get("phase") or "")
+    updated.pop("paused", None)
+    updated.pop("interrupted_by_safety_signal", None)
+    updated["phase"] = resume_phase
+    return _with_current_visible_question(updated)
+
+
+def revise_pregnancy_plan_workflow(
+    workflow: dict[str, Any],
+    *,
+    step_id: str,
+    choice_id: str,
+    answer: str,
+    checkup_attachment_count: int = 0,
+) -> dict[str, Any]:
+    """Append a revision and rebuild the dependent tail without rewriting history."""
+
+    if str(workflow.get("consumed_by_action_id") or "").strip():
+        raise ValueError("pregnancy_plan_completed_requires_plan_revision")
+    updated = resume_pregnancy_plan_workflow(workflow)
+    normalized_step_id = str(step_id or "").strip()
+    normalized_choice = str(choice_id or "").strip()
+    normalized_answer = str(answer or "").strip()
+    previous_answer = ""
+    invalidated = ["checkup_done", "checkup_records", "final_confirmation", "generate_plan"]
+
+    if normalized_step_id.startswith("followup:"):
+        topic_id = normalized_step_id.partition(":")[2]
+        records = _followup_records(updated)
+        target = next((record for record in records if str(record.get("topic") or "") == topic_id), None)
+        if target is None:
+            raise ValueError("pregnancy_plan_revision_step_not_found")
+        previous_answer = str(target.get("answer") or "")
+        revised_answer = normalized_answer or _historical_followup_option_label(
+            updated,
+            topic_id=topic_id,
+            choice_id=normalized_choice,
+        )
+        if not revised_answer:
+            raise ValueError("missing_pregnancy_plan_followup_answer")
+        target["answer"] = revised_answer[:2000]
+        updated["personalized_followup_records"] = records
+        plan_context = _dict(updated, "plan_context")
+        plan_context["personalized_followup_records"] = deepcopy(records)
+        plan_context["personalized_facts"] = "；".join(
+            f"{record['topic']} / {record['answer']}"
+            for record in records
+            if record.get("topic") and record.get("answer")
+        )
+        updated["plan_context"] = plan_context
+        _invalidate_pregnancy_plan_tail(updated)
+        updated["phase"] = _phase_after_personalized_followups(_dict(updated, "analysis")).value
+    elif normalized_step_id == "checkup_done":
+        if normalized_choice not in {
+            "confirm_checkup_done",
+            "confirm_no_checkup_yet",
+            "confirm_checkup_unknown",
+        }:
+            raise ValueError("invalid_pregnancy_plan_choice")
+        previous_answer = str(updated.get("checkup_status") or updated.get("checkup_done_confirmed") or "")
+        _invalidate_pregnancy_plan_tail(updated)
+        plan_context = _dict(updated, "plan_context")
+        if normalized_choice == "confirm_checkup_done":
+            updated["checkup_done_confirmed"] = True
+            updated["phase"] = PregnancyPlanPhase.CHECKUP_RECORDS_UPLOAD.value
+        else:
+            status = "还没做过产检" if normalized_choice == "confirm_no_checkup_yet" else "暂不确定是否做过产检"
+            updated["checkup_status"] = status
+            plan_context["checkup_status"] = status
+            updated["phase"] = PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value
+        updated["plan_context"] = plan_context
+        invalidated = ["checkup_records", "final_confirmation", "generate_plan"]
+    elif normalized_step_id == "checkup_records":
+        if normalized_choice not in {"mark_checkup_records_uploaded", "skip_checkup_records"}:
+            raise ValueError("invalid_pregnancy_plan_choice")
+        if normalized_choice == "mark_checkup_records_uploaded" and max(0, int(checkup_attachment_count)) < 1:
+            raise ValueError("pregnancy_plan_checkup_attachment_required")
+        previous_answer = str(updated.get("checkup_status") or "")
+        plan_context = _dict(updated, "plan_context")
+        if normalized_choice == "mark_checkup_records_uploaded":
+            updated["checkup_records_uploaded"] = True
+            updated["checkup_status"] = "已上传产检记录"
+            plan_context["checkup_records_uploaded"] = "是"
+            plan_context["checkup_status"] = "已上传产检记录"
+        else:
+            updated.pop("checkup_records_uploaded", None)
+            updated["checkup_status"] = "暂不上传"
+            plan_context.pop("checkup_records_uploaded", None)
+            plan_context["checkup_status"] = "暂不上传"
+        updated["plan_context"] = plan_context
+        updated.pop("final_plan_confirmed", None)
+        updated["phase"] = PregnancyPlanPhase.FINAL_PLAN_CONFIRMATION.value
+        invalidated = ["final_confirmation", "generate_plan"]
+    elif normalized_step_id == "final_confirmation":
+        if normalized_choice not in {"confirm_ready_to_generate", "submit_final_additional_info"}:
+            raise ValueError("invalid_pregnancy_plan_choice")
+        plan_context = _dict(updated, "plan_context")
+        previous_answer = str(plan_context.get("final_additional_info") or "")
+        if normalized_choice == "submit_final_additional_info":
+            if not normalized_answer:
+                raise ValueError("missing_pregnancy_plan_final_additional_info")
+            plan_context["final_additional_info"] = normalized_answer[:2000]
+        else:
+            plan_context.pop("final_additional_info", None)
+        updated["plan_context"] = plan_context
+        updated["final_plan_confirmed"] = True
+        updated["phase"] = PregnancyPlanPhase.READY_TO_GENERATE.value
+        invalidated = ["generate_plan"]
+    else:
+        raise ValueError("pregnancy_plan_revision_step_not_found")
+
+    revisions = updated.get("answer_revisions")
+    revision_items = [deepcopy(item) for item in revisions if isinstance(item, dict)] if isinstance(revisions, list) else []
+    revision_items.append(
+        {
+            "revision": len(revision_items) + 1,
+            "step_id": normalized_step_id,
+            "previous_answer": previous_answer,
+            "answer": normalized_answer or _revision_answer_label(updated, normalized_step_id, normalized_choice),
+            "choice_id": normalized_choice,
+            "invalidated_step_ids": invalidated,
+        }
+    )
+    updated["answer_revisions"] = revision_items[-20:]
+    return _with_current_visible_question(updated)
+
+
 def advance_pregnancy_plan_workflow(
     workflow: dict[str, Any],
     *,
@@ -559,6 +937,107 @@ def _with_current_visible_question(workflow: dict[str, Any]) -> dict[str, Any]:
 def _followup_records(workflow: dict[str, Any]) -> list[dict[str, Any]]:
     records = workflow.get("personalized_followup_records")
     return [deepcopy(record) for record in records if isinstance(record, dict)] if isinstance(records, list) else []
+
+
+def _followup_topics(workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    topics = workflow.get("followup_topics")
+    return [deepcopy(topic) for topic in topics if isinstance(topic, dict)] if isinstance(topics, list) else []
+
+
+def _workflow_step(
+    *,
+    step_id: str,
+    phase: str,
+    kind: str,
+    question: str,
+    allow_free_text: bool,
+    options: list[dict[str, str]] | None = None,
+    progress: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    step: dict[str, Any] = {
+        "id": step_id,
+        "phase": phase,
+        "kind": kind,
+        "question": question,
+        "allow_free_text": allow_free_text,
+        "options": list(options or []),
+    }
+    if progress is not None:
+        step["progress"] = progress
+    return step
+
+
+def _historical_followup_option_label(
+    workflow: dict[str, Any],
+    *,
+    topic_id: str,
+    choice_id: str,
+) -> str:
+    prefix = f"followup:{topic_id}:option:"
+    if not choice_id.startswith(prefix):
+        return ""
+    try:
+        index = int(choice_id[len(prefix) :])
+    except ValueError:
+        return ""
+    topic = next(
+        (item for item in _followup_topics(workflow) if str(item.get("id") or "") == topic_id),
+        {},
+    )
+    options = topic.get("reply_options")
+    if not isinstance(options, (list, tuple)) or index < 0 or index >= len(options):
+        return ""
+    return str(options[index] or "").strip()
+
+
+def _invalidate_pregnancy_plan_tail(workflow: dict[str, Any]) -> None:
+    for key in (
+        "checkup_done_confirmed",
+        "checkup_records_uploaded",
+        "checkup_status",
+        "final_plan_confirmed",
+    ):
+        workflow.pop(key, None)
+    plan_context = _dict(workflow, "plan_context")
+    for key in ("checkup_records_uploaded", "checkup_status", "final_additional_info"):
+        plan_context.pop(key, None)
+    workflow["plan_context"] = plan_context
+
+
+def _revision_answer_label(workflow: dict[str, Any], step_id: str, choice_id: str) -> str:
+    if step_id.startswith("followup:"):
+        return _historical_followup_option_label(
+            workflow,
+            topic_id=step_id.partition(":")[2],
+            choice_id=choice_id,
+        )
+    labels = {
+        "confirm_checkup_done": "做过产检",
+        "confirm_no_checkup_yet": "还没做过",
+        "confirm_checkup_unknown": "不确定",
+        "mark_checkup_records_uploaded": "使用已上传记录",
+        "skip_checkup_records": "暂时跳过",
+        "confirm_ready_to_generate": "没有其他补充",
+        "submit_final_additional_info": "有补充",
+    }
+    return labels.get(choice_id, "")
+
+
+def _allowed_workflow_commands(workflow: dict[str, Any]) -> list[str]:
+    if str(workflow.get("consumed_by_action_id") or "").strip():
+        return []
+    if workflow.get("paused") is True:
+        return ["resume", "abandon"]
+    phase = str(workflow.get("phase") or "")
+    commands = ["pause", "edit_answer", "abandon"]
+    if phase == PregnancyPlanPhase.COLLECTING_INTAKE.value:
+        commands.insert(0, "submit_form")
+    elif phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
+        commands.insert(0, "generate_plan")
+        commands.remove("pause")
+    else:
+        commands.insert(0, "answer_current")
+    return commands
 
 
 def _dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
@@ -1179,7 +1658,7 @@ def build_pregnancy_plan_result(
     generation_context["created_at"] = generated_at.astimezone(timezone.utc).isoformat(timespec="seconds")
     card_json["generation_context"] = generation_context
     return {
-        "tool_name": "pregnancy_plan_propose",
+        "tool_name": "pregnancy_plan_workflow",
         "status": "card_created",
         "summary": "孕期计划已生成",
         "card": {
