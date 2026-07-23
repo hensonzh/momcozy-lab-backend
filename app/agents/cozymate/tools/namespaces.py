@@ -9,8 +9,8 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ToolNamespace(
         name="milk_management",
         description=(
-            "管理当前用户的喂养、吸奶、奶量、生长记录及相关计划和提醒。"
-            "用户要查看数据、记录一次喂养/吸奶/生长、分析趋势，或创建和调整相关计划与提醒时使用。"
+            "管理当前用户的喂养、吸奶、奶量、生长记录、相关计划提醒及 IBCLC 哺乳顾问咨询。"
+            "用户要查看数据、记录一次喂养/吸奶/生长、分析趋势、创建和调整相关计划提醒，或联系 IBCLC 时使用。"
         ),
         tool_contracts=(
             "records_milk_status_read",
@@ -35,6 +35,7 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "plans_milk_task_update_propose",
             "plans_milk_task_delete_propose",
             "notifications_milk_reminder_propose",
+            "ibclc_consult_card_create",
         ),
     ),
     ToolNamespace(
@@ -68,11 +69,6 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "devices_unboxing_advance",
             "support_ticket_propose",
         ),
-    ),
-    ToolNamespace(
-        name="health_consultation",
-        description="为当前用户创建 IBCLC 哺乳顾问咨询入口。用户希望联系专业哺乳顾问或需要进一步人工咨询时使用。",
-        tool_contracts=("ibclc_consult_card_create",),
     ),
     ToolNamespace(
         name="pregnancy_diary",

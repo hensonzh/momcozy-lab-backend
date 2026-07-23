@@ -20,7 +20,7 @@ def default_tool_registry() -> ToolContractRegistry:
             domain="agent_runtime",
             description=(
                 "按 service_skill_id 加载一个 MomCozy 服务技能。"
-                "用户当前请求需要进入奶量、产前准备、健康咨询、情绪支持或设备指导流程，且对应技能尚未驻留时调用；"
+                "用户当前请求需要进入奶量、产前准备或设备指导流程，且对应技能尚未驻留时调用；"
                 "返回该技能说明、建议工具和小型业务事实包。仅涉及孕期日记时不要调用，直接使用全局 pregnancy_diary namespace。"
             ),
             loading_mode="eager",
@@ -567,7 +567,7 @@ def default_tool_registry() -> ToolContractRegistry:
     registry.register(
         _tool_contract(
             name="ibclc_consult_card_create",
-            domain="health_consultation",
+            domain="lactation",
             description=(
                 "当前用户明确要求联系/打开 IBCLC 哺乳顾问咨询，或明确确认上一轮 IBCLC 推荐时调用，创建咨询入口卡片。"
                 "仅询问 IBCLC 是什么、是否需要顾问、否定/暂缓意图或无上一轮推荐的孤立确认都不得创建。"

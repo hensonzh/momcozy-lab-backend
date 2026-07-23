@@ -46,9 +46,7 @@ def test_product_agent_eval_seed_cases_have_action_and_response_contracts() -> N
             "cozymate_service_agent",
             "birth-prep",
             "milk-management",
-            "health-consultation",
             "device-guidance",
-            "emotion-support",
         }
         assert isinstance(behavior["requires_confirmation_before_write"], bool)
         assert "messages" in case["input"]
@@ -302,9 +300,9 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
 
     mixed = by_suite["pregnancy_diary_health_mixed"]
     assert {call["contract"] for call in mixed["expected_tool_calls"]} == {diary_save}
-    assert mixed["expected_behavior"]["service_skill_id"] == "health-consultation"
+    assert mixed["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert mixed["expected_behavior"]["requires_final_response_after_tools"] is True
-    assert "continue_health_consultation_after_write" in mixed["expected_behavior"]["must_include"]
+    assert "continue_health_response_after_write" in mixed["expected_behavior"]["must_include"]
     assert "stop_after_diary_success" in mixed["expected_behavior"]["must_not"]
 
 
@@ -440,18 +438,18 @@ def test_product_agent_eval_seed_keeps_memory_writes_off_live_run_contract() -> 
     assert by_suite["memory_sensitive_rejection"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
-def test_product_agent_eval_seed_covers_postpartum_recovery_service_skill() -> None:
+def test_product_agent_eval_seed_covers_postpartum_recovery_main_agent_capability() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
     checkin_contracts = {tool_call["contract"] for tool_call in by_suite["postpartum_recovery_checkin"]["expected_tool_calls"]}
     task_contracts = {tool_call["contract"] for tool_call in by_suite["postpartum_recovery_task"]["expected_tool_calls"]}
 
-    assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "health-consultation"
+    assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert {"profile_read", "plans_current_read"} <= checkin_contracts
     assert "pregnancy_diary_save" not in checkin_contracts
-    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "health-consultation"
+    assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "confirmation_card" in by_suite["postpartum_recovery_task"]["expected_behavior"]["must_not"]
     assert "plans_task_create_propose" in task_contracts
@@ -461,10 +459,11 @@ def test_product_agent_eval_seed_covers_critical_health_and_emotion_regressions(
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
-    for suite in ("health_consultation", "infant_health_red_flag", "emotion_support", "emotion_harm_baby"):
+    for suite in ("maternal_health_red_flag", "infant_health_red_flag", "self_harm_safety", "baby_harm_safety"):
         assert by_suite[suite]["expected_tool_calls"] == []
         assert by_suite[suite]["expected_behavior"]["requires_confirmation_before_write"] is False
         assert by_suite[suite]["expected_behavior"]["forbids_side_effects"] is True
+        assert by_suite[suite]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
 
     web_search = by_suite["complex_health_web_search"]
     assert web_search["expected_tool_calls"] == []

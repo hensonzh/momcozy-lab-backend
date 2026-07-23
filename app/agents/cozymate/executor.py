@@ -1893,12 +1893,8 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "plans_task_complete_propose",
         "plans_task_create_propose",
         "notifications_milk_reminder_propose",
-    ),
-    ServiceSkillId.HEALTH_CONSULTATION: (
-        "records_milk_status_read",
         "ibclc_consult_card_create",
     ),
-    ServiceSkillId.EMOTION_SUPPORT: (),
     ServiceSkillId.DEVICE_GUIDANCE: (
         "devices_pump_status_read",
         "devices_guidance_read",

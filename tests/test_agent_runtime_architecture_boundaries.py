@@ -194,8 +194,6 @@ def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
     assert skill_ids == {
         "birth-prep",
         "device-guidance",
-        "emotion-support",
-        "health-consultation",
         "milk-management",
     }
     assert {skill_id.value for skill_id in ServiceSkillId} == skill_ids
@@ -327,13 +325,6 @@ def test_service_skill_tool_references_are_registered_contracts() -> None:
     assert violations == []
 
 
-def test_service_skill_text_does_not_own_pregnancy_diary_behavior() -> None:
-    health = default_service_skill_registry().get("health-consultation").prompt_block()
-
-    assert "孕期日记" not in health
-    assert "pregnancy_diary" not in health
-
-
 def test_skills_directory_contains_only_skill_directories() -> None:
     paths = [path for path in SERVICE_SKILLS_ROOT.iterdir() if not path.name.startswith(".")]
     entries = {path.name for path in paths}
@@ -426,8 +417,6 @@ def test_static_skill_manifests_are_derived_from_skill_directories() -> None:
     assert {manifest["id"] for manifest in manifests} == {
         "birth-prep",
         "device-guidance",
-        "emotion-support",
-        "health-consultation",
         "milk-management",
     }
 
@@ -466,7 +455,6 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     pregnancy = registry.get("birth-prep").prompt_block()
     lactation = registry.get("milk-management").prompt_block()
     after_sales = registry.get("device-guidance").prompt_block()
-    safety = registry.get("emotion-support").prompt_block()
 
     assert "pregnancy_plan_workflow" in pregnancy
     assert "pregnancy_plan_intake_start" not in pregnancy
@@ -495,10 +483,6 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "每轮给 1 个主步骤" in after_sales
     assert "devices_guidance_read" in after_sales
     assert "support_ticket_propose" in after_sales
-
-    assert "宝宝交给身边可信成年人" in safety
-    assert "当前没有情绪支持专用工具" in safety
-
 
 def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_policy() -> None:
     registry = default_tool_registry()
@@ -533,6 +517,11 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
     assert set(registry.eager_names()).isdisjoint(registry.deferred_names())
     assert set(registry.eager_names()) | set(registry.deferred_names()) == registered_names
     assert registry.get("load_service_skill").loading_mode == "eager"
+    assert registry.get("load_service_skill").input_schema["properties"]["service_skill_id"]["enum"] == [
+        "birth-prep",
+        "milk-management",
+        "device-guidance",
+    ]
     assert milk_status.loading_mode == "eager"
     assert support_ticket.loading_mode == "deferred"
     assert support_ticket.effect_scope == "agent_internal"
@@ -634,7 +623,7 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "devices_pump_status_read" in namespaces["device_support"].tool_contracts
     assert "devices_guidance_read" in namespaces["device_support"].tool_contracts
     assert "support_ticket_propose" in namespaces["device_support"].deferred_tool_contracts
-    assert "ibclc_consult_card_create" in namespaces["health_consultation"].deferred_tool_contracts
+    assert "ibclc_consult_card_create" in namespaces["milk_management"].deferred_tool_contracts
 
 
 def test_tool_schema_contract_exposes_only_effective_fields() -> None:

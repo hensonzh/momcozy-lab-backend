@@ -205,8 +205,6 @@ def _dynamic_tool_completed_label(
             "diary_entry_written": "我已经保存好孕期日记啦",
             "diary_entry_created": "我已经保存好孕期日记啦",
             "diary_entry_updated": "我已经保存好孕期日记啦",
-            "health_consultation_recorded": "我已经记录到孕期日记啦",
-            "health_consultation_updated": "我已经记录到孕期日记啦",
             "diary_list_read": "我看好孕期日记啦",
             "diary_entry_read": "我看好孕期日记啦",
             "entries_read": "我看好孕期日记啦",

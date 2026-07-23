@@ -15,7 +15,6 @@ from ..service_skills import ServiceSkillId
 @dataclass(frozen=True)
 class BusinessFactsProjectorConfig:
     default_limit: int = 5
-    recent_limit: int = 3
     milk_days: int = 7
 
 
@@ -96,20 +95,11 @@ async def _maybe_await(
 
 def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProjectorConfig) -> tuple[BusinessFactSource, ...]:
     default_limit = config.default_limit
-    recent_limit = config.recent_limit
     if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
             BusinessFactSource("profile_read", "profile"),
             BusinessFactSource("records_milk_status_read", "milk_status", {"days": config.milk_days, "limit": default_limit}),
         )
-    if skill_id == ServiceSkillId.HEALTH_CONSULTATION:
-        return (
-            BusinessFactSource("profile_read", "profile"),
-            BusinessFactSource("plans_current_read", "plans", {"limit": default_limit}),
-            BusinessFactSource("records_milk_summary_read", "milk_summary", {"days": config.milk_days, "limit": recent_limit}),
-        )
-    if skill_id == ServiceSkillId.EMOTION_SUPPORT:
-        return (BusinessFactSource("profile_read", "profile"),)
     if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
         return (
             BusinessFactSource("profile_read", "profile"),

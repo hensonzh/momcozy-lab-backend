@@ -567,13 +567,12 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
     assert scenario.repository.artifacts[-1].payload["submit_label"] == "确认并提交"
 
 
-def test_observed_health_consultation_can_write_user_facts_then_continue_replying() -> None:
+def test_observed_health_response_can_write_user_facts_then_continue_replying() -> None:
     scenario = ObservedScenario()
     result = scenario.run_turn(
         text="没有出血或发烧，疼痛也没有加重，宝宝胎动正常。今天散步后只是有一点轻微牵拉感。",
         handlers=scenario.diary_handlers(),
         tool_invocations=(
-            scripted_tool_invocation("load_service_skill", {"service_skill_id": "health-consultation"}),
             scripted_tool_invocation(
                 "pregnancy_diary_save",
                 {
@@ -585,7 +584,7 @@ def test_observed_health_consultation_can_write_user_facts_then_continue_replyin
         final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
     )
 
-    _assert_tools(result.trace, "load_service_skill", "pregnancy_diary_save")
+    _assert_tools(result.trace, "pregnancy_diary_save")
     _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
     assert result.trace.final_text.startswith("我已经记下来了")
     assert scenario.diary.entries[0].content == (

@@ -13,8 +13,6 @@ REQUIRED_SECTION_TITLES = ("服务范围", "回复风格", "服务流程", "交�
 SERVICE_SKILL_ORDER = (
     ServiceSkillId.BIRTH_PREP.value,
     ServiceSkillId.MILK_MANAGEMENT.value,
-    ServiceSkillId.HEALTH_CONSULTATION.value,
-    ServiceSkillId.EMOTION_SUPPORT.value,
     ServiceSkillId.DEVICE_GUIDANCE.value,
 )
 

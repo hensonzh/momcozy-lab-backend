@@ -20,8 +20,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "enum": [
                     "birth-prep",
                     "milk-management",
-                    "health-consultation",
-                    "emotion-support",
                     "device-guidance",
                 ],
                 "description": "要加载的具体服务技能 id。",

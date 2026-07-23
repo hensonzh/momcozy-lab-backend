@@ -9,7 +9,3 @@ def test_pregnancy_diary_entries_are_unique_by_owner_date() -> None:
     assert "owner_user_id" in table.columns
     assert "entry_date" in table.columns
     assert "uq_pregnancy_diary_owner_date" in constraint_names
-
-
-def test_pregnancy_diary_has_no_health_consultation_coupling_table() -> None:
-    assert "pregnancy_diary_health_notes" not in Base.metadata.tables

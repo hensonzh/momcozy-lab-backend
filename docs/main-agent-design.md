@@ -32,7 +32,7 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 `pregnancy_plan_workflow`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
 
-其中 `pregnancy_plan_workflow` 是唯一对模型和 App 暴露的孕期计划流程入口。原开始采集、分析表单、推进追问和生成计划四个操作只作为内部 Handler 保留，不再是 Tool Contract。
+其中 `pregnancy_plan_workflow` 是唯一对模型和 App 暴露的孕期计划流程入口，孕期计划采集、表单分析、追问推进和计划生成由该工作流内部 Handler 执行。
 
 ## 孕期计划 Workflow Contract
 
@@ -41,8 +41,6 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 `start_or_resume`、`submit_form`、`answer_current`、`edit_answer`、`pause`、`resume`、`abandon`、`generate_plan`。
 
 运行时以用户维度持久化唯一的活动孕期计划，状态不设自动过期时间。每次转换都增加 `revision`、更新一次性 `step_token`，并写入 append-only workflow event；因此新会话和 App 重启后仍可在已完成步骤上继续，也可以修改历史回答并使依赖它的后续步骤失效后重算。
-
-当前内部测试阶段采用 fresh-cutover：首次部署 `20260723_0043` 前必须重建测试数据库或清空测试 Compose volumes，不迁移上线前的孕期 workflow。该 migration 会在发现任何既有 `pregnancy_plan` 状态时明确失败，不会归并、复活、删除或清除旧状态的 `expires_at`。进入真实用户生产环境前，需要重新评审并制定正式的数据迁移策略。
 
 每轮实际使用的消息、成对 Tool call/output、上下文条目引用、裁剪策略和有界 workflow 投影会写入 model-context snapshot，workflow 转换的命令、交互摘要、revision 和失效步骤则留在 append-only event ledger，便于按当时输入重放和审计。完整历史不会在后续每轮重复塞回模型：默认最多选择 64 个上下文条目、约 12,000 token，并为所有活动 workflow 单独保留约 1,200 token 的投影预算。
 
@@ -65,33 +63,13 @@ App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregn
 
 `devices_pump_status_read`、`devices_guidance_read`、`devices_unboxing_advance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
 
-### 已移除（5）
-
-`birth_plan_form_create`、`labor_communication_card_create`、`business_context_read`、`pregnancy_plan_context_read`、`pregnancy_plan_todo_propose` 及其表单、卡片、上下文投影、Action、Fact、Skill 和 Eval 链路已删除。
-
-### 重构后移除（1）
-
-`load_service_skill` 由三个 Handoff 和各智能体静态专业定义取代。
-
-## 调整项
-
-`hospital_bag_pump_recommend` 迁入设备领域并改为设备语义名称，通用计划 Tool 从现有专业 Namespace 移入公共能力面。
-
-## `propose` 命名待统一
+## `propose` 语义
 
 当前 `_propose` 只表示向 Action Runtime 提交结构化变更意图，不能表示是否直接写入；实际行为以 `ActionPolicy.requires_confirmation` 为准。
 
-| 当前行为 | 当前 Tool | 合并后命名规则 |
-| --- | --- | --- |
-| 生成方案，等待用户确认后写入 | `plans_milk_plan_propose`、`plans_milk_schedule_propose`、`notifications_milk_reminder_propose` | 保留 `_propose` |
-| 用户已明确授权，调用后直接写入 | 其余 Action-backed `_propose` Tool | 移除 `_propose`，使用实际动作结尾：`_create`、`_update`、`_delete`、`_complete` |
-| 只生成 Agent 内部草稿，不创建业务资源 | `support_ticket_propose` | 改为 `support_ticket_draft_create` |
-
-本分支暂不修改 Tool 名；与其他分支合并后，再全量同步 Registry、Schema、Handler、Policy、Prompt、测试、Eval 和客户端事件 Fixture。
-
 ## Tool 之外的能力
 
-`health-consultation` 和 `emotion-support` 当前是 Skill，Health Web Search 是 Provider 能力。
+Health Web Search 是主智能体的 Provider 能力。
 
 ## 跨域边界
 

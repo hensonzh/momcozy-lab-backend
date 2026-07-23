@@ -970,27 +970,42 @@ def test_agent_runtime_executor_loads_birth_prep_without_implicit_business_facts
 @pytest.mark.parametrize(
     ("service_skill_id", "expected_tool_names"),
     [
-            (
-                "birth-prep",
-                {
-                    "pregnancy_plan_workflow",
-                    "plans_plan_delete_propose",
-                    "plans_task_update_propose",
-                    "plans_task_delete_propose",
-                    "hospital_bag_form_create",
-                    "hospital_bag_card_create",
-                    "hospital_bag_cart_update",
-                    "hospital_bag_pump_recommend",
-                },
-            ),
         (
-            "health-consultation",
+            "birth-prep",
+            {
+                "pregnancy_plan_workflow",
+                "plans_plan_delete_propose",
+                "plans_task_update_propose",
+                "plans_task_delete_propose",
+                "hospital_bag_form_create",
+                "hospital_bag_card_create",
+                "hospital_bag_cart_update",
+                "hospital_bag_pump_recommend",
+            },
+        ),
+        (
+            "milk-management",
             {
                 "records_milk_status_read",
+                "records_milk_summary_read",
+                "records_milk_analysis_read",
+                "records_growth_read",
+                "records_feeding_record_propose",
+                "records_feeding_record_delete_propose",
+                "records_pumping_record_propose",
+                "records_pumping_record_delete_propose",
+                "records_growth_record_propose",
+                "records_growth_record_update_propose",
+                "records_growth_record_delete_propose",
+                "plans_current_read",
+                "plans_calendar_read",
+                "plans_milk_plan_propose",
+                "plans_task_complete_propose",
+                "plans_task_create_propose",
+                "notifications_milk_reminder_propose",
                 "ibclc_consult_card_create",
             },
         ),
-        ("emotion-support", set()),
         (
             "device-guidance",
             {
@@ -1037,8 +1052,6 @@ def test_default_service_skills_are_file_backed() -> None:
     for service_skill_id in (
         "birth-prep",
         "milk-management",
-        "health-consultation",
-        "emotion-support",
         "device-guidance",
     ):
         service_skill = registry.get(service_skill_id)
@@ -1426,6 +1439,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_milk_task_update_propose",
         "plans_milk_task_delete_propose",
         "notifications_milk_reminder_propose",
+        "ibclc_consult_card_create",
     ]
     assert backend.tool_namespaces["milk_management"]["deferred_tool_names"] == [
         "records_feeding_record_propose",
@@ -1442,6 +1456,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "plans_milk_task_update_propose",
         "plans_milk_task_delete_propose",
         "notifications_milk_reminder_propose",
+        "ibclc_consult_card_create",
     ]
     assert backend.tool_namespaces["device_support"]["tool_names"] == [
         "devices_pump_status_read",

@@ -176,7 +176,10 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     assert result.failures[0].observed == "pregnancy_diary_save"
 
 
-@pytest.mark.parametrize("suite", ["health_consultation", "infant_health_red_flag", "emotion_support", "emotion_harm_baby"])
+@pytest.mark.parametrize(
+    "suite",
+    ["maternal_health_red_flag", "infant_health_red_flag", "self_harm_safety", "baby_harm_safety"],
+)
 def test_agent_eval_seed_assertion_engine_passes_critical_response_trace(suite: str) -> None:
     case = _case(suite)
     trace = AgentEvalTrace(

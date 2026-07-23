@@ -26,7 +26,7 @@
 | --- | ---: |
 | 模型可见 Tool Contract | 42 |
 | 顶层工具 | 4 |
-| Namespace | 7 |
+| Namespace | 6 |
 | Namespace 内工具 | 38 |
 | eager | 18 |
 | deferred | 24 |
@@ -50,12 +50,11 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 | Namespace | Tool 数 | deferred | 用途 |
 | --- | ---: | ---: | --- |
-| `milk_management` | 22 | 14 | 奶量、喂养、吸奶、生长、计划与提醒 |
+| `milk_management` | 23 | 15 | 奶量、喂养、吸奶、生长、计划、提醒与 IBCLC 咨询 |
 | `birth_prep` | 6 | 6 | 孕期计划、待产包 |
 | `hospital_bag_cart` | 1 | 1 | 待产包购物车 |
 | `pump_recommendation` | 1 | 1 | 吸奶器推荐 |
 | `device_support` | 4 | 1 | 设备状态、官方指导、开箱、售后草稿 |
-| `health_consultation` | 1 | 1 | IBCLC 咨询入口 |
 | `pregnancy_diary` | 3 | 0 | 孕期日记查询、保存、删除 |
 
 ## 5. 无业务写入工具

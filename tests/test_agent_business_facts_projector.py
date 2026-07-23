@@ -2,10 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.agents.cozymate.context import (
-    BusinessFactsProjector,
-    BusinessFactsProjectorConfig,
-)
+from app.agents.cozymate.context import BusinessFactsProjector
 from app.agents.cozymate import ServiceSkillId
 from app.agent_runtime.tools.result import ToolResult
 from app.modules.auth import CurrentUser
@@ -93,47 +90,6 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
     ]
     assert facts["profile"] == {"profile": {"preferred_name": "Mai"}}
     assert facts["milk_status"] == {"totals": {"trend_pumped_volume_ml": 420}}
-
-
-def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
-    calls = []
-
-    async def handler(context):
-        calls.append({"tool_name": context.tool_name, "args": context.args})
-        return ToolResult.json({"ok": True})
-
-    asyncio.run(
-        BusinessFactsProjector(
-            handlers={
-                "profile_read": handler,
-                "plans_current_read": handler,
-                "records_milk_summary_read": handler,
-            },
-            config=BusinessFactsProjectorConfig(default_limit=4, recent_limit=2, milk_days=14),
-        ).project(
-            actor=_actor(),
-            run_id=uuid4(),
-            service_skill_id=ServiceSkillId.HEALTH_CONSULTATION,
-        )
-    )
-
-    assert calls == [
-        {"tool_name": "profile_read", "args": {}},
-        {"tool_name": "plans_current_read", "args": {"limit": 4}},
-        {"tool_name": "records_milk_summary_read", "args": {"days": 14, "limit": 2}},
-    ]
-
-
-def test_business_facts_projector_returns_empty_when_no_handlers_are_available() -> None:
-    facts = asyncio.run(
-        BusinessFactsProjector(handlers={}).project(
-            actor=_actor(),
-            run_id=uuid4(),
-            service_skill_id=ServiceSkillId.EMOTION_SUPPORT,
-        )
-    )
-
-    assert facts == {}
 
 
 def test_business_facts_projector_does_not_project_birth_prep_context() -> None:
