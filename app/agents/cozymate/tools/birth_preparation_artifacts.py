@@ -118,117 +118,6 @@ HOSPITAL_BAG_REQUIRED_LABELS = {
     "top_worries": "最焦虑的事",
 }
 
-BIRTH_PLAN_FORM_FIELDS: list[dict[str, Any]] = [
-    {
-        "id": "due_date_or_week",
-        "label": "基本信息｜现在怀孕多久/预产期",
-        "type": "text",
-        "required": True,
-        "placeholder": "例如：2026-06-12 或 37 周",
-    },
-    {"id": "birth_path", "label": "基本信息｜医生目前建议的生产方式", "type": "select", "required": True, "options": ["顺产", "剖宫产", "还没确定"]},
-    {
-        "id": "birth_setting",
-        "label": "基本信息｜准备在哪家医院/哪里生",
-        "type": "text",
-        "required": False,
-        "placeholder": "例如：某某医院、助产中心，或暂未确定",
-    },
-    {"id": "first_birth", "label": "基本信息｜是不是第一胎", "type": "select", "required": False, "options": ["是", "否", "还没确定"]},
-    {
-        "id": "top_priorities",
-        "label": "支持与沟通｜最希望医护知道的事",
-        "type": "multi_select",
-        "required": True,
-        "options": ["宝宝出生后，想尽早抱一抱/贴一贴", "想尽早试着喂母乳", "希望伴侣/支持人尽量陪在身边", "希望医护多鼓励我、告诉我进展", "一些非必要操作，希望先和我沟通"],
-    },
-    {
-        "id": "support_person",
-        "label": "支持与沟通｜谁陪你、希望 TA 帮什么",
-        "type": "text",
-        "required": False,
-        "placeholder": "例如：伴侣陪产并参与重要决定；妈妈在产后帮忙照顾",
-    },
-    {
-        "id": "communication_preferences",
-        "label": "支持与沟通｜希望医护怎么和你沟通",
-        "type": "multi_select",
-        "required": False,
-        "options": ["做操作前，先告诉我为什么需要", "做重要决定前，先问问我的想法", "重要决定也请同步伴侣/支持人", "请用简单清楚的话说明", "计划有变化时，请先说原因和选择", "需要翻译或语言支持"],
-    },
-    {
-        "id": "priority_notes",
-        "label": "支持与沟通｜还有什么想补充告诉医护",
-        "type": "textarea",
-        "required": False,
-        "placeholder": "如果上面的选项没覆盖，可以简单写一句；不确定可留空。",
-    },
-    {
-        "id": "labor_preferences",
-        "label": "生产过程｜生宝宝时希望怎么被照顾",
-        "type": "multi_select",
-        "required": False,
-        "options": ["医生允许时，希望可以走动或换姿势", "宝宝心跳监护怎么做，希望先说明一下", "希望可以用分娩球、热敷或按摩让自己舒服一点", "想提前确认生产时能不能喝水或吃点东西", "希望环境安静一点、灯光柔和一点"],
-    },
-    {
-        "id": "intervention_preferences",
-        "label": "生产过程｜需要先说清楚的操作",
-        "type": "multi_select",
-        "required": False,
-        "options": ["如果需要侧切，请先说明原因再和我沟通", "如果需要产钳或吸引，请先解释为什么需要", "如果需要人工破水，请先和我说明", "灌肠或剃毛前，希望先告诉我是否必须"],
-    },
-    {
-        "id": "pain_relief_preferences",
-        "label": "疼痛和舒适｜生产时怎么帮你舒服一点",
-        "type": "multi_select",
-        "required": False,
-        "options": ["想提前了解有哪些减痛/麻醉选择", "如果安全允许，先试试呼吸、姿势、按摩来缓解", "我倾向使用无痛/硬膜外，想提前沟通安排", "有点担心副作用或恢复，想先了解清楚再决定", "如果剖宫产，希望手术麻醉前充分说明"],
-    },
-    {
-        "id": "pain_relief_notes",
-        "label": "疼痛和舒适｜其他关于疼痛缓解/麻醉的想法",
-        "type": "textarea",
-        "required": False,
-        "placeholder": "如果上面的选项没覆盖，可以简单写一句；不确定可留空。",
-    },
-    {"id": "feeding_intention", "label": "宝宝出生后｜准备怎么喂宝宝", "type": "select", "required": False, "options": ["母乳喂养", "母乳和配方奶都可能", "配方奶", "还没想好"]},
-    {
-        "id": "baby_after_birth_preferences",
-        "label": "宝宝出生后｜宝宝出生后希望怎么安排",
-        "type": "multi_select",
-        "required": False,
-        "options": ["宝宝出生后，想尽早抱一抱/贴一贴", "想尽早试着亲喂/喂母乳", "如果医院允许，希望晚一点剪脐带", "希望宝宝尽量和我在一起", "给宝宝做检查或护理前，希望先告诉我", "打针、疫苗或新生儿检查前，希望先说明", "如果医院允许，希望伴侣/家人剪脐带", "如果医院允许，第一次洗澡晚一点", "如果宝宝需要离开我身边，请说明原因和大概多久", "给宝宝用配方奶或奶瓶前，请先和我沟通"],
-    },
-    {
-        "id": "if_plans_change",
-        "label": "临时变化｜如果现场安排变了，希望怎么沟通",
-        "type": "textarea",
-        "required": False,
-        "placeholder": "例如：请尽量解释原因；请让伴侣参与决定；请用简单语言说明选择。",
-    },
-    {
-        "id": "emergency_authorization",
-        "label": "临时变化｜如果来不及慢慢沟通，希望怎么处理",
-        "type": "select",
-        "required": False,
-        "options": ["来不及细说时，优先按医生团队判断处理", "希望先联系我的伴侣/支持人", "希望尽量先直接告诉我", "还没确定"],
-    },
-    {
-        "id": "hospital_questions_focus",
-        "label": "提前问医院｜想提前问医院的问题",
-        "type": "multi_select",
-        "required": False,
-        "options": ["陪产和探视怎么安排", "能不能拍照或录像", "生产时能不能喝水或吃点东西", "无痛或麻醉什么时候可以沟通", "宝宝出生后的护理流程", "产后有没有母乳喂养支持", "大概住几天、怎么出院", "紧急情况会怎么沟通和决定"],
-    },
-    {
-        "id": "medical_notes",
-        "label": "提前问医院｜过敏、医生提醒或其他安全信息",
-        "type": "textarea",
-        "required": False,
-        "placeholder": "只填写你明确知道的信息，例如：过敏、医生已说明的限制、医院要求。不确定可留空。",
-    },
-]
-
 DEFAULT_HOSPITAL_BAG_CART_GROUPS: list[dict[str, Any]] = [
     {
         "title": "妈妈护理",
@@ -471,12 +360,8 @@ HOSPITAL_BAG_CART_REPLACEMENT_ORIGINAL_BY_ID = {
 def create_birth_preparation_artifact_result(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
     if tool_name == "hospital_bag_form_create":
         return hospital_bag_form_result(args)
-    if tool_name == "birth_plan_form_create":
-        return birth_plan_form_result(args)
     if tool_name == "hospital_bag_card_create":
         return hospital_bag_card_result(args)
-    if tool_name == "labor_communication_card_create":
-        return labor_communication_card_result(args)
     if tool_name == "hospital_bag_cart_update":
         return hospital_bag_cart_update_result(args)
     if tool_name == "hospital_bag_pump_recommend":
@@ -538,22 +423,6 @@ def hospital_bag_form_result(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def birth_plan_form_result(args: dict[str, Any]) -> dict[str, Any]:
-    default_values = _dict(args.get("default_values"))
-    return {
-        "tool_name": "ui_form_create",
-        "status": "form_created",
-        "form": {
-            "id": "birth_plan_card_intake",
-            "title": "信息采集",
-            "description": "",
-            "submit_label": "生成我的沟通卡",
-            "fields": _fields_with_defaults(BIRTH_PLAN_FORM_FIELDS, default_values),
-            "default_values": _allowed_defaults(BIRTH_PLAN_FORM_FIELDS, default_values),
-        },
-    }
-
-
 def hospital_bag_card_result(args: dict[str, Any]) -> dict[str, Any]:
     form_data = _confirmed_form_data(args)
     if not form_data:
@@ -584,26 +453,6 @@ def hospital_bag_card_result(args: dict[str, Any]) -> dict[str, Any]:
         "card": {"card_type": "hospital_bag_card", "schema_version": "1.0", "card_json": card_json},
         "source_form_submission_id": _text(args.get("form_submission_id")),
         "assistant_followup": build_hospital_bag_followup(card_json),
-    }
-
-
-def labor_communication_card_result(args: dict[str, Any]) -> dict[str, Any]:
-    form_data = _confirmed_form_data(args)
-    if not form_data:
-        return _needs_context_result(
-            "labor_communication_card_create",
-            "needs_confirmed_form_data",
-            "生成分娩沟通单前，需要先提交分娩沟通单信息采集表单。",
-            ["confirmed_form_data"],
-            "请先完成并提交分娩沟通单信息采集表单，我再根据确认后的信息整理沟通单。",
-        )
-    card_json = _birth_plan_card_json(form_data)
-    return {
-        "tool_name": "labor_communication_card_create",
-        "status": "card_created",
-        "card": {"card_type": "birth_plan_card", "schema_version": "1.0", "card_json": card_json},
-        "source_form_submission_id": _text(args.get("form_submission_id")),
-        "assistant_followup": "我已经把你的生产偏好整理成沟通单了。可以带着它和医生、助产士或家人一起确认。",
     }
 
 
@@ -644,7 +493,6 @@ def build_birth_journey_plan_result(plan_context: dict[str, Any]) -> dict[str, A
                     "status": "upcoming",
                     "items": [
                         _todo_item("know_labor_signs", "确认需要去医院的信号", "向医院确认破水、出血、胎动减少、规律宫缩时的处理方式。"),
-                        _todo_item("birth_plan_card", "整理分娩沟通单", "提前写清楚生产偏好和需要医护先沟通的事项。"),
                     ],
                 },
             ]
@@ -858,34 +706,6 @@ def hospital_bag_pump_recommend_result(args: dict[str, Any]) -> dict[str, Any]:
 
 def _hospital_bag_card_json(form_data: dict[str, Any], *, generation_mode: str = "standard") -> dict[str, Any]:
     return build_hospital_bag_card_json(form_data, generation_mode=generation_mode)
-
-
-def _birth_plan_card_json(form_data: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "card_type": "birth_plan_card",
-        "schema_version": "1.0",
-        "title": "分娩沟通单",
-        "owner": {
-            "due_date_or_week": _first_text(form_data.get("due_date_or_week")),
-            "birth_path": _first_text(form_data.get("birth_path")),
-            "birth_setting": _first_text(form_data.get("birth_setting")),
-            "first_birth": _first_text(form_data.get("first_birth")),
-        },
-        "top_priorities": _string_list(form_data.get("top_priorities")),
-        "support_person": _first_text(form_data.get("support_person")),
-        "communication_preferences": _string_list(form_data.get("communication_preferences")),
-        "labor_preferences": _string_list(form_data.get("labor_preferences")),
-        "intervention_preferences": _string_list(form_data.get("intervention_preferences")),
-        "pain_relief_preferences": _string_list(form_data.get("pain_relief_preferences")),
-        "feeding_intention": _first_text(form_data.get("feeding_intention")),
-        "baby_after_birth_preferences": _string_list(form_data.get("baby_after_birth_preferences")),
-        "if_plans_change": _first_text(form_data.get("if_plans_change")),
-        "emergency_authorization": _first_text(form_data.get("emergency_authorization")),
-        "questions_for_hospital": _string_list(form_data.get("hospital_questions_focus")),
-        "medical_notes": _string_list(form_data.get("medical_notes")),
-        "personalized_notes": _string_list(form_data.get("priority_notes")),
-        "disclaimer": "这份沟通单只用于沟通。请优先遵循医生和医院建议，尤其是因安全原因需要调整计划时。",
-    }
 
 
 def _needs_context_result(tool_name: str, status: str, summary: str, missing_fields: list[str], question: str) -> dict[str, Any]:

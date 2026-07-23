@@ -714,11 +714,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "birth_plan_form_create": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
-    },
     "hospital_bag_cart_update": {
         "type": "object",
         "additionalProperties": False,
@@ -894,8 +889,12 @@ for _tool_name in ("records_pumping_record_delete_propose", "records_growth_reco
 _TOOL_INPUT_SCHEMAS["plans_milk_task_update_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_update_propose"]
 _TOOL_INPUT_SCHEMAS["plans_milk_task_delete_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_delete_propose"]
 
-for _tool_name in ("labor_communication_card_create", "hospital_bag_form_create", "hospital_bag_card_create"):
-    _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["birth_plan_form_create"]
+for _tool_name in ("hospital_bag_form_create", "hospital_bag_card_create"):
+    _TOOL_INPUT_SCHEMAS[_tool_name] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
+    }
 
 _TOOL_INPUT_SCHEMAS["hospital_bag_card_create"] = {
     "type": "object",

@@ -39,9 +39,7 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
     ),
     ToolNamespace(
         name="birth_prep",
-        description=(
-            "处理当前用户的孕期计划、分娩沟通和待产包表单/卡片。用户要制定或调整孕期待办、梳理分娩偏好、生成沟通单或整理待产包时使用。"
-        ),
+        description="处理当前用户的孕期计划和待产包表单/卡片。用户要制定或调整孕期待办或整理待产包时使用。",
         tool_contracts=(
             "pregnancy_plan_intake_start",
             "pregnancy_plan_intake_analyze",
@@ -51,8 +49,6 @@ SCENARIO_NAMESPACE_DEFINITIONS: tuple[ToolNamespace, ...] = (
             "plans_plan_delete_propose",
             "plans_task_update_propose",
             "plans_task_delete_propose",
-            "birth_plan_form_create",
-            "labor_communication_card_create",
             "hospital_bag_form_create",
             "hospital_bag_card_create",
         ),

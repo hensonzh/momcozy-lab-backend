@@ -15,7 +15,7 @@
 | 归属 | 场景 |
 | --- | --- |
 | 主智能体 | 通用问答、健康咨询、普通情绪支持、孕期日记、用户资料、通用计划任务、产后恢复问答、范围澄清和多意图汇总 |
-| 产前服务智能体 | 孕期计划、孕期计划任务、待产包、待产包购物车、分娩沟通单和事项型孕期焦虑 |
+| 产前服务智能体 | 孕期计划、孕期计划任务、待产包、待产包购物车和事项型孕期焦虑 |
 | 泌乳服务智能体 | 奶量摘要与分析、泌乳计划、日程调整、喂养/吸奶/生长记录、吸奶小结、提醒和 IBCLC 衔接 |
 | 设备服务智能体 | 吸奶器选型、设备状态、开箱使用、清洁消毒、蓝牙与法兰指导、故障排查和售后工单 |
 | 全局能力 | 健康红旗、情绪危机、设备安全、权限、Prompt 防护、上下文账本和 Memory |
@@ -26,11 +26,11 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 ### 主智能体与公共能力（13）
 
-`profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`。
+`profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`
 
-### 产前服务智能体（10）
+### 产前服务智能体（8）
 
-`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`pregnancy_plan_propose`、`pregnancy_plan_todo_propose`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
+`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`pregnancy_plan_propose`、`pregnancy_plan_todo_propose`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
 
 ### 泌乳服务智能体（19）
 
@@ -40,13 +40,29 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 `devices_pump_status_read`、`devices_guidance_read`、`devices_unboxing_advance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
 
-### 移除（1）
+### 已移除（2）
+
+`birth_plan_form_create`、`labor_communication_card_create` 及分娩沟通单表单、卡片、Fact、Skill 和 Eval 链路已删除。
+
+### 重构后移除（1）
 
 `load_service_skill` 由三个 Handoff 和各智能体静态专业定义取代。
 
 ## 调整项
 
 `hospital_bag_pump_recommend` 迁入设备领域并改为设备语义名称，通用计划 Tool 从现有专业 Namespace 移入公共能力面。
+
+## `propose` 命名待统一
+
+当前 `_propose` 只表示向 Action Runtime 提交结构化变更意图，不能表示是否直接写入；实际行为以 `ActionPolicy.requires_confirmation` 为准。
+
+| 当前行为 | 当前 Tool | 合并后命名规则 |
+| --- | --- | --- |
+| 生成方案，等待用户确认后写入 | `plans_milk_plan_propose`、`plans_milk_schedule_propose`、`notifications_milk_reminder_propose` | 保留 `_propose` |
+| 用户已明确授权，调用后直接写入 | 其余 Action-backed `_propose` Tool | 移除 `_propose`，使用实际动作结尾：`_create`、`_update`、`_delete`、`_complete` |
+| 只生成 Agent 内部草稿，不创建业务资源 | `support_ticket_propose` | 改为 `support_ticket_draft_create` |
+
+本分支暂不修改 Tool 名；与其他分支合并后，再全量同步 Registry、Schema、Handler、Policy、Prompt、测试、Eval 和客户端事件 Fixture。
 
 ## Tool 之外的能力
 

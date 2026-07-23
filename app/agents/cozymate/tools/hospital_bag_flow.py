@@ -168,7 +168,6 @@ def _document_items(context: dict[str, Any]) -> list[dict[str, Any]]:
         _item("银行卡/手机支付", "must"),
         _item("紧急联系人信息", "recommended"),
         _item("医生/医院联系电话", "recommended"),
-        _item("分娩沟通单", "recommended" if context["first_birth"] == "是" else "nice_to_have"),
         _item("准生证/户口本", "confirm_first", confirm_question="确认医院是否要求携带准生证、户口本及复印件。"),
     ]
     if context["first_birth"] == "否":
@@ -564,8 +563,6 @@ def _item_explanation(label: str) -> str:
         return "做胎心监护时固定探头用，有些医院要求自带。"
     if "收腹带" in label:
         return "产后腹部支撑用品，剖宫产尤其要先问医生。"
-    if "分娩沟通单" in label:
-        return "记录生产偏好和需要提前沟通的事，入院时方便给医护看。"
     return ""
 
 

@@ -475,7 +475,7 @@ def test_agent_runtime_service_rejects_form_submission_for_mismatched_artifact()
         artifact_type="form",
         schema_version="1.0",
         status="created",
-        payload={"form": {"id": "birth_plan_card_intake"}},
+        payload={"form": {"id": "birth_journey_basic_info_intake"}},
         raw_payload_ref="",
     )
     service = AgentRuntimeService(repository=repository)

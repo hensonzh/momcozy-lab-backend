@@ -22,9 +22,7 @@ from app.agent_runtime.context.facts.service import (
 )
 from app.agent_runtime.providers import OpenAIResponsesRunner, ScriptedSdkBackend, scripted_sdk_response
 from app.agents.cozymate.tools.birth_preparation_artifacts import (
-    BIRTH_PLAN_FORM_FIELDS,
     HOSPITAL_BAG_FORM_FIELDS,
-    birth_plan_form_result,
 )
 from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FIELDS,
@@ -36,7 +34,6 @@ def test_fact_catalog_covers_every_birth_prep_form_field() -> None:
         field["id"] for field in PREGNANCY_PLAN_INTAKE_FIELDS
     }
     assert set(FORM_FIELD_MAPPINGS["hospital_bag_intake"]) == {field["id"] for field in HOSPITAL_BAG_FORM_FIELDS}
-    assert set(FORM_FIELD_MAPPINGS["birth_plan_card_intake"]) == {field["id"] for field in BIRTH_PLAN_FORM_FIELDS}
     candidate_keys = FACT_EXTRACTOR_RESPONSE_FORMAT["schema"]["properties"]["facts"]["items"]["properties"][
         "fact_key"
     ]["enum"]
@@ -48,17 +45,8 @@ def test_fact_catalog_covers_every_birth_prep_form_field() -> None:
             "pregnancy.first_birth",
             "pregnancy.birth_path",
             "pregnancy.feeding_intention",
-            "birth_plan.emergency_authorization",
         }
     )
-
-
-def test_birth_plan_form_exposes_top_level_and_field_defaults() -> None:
-    form = birth_plan_form_result({"default_values": {"due_date_or_week": "30周"}})["form"]
-
-    assert form["default_values"] == {"due_date_or_week": "30周"}
-    due_field = next(field for field in form["fields"] if field["id"] == "due_date_or_week")
-    assert due_field["default_value"] == "30周"
 
 
 def test_fact_catalog_maps_shared_birth_prep_fields_between_forms() -> None:
@@ -474,17 +462,6 @@ def test_fact_service_rejects_restricted_content_smuggled_through_allowed_candid
                 "subject": "current_pregnancy",
                 "certainty": "explicit",
                 "evidence": "子痫前期会影响宝宝",
-            },
-        ),
-        (
-            "希望医护知道我HIV阳性。",
-            {
-                "fact_key": "birth_plan.top_priorities",
-                "operation": "set",
-                "value": ["我HIV阳性"],
-                "subject": "self",
-                "certainty": "explicit",
-                "evidence": "我HIV阳性",
             },
         ),
         (

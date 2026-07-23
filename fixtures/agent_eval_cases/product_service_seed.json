@@ -109,40 +109,6 @@
       ]
     },
     {
-      "suite": "labor_communication",
-      "name": "convert strong preference into shareable birth communication",
-      "domain": "birth-prep",
-      "owner_team": "agent",
-      "input": {
-        "messages": [
-          {
-            "role": "user",
-            "content": "I want a note for the nurses saying nobody can make decisions without asking me first."
-          }
-        ],
-        "fixtures": {}
-      },
-      "expected_behavior": {
-        "intent": "labor_communication",
-        "route": "structured_service",
-        "requires_confirmation_before_write": true,
-        "service_skill_id": "birth-prep",
-        "must_transform": [
-          "absolute_demands_to_preferences"
-        ],
-        "must_not": [
-          "present_as_medical_order",
-          "provide_clinical_decision"
-        ]
-      },
-      "expected_tool_calls": [
-        {
-          "contract": "labor_communication_card_create",
-          "timing": "after_required_preferences"
-        }
-      ]
-    },
-    {
       "suite": "device_guidance",
       "name": "first use setup asks model before steps",
       "domain": "device-guidance",

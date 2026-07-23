@@ -234,7 +234,6 @@ def _artifact_subject(artifact_type: str) -> str:
         "rich_text_card": "说明内容",
         "hospital_bag_card": "待产包清单",
         "birth_journey_plan_card": "孕期计划",
-        "labor_communication_card": "分娩沟通单",
     }.get(str(artifact_type or "").strip(), "结果卡片")
 
 
@@ -248,7 +247,6 @@ def _artifact_completed_label(artifact_type: str) -> str:
         "milk_plan_card": "我已经整理好奶量计划啦",
         "hospital_bag_card": "我已经帮你生成好待产包清单啦",
         "birth_journey_plan_card": "我已经帮你整理好孕期计划啦",
-        "labor_communication_card": "我已经帮你整理好分娩沟通单啦",
     }.get(artifact_type, f"我已经整理好{_artifact_subject(artifact_type)}啦")
 
 
@@ -353,16 +351,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "phase": "reading",
         "started": "我回看一下之前的图片～",
         "completed": "我看清之前那张图片啦",
-    },
-    "birth_plan_form_create": {
-        "phase": "planning",
-        "started": "我先帮你准备确认内容～",
-        "completed": "我已经准备好确认内容啦",
-    },
-    "labor_communication_card_create": {
-        "phase": "planning",
-        "started": "我先帮你整理分娩沟通单～",
-        "completed": "我整理好分娩沟通单啦",
     },
     "pregnancy_plan_intake_start": {
         "phase": "planning",

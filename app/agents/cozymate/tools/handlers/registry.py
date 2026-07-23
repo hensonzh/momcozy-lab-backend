@@ -159,10 +159,6 @@ def build_default_tool_handlers(
         "records_growth_record_propose": GrowthRecordProposeToolHandler(runtime_service=agent_runtime_service),
         "records_growth_record_update_propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "records_growth_record_delete_propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "birth_plan_form_create": BirthPreparationArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
-        "labor_communication_card_create": BirthPreparationArtifactToolHandler(
-            runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"
-        ),
         "hospital_bag_form_create": HospitalBagFormCreateToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_card_create": HospitalBagCardCreateToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(

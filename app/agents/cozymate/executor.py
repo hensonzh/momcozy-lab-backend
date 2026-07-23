@@ -87,13 +87,11 @@ LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 FORM_TOOL_IDS = {
     "pregnancy_plan_intake_analyze": "birth_journey_basic_info_intake",
     "hospital_bag_card_create": "hospital_bag_intake",
-    "labor_communication_card_create": "birth_plan_card_intake",
 }
-FORM_CREATION_TOOL_NAMES = {"pregnancy_plan_intake_start", "birth_plan_form_create", "hospital_bag_form_create"}
+FORM_CREATION_TOOL_NAMES = {"pregnancy_plan_intake_start", "hospital_bag_form_create"}
 FORM_CREATION_IDS = {
     "pregnancy_plan_intake_start": "birth_journey_basic_info_intake",
     "hospital_bag_form_create": "hospital_bag_intake",
-    "birth_plan_form_create": "birth_plan_card_intake",
 }
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 MODEL_IMAGE_CONTENT_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
@@ -1289,8 +1287,6 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "plans_plan_delete_propose",
         "plans_task_update_propose",
         "plans_task_delete_propose",
-        "birth_plan_form_create",
-        "labor_communication_card_create",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",

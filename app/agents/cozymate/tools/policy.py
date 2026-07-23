@@ -72,8 +72,6 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
             "devices_guidance_read": "设备指导资料",
             "devices_unboxing_advance": "设备开箱步骤",
             "conversation_history_image_load": "历史图片",
-            "birth_plan_form_create": "我先帮你准备确认内容～",
-            "labor_communication_card_create": "我先帮你整理分娩沟通单～",
             "hospital_bag_form_create": "我先帮你准备确认内容～",
             "hospital_bag_card_create": "我先帮你整理待产包清单～",
             "hospital_bag_cart_update": "我先帮你调整待产包购物车～",

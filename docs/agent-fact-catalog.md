@@ -1,6 +1,6 @@
 # Agent Fact Catalog
 
-This catalog is the single source of truth for reusable information collected by the pregnancy-plan, hospital-bag, and birth-plan forms. Runtime code lives in `app/agent_runtime/context/facts/catalog.py`.
+This catalog is the single source of truth for reusable information collected by the pregnancy-plan and hospital-bag forms. Runtime code lives in `app/agent_runtime/context/facts/catalog.py`.
 
 ## Lifecycle
 
@@ -26,7 +26,6 @@ This catalog is the single source of truth for reusable information collected by
 |---|---|---|
 | Pregnancy plan | `birth_journey_basic_info_intake` | gestation, IVF, fetus count, age, birth history/path, location, hospital, medical and doctor notes |
 | Hospital bag | `hospital_bag_intake` | gestation, birth history/path, fetus count, feeding, return to work, support, worries |
-| Birth plan | `birth_plan_card_intake` | gestation, birth setting/path, support, communication, labor, interventions, pain relief, newborn and emergency preferences |
 
 ## Canonical Fields
 
@@ -40,9 +39,6 @@ This catalog is the single source of truth for reusable information collected by
 | Restricted pregnancy care | `pregnancy.medical_notes`, `pregnancy.doctor_notes` | Never |
 | Pregnancy feeding | `pregnancy.feeding_intention` | Allowed as a closed enum |
 | Open pregnancy preferences | `pregnancy.return_to_work_timing`, `pregnancy.support_person`, `pregnancy.top_worries` | Verified forms only |
-| Birth-plan communication | `birth_plan.top_priorities`, `birth_plan.communication_preferences`, `birth_plan.priority_notes` | Verified forms only |
-| Birth-plan labor | `birth_plan.labor_preferences`, `birth_plan.intervention_preferences`, `birth_plan.pain_relief_preferences`, `birth_plan.pain_relief_notes` | Verified forms only |
-| Birth-plan newborn/change | `birth_plan.emergency_authorization` | Allowed as a closed enum; other newborn/change free text is verified forms only |
 
 ## Adding A Field
 

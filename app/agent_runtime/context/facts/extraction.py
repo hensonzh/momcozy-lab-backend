@@ -28,7 +28,7 @@ FACT_EXTRACTOR_INSTRUCTIONS = """
 只从 source_user_message 中提取当前用户本人明确陈述、属于 field_catalog 且允许作为表单预填候选的信息。recent_dialogue 只用于理解指代和纠正，不能把 assistant 的话当作事实来源。
 
 规则：
-- profile.* 和 birth_plan.* 的 subject 必须是 self；pregnancy.* 的 subject 必须是 current_pregnancy。
+- profile.* 的 subject 必须是 self；pregnancy.* 的 subject 必须是 current_pregnancy。
 - 朋友、家人、同事、其他用户、本次之外的既往妊娠一律标为 other 或 previous_pregnancy。
 - 用户在同一句中纠正旧值时，只输出纠正后的值。
 - “可能、也许、医生怀疑、还没确认”等输出 uncertain；推测信息输出 inferred。

@@ -787,8 +787,6 @@ def test_agent_runtime_executor_loads_birth_prep_with_structured_business_fact_r
                 "plans_plan_delete_propose",
                 "plans_task_update_propose",
                 "plans_task_delete_propose",
-                "birth_plan_form_create",
-                "labor_communication_card_create",
                 "hospital_bag_form_create",
                 "hospital_bag_card_create",
                 "hospital_bag_cart_update",
@@ -1908,7 +1906,7 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
 def test_agent_runtime_executor_loads_birth_prep_skill_only_when_model_calls_tool() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
-    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备待产包和分娩沟通单", sequence=1)
+    current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="帮我准备孕期计划和待产包", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
     backend = ScriptedSdkBackend(
         [

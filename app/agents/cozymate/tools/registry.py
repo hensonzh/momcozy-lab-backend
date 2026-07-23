@@ -556,28 +556,6 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="birth_plan_form_create",
-            domain="birth_prep",
-            description="创建分娩沟通单信息采集表单，字段和预填信息由 runtime 生成。用户希望开始梳理分娩偏好或准备分娩沟通单时调用。",
-            effect_scope="agent_internal",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="labor_communication_card_create",
-            domain="birth_prep",
-            description="根据应用侧可信的 birth_plan_card_intake 表单提交生成可渲染的分娩沟通单。用户完成信息采集并要求生成沟通单时调用。",
-            effect_scope="agent_internal",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
             name="hospital_bag_form_create",
             domain="hospital_bag",
             description="创建待产包信息采集表单，并由 runtime 合并可信资料和当前孕期计划。用户确认开始整理待产包时调用。",

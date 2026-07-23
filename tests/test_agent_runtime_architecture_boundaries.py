@@ -481,7 +481,8 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "version_conflict" in pregnancy
     assert "hospital_bag_form_create" in pregnancy
     assert "hospital_bag_card_create" in pregnancy
-    assert "labor_communication_card_create" in pregnancy
+    assert "birth_plan_form_create" not in pregnancy
+    assert "labor_communication_card_create" not in pregnancy
 
     assert "追奶、稳奶还是减奶" in lactation
     assert "records_milk_status_read" in lactation
@@ -508,6 +509,8 @@ def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_po
         {
             "business_context_read",
             "diary.recent.read",
+            "birth_plan_form_create",
+            "labor_communication_card_create",
             "pregnancy_plan_context_read",
             "memory.create.propose",
             "plans.milk_plan_preview.create",
@@ -699,8 +702,6 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     record_delete_schema = registry.get("records_feeding_record_delete_propose").input_schema
     growth_schema = registry.get("records_growth_record_propose").input_schema
     growth_update_schema = registry.get("records_growth_record_update_propose").input_schema
-    birth_form_schema = registry.get("birth_plan_form_create").input_schema
-    labor_card_schema = registry.get("labor_communication_card_create").input_schema
     hospital_bag_form_schema = registry.get("hospital_bag_form_create").input_schema
     hospital_bag_card_schema = registry.get("hospital_bag_card_create").input_schema
     hospital_bag_cart_schema = registry.get("hospital_bag_cart_update").input_schema
@@ -852,9 +853,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert growth_schema["required"] == ["measured_at"]
     assert growth_schema["properties"]["weight_kg"]["type"] == "number"
     assert growth_update_schema["required"] == ["record_id"]
-    for schema in (birth_form_schema, labor_card_schema, hospital_bag_form_schema):
-        assert schema["additionalProperties"] is False
-        assert schema["properties"] == {}
+    assert hospital_bag_form_schema["additionalProperties"] is False
+    assert hospital_bag_form_schema["properties"] == {}
     assert hospital_bag_card_schema["additionalProperties"] is False
     assert hospital_bag_card_schema["properties"]["generation_mode"]["enum"] == ["standard", "quick", "immediate"]
     assert hospital_bag_cart_schema["additionalProperties"] is False

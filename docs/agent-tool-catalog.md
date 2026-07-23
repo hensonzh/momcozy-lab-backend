@@ -24,14 +24,14 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 Tool Contract | 48 |
+| 模型可见 Tool Contract | 46 |
 | 顶层工具 | 4 |
 | Namespace | 7 |
-| Namespace 内工具 | 44 |
+| Namespace 内工具 | 42 |
 | eager | 18 |
-| deferred | 30 |
+| deferred | 28 |
 | `none` | 12 |
-| `agent_internal` | 13 |
+| `agent_internal` | 11 |
 | `user_resource` | 23 |
 | Action-backed Tool 对应的唯一 Action Type | 21 |
 
@@ -51,7 +51,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 | Namespace | Tool 数 | deferred | 用途 |
 | --- | ---: | ---: | --- |
 | `milk_management` | 22 | 14 | 奶量、喂养、吸奶、生长、计划与提醒 |
-| `birth_prep` | 12 | 12 | 孕期计划、分娩沟通、待产包 |
+| `birth_prep` | 10 | 10 | 孕期计划、待产包 |
 | `hospital_bag_cart` | 1 | 1 | 待产包购物车 |
 | `pump_recommendation` | 1 | 1 | 吸奶器推荐 |
 | `device_support` | 4 | 1 | 设备状态、官方指导、开箱、售后草稿 |
@@ -66,7 +66,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 ### `agent_internal`
 
-`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_unboxing_advance`、`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
+`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_unboxing_advance`、`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
 
 `agent_internal` 仍可以写 Agent Runtime 自身的 Workflow 或 Artifact，但不允许从 Tool Handler 直接修改 Profile、Diary、Plan、Record、Notification 等用户业务资源。
 

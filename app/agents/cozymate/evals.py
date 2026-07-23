@@ -15,7 +15,6 @@ PRODUCT_AGENT_EVAL_SEED_SCHEMA_VERSION = "agent_eval_seed.v2"
 REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "birth_prep",
     "hospital_bag_cart_update",
-    "labor_communication",
     "device_guidance",
     "device_known_guidance",
     "device_support_handoff",

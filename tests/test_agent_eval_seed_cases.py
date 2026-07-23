@@ -234,19 +234,16 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     assert "stop_after_diary_success" in mixed["expected_behavior"]["must_not"]
 
 
-def test_product_agent_eval_seed_uses_current_pregnancy_artifact_contracts() -> None:
+def test_product_agent_eval_seed_uses_current_birth_prep_artifact_contracts() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
     birth_prep_contracts = {tool_call["contract"] for tool_call in by_suite["birth_prep"]["expected_tool_calls"]}
-    communication_contracts = {tool_call["contract"] for tool_call in by_suite["labor_communication"]["expected_tool_calls"]}
 
     assert "load_service_skill" in birth_prep_contracts
     assert "hospital_bag_form_create" in birth_prep_contracts
     assert "hospital_bag_card_create" in birth_prep_contracts
-    assert "labor_communication_card_create" in communication_contracts
     assert "birth_prep_intake" not in birth_prep_contracts
-    assert "labor_communication_draft" not in communication_contracts
 
 
 def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> None:

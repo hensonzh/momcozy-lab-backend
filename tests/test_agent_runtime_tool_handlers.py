@@ -3387,8 +3387,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     )
 
     assert set(handlers) == {
-        "birth_plan_form_create",
-        "labor_communication_card_create",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
