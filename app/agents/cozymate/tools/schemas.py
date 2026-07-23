@@ -10,22 +10,6 @@ JsonSchema = dict[str, Any]
 
 
 _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
-    "load_service_skill": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["service_skill_id"],
-        "properties": {
-            "service_skill_id": {
-                "type": "string",
-                "enum": [
-                    "birth-prep",
-                    "milk-management",
-                    "device-guidance",
-                ],
-                "description": "要加载的具体服务技能 id。",
-            }
-        },
-    },
     "profile_read": {
         "type": "object",
         "additionalProperties": False,
@@ -315,79 +299,52 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "devices_pump_status_read": {
+    "devices_guidance": {
         "type": "object",
         "additionalProperties": False,
+        "required": ["model", "operation"],
         "properties": {
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "最多纳入的吸奶器设备和遥测事件数。",
-            }
-        },
-    },
-    "devices_guidance_read": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["model"],
-        "properties": {
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 10,
-                "description": "最多纳入的已打包设备指导素材数。",
-            },
-            "content_type": {
-                "type": "string",
-                "maxLength": 80,
-                "description": "可选内容类型过滤条件，例如 application/pdf 或 video/mp4。",
-            },
             "model": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 120,
                 "description": "已经由用户确认的设备型号；当前支持 Air1 或 BP334。",
             },
+            "operation": {
+                "type": "string",
+                "enum": ["read", "start_or_resume", "complete_current", "cancel"],
+                "description": "读取目标内容、开始或恢复开箱指导、完成当前步骤并推进一步，或取消开箱指导。",
+            },
             "topic": {
                 "type": "string",
+                "enum": [
+                    "unboxing",
+                    "setup",
+                    "assembly",
+                    "cleaning",
+                    "disinfection",
+                    "charging",
+                    "bluetooth",
+                    "flange",
+                ],
                 "maxLength": 80,
-                "description": "可选指导主题，例如 setup、cleaning、flange、suction 或 bluetooth。",
+                "description": "可选说明书主题，例如 setup、cleaning、flange 或 bluetooth。",
             },
             "step": {
                 "type": "string",
                 "maxLength": 80,
                 "description": "需要读取的明确指导步骤，例如 guide.parts、guide.charging 或 guide.assembly。",
             },
-            "query": {
+            "resource_kind": {
                 "type": "string",
-                "maxLength": 200,
-                "description": "可选关键词过滤条件。",
+                "enum": ["auto", "image", "pdf", "video"],
+                "default": "auto",
+                "description": "可选素材类型；默认由服务自动选择。",
             },
             "measured_nipple_mm": {
                 "type": "number",
                 "minimum": 0,
                 "description": "用户提供的乳头根部测量值，供回复时按官方素材核对。",
-            },
-        },
-    },
-    "devices_unboxing_advance": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["model", "action"],
-        "properties": {
-            "model": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 120,
-                "description": "已经由用户确认的设备型号；当前支持 Air1 或 BP334。",
-            },
-            "action": {
-                "type": "string",
-                "enum": ["start", "resume", "complete_current", "cancel"],
-                "description": "开始新流程、恢复当前流程、确认完成当前主步骤，或取消流程。",
             },
         },
     },

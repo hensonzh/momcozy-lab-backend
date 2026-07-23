@@ -7,7 +7,6 @@ from .openai_responses import (
     SdkNodeResult,
     SdkImageUrlResolver,
     SdkToolDefinition,
-    SdkToolNamespace,
     responses_tools_payload,
 )
 from .testing import ScriptedSdkBackend, ScriptedSdkResponse, ScriptedToolInvocation, scripted_sdk_response, scripted_tool_invocation
@@ -20,7 +19,6 @@ __all__ = [
     "SdkNodeResult",
     "SdkImageUrlResolver",
     "SdkToolDefinition",
-    "SdkToolNamespace",
     "ScriptedSdkBackend",
     "ScriptedSdkResponse",
     "ScriptedToolInvocation",

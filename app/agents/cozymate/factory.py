@@ -19,8 +19,6 @@ from app.core.settings import Settings
 from app.modules.assets.service import ProductAssetService
 from app.modules.audit import AuditService, IdempotencyService
 from app.modules.audit.repository import AuditRepository
-from app.modules.devices.repository import DevicesRepository
-from app.modules.devices.service import DevicesService
 from app.modules.diary.repository import DiaryRepository
 from app.modules.diary.service import DiaryService
 from app.modules.files.repository import FileRepository
@@ -102,11 +100,6 @@ def build_cozymate_runtime(
         repository=DiaryRepository(session),
         audit_service=AuditService(repository=audit_repository),
     )
-    devices_service = DevicesService(
-        repository=DevicesRepository(session),
-        audit_service=AuditService(repository=audit_repository),
-        idempotency_service=IdempotencyService(repository=audit_repository),
-    )
     notifications_service = NotificationsService(
         repository=NotificationsRepository(session),
         audit_service=AuditService(repository=audit_repository),
@@ -161,7 +154,6 @@ def build_cozymate_runtime(
         records_service=records_service,
         plans_service=plans_service,
         diary_service=diary_service,
-        devices_service=devices_service,
         asset_service=ProductAssetService(),
         agent_runtime_service=runtime_service,
         object_storage=object_storage,

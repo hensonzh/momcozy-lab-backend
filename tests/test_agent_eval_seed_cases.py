@@ -112,14 +112,13 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
-    assert "load_service_skill" in plan_contracts
     assert "pregnancy_plan_workflow" in plan_contracts
     assert by_suite["pregnancy_plan_creation"]["expected_tool_calls"][-1]["args_subset"] == {
         "command": "generate_plan"
     }
     assert by_suite["pregnancy_plan_creation"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "confirmation_card" in by_suite["pregnancy_plan_creation"]["expected_behavior"]["must_not"]
-    assert intake_contracts == {"load_service_skill", "pregnancy_plan_workflow"}
+    assert intake_contracts == {"pregnancy_plan_workflow"}
     assert by_suite["pregnancy_plan_intake_start"]["expected_tool_calls"][-1]["args_subset"] == {
         "command": "start_or_resume"
     }
@@ -168,7 +167,6 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
             "args_subset": {"command": "generate_plan"},
         }
     ]
-    assert "load_service_skill" in task_contracts
     assert "plans_task_complete_propose" in task_contracts
     assert diary_contracts == {"pregnancy_diary_save"}
     assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
@@ -286,7 +284,7 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     assert implicit["expected_behavior"]["requires_confirmation_before_write"] is False
 
     for suite in ("pregnancy_diary_entry", "pregnancy_diary_implicit_entry", "pregnancy_diary_existing_entry"):
-        assert {call["contract"] for call in by_suite[suite]["forbidden_tool_calls"]} == {"load_service_skill"}
+        assert by_suite[suite]["forbidden_tool_calls"] == []
 
     existing = by_suite["pregnancy_diary_existing_entry"]
     assert [call["contract"] for call in existing["expected_tool_calls"]] == [
@@ -323,7 +321,6 @@ def test_product_agent_eval_seed_uses_current_birth_prep_artifact_contracts() ->
 
     birth_prep_contracts = {tool_call["contract"] for tool_call in by_suite["birth_prep"]["expected_tool_calls"]}
 
-    assert "load_service_skill" in birth_prep_contracts
     assert "hospital_bag_form_create" in birth_prep_contracts
     assert "hospital_bag_card_create" in birth_prep_contracts
     assert "birth_prep_intake" not in birth_prep_contracts
@@ -347,11 +344,7 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
 
     continuity = by_suite["ledger_multi_tool_continuity"]
     assert continuity["expected_tool_calls"] == []
-    assert continuity["forbidden_tool_calls"] == [{"contract": "load_service_skill"}]
-    assert continuity["input"]["fixtures"]["context_ledger"]["skill_results"] == [
-        "milk-management",
-        "device-guidance",
-    ]
+    assert continuity["forbidden_tool_calls"] == []
 
     refresh = by_suite["ledger_latest_fact_refresh"]
     assert [call["contract"] for call in refresh["expected_tool_calls"]] == ["records_milk_status_read"]
@@ -361,37 +354,45 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
     assert device["input"]["messages"][-1]["content"] == "继续"
     assert device["expected_tool_calls"] == [
         {
-            "contract": "devices_unboxing_advance",
+            "contract": "devices_guidance",
             "timing": "after_user_completes_current_step",
-            "args_subset": {"action": "complete_current"},
+            "args_subset": {"operation": "complete_current"},
         }
     ]
 
     incomplete_device = by_suite["device_unboxing_incomplete_step"]
     assert incomplete_device["expected_tool_calls"] == []
-    assert incomplete_device["forbidden_tool_calls"] == [{"contract": "devices_unboxing_advance"}]
+    assert incomplete_device["forbidden_tool_calls"] == [
+        {
+            "contract": "devices_guidance",
+            "args_subset": {"operation": "complete_current"},
+        }
+    ]
 
     incomplete_delivery = by_suite["device_unboxing_incomplete_delivery"]
     assert incomplete_delivery["input"]["messages"][-1]["content"] == "继续"
     assert incomplete_delivery["expected_tool_calls"] == []
-    assert incomplete_delivery["forbidden_tool_calls"] == [{"contract": "devices_unboxing_advance"}]
+    assert incomplete_delivery["forbidden_tool_calls"] == [
+        {
+            "contract": "devices_guidance",
+            "args_subset": {"operation": "complete_current"},
+        }
+    ]
 
     hospital_bag = by_suite["hospital_bag_form_to_card_workflow"]
     assert [call["contract"] for call in hospital_bag["expected_tool_calls"]] == [
-        "load_service_skill",
         "hospital_bag_form_create",
         "hospital_bag_card_create",
     ]
 
     pregnancy = by_suite["pregnancy_plan_end_to_end_workflow"]
     assert [call["contract"] for call in pregnancy["expected_tool_calls"]] == [
-        "load_service_skill",
         "pregnancy_plan_workflow",
         "pregnancy_plan_workflow",
         "pregnancy_plan_workflow",
         "pregnancy_plan_workflow",
     ]
-    assert [call.get("args_subset") for call in pregnancy["expected_tool_calls"][1:]] == [
+    assert [call.get("args_subset") for call in pregnancy["expected_tool_calls"]] == [
         {"command": "start_or_resume"},
         {"command": "submit_form"},
         {"command": "answer_current"},
@@ -409,7 +410,7 @@ def test_product_agent_eval_seed_splits_device_hazard_from_ibclc_artifact_contra
 
     assert support_contracts == set()
     assert {call["contract"] for call in by_suite["device_support_handoff"]["forbidden_tool_calls"]} == {
-        "devices_guidance_read",
+        "devices_guidance",
         "support_ticket_propose",
     }
     assert ibclc_contracts == {"ibclc_consult_card_create"}
@@ -417,7 +418,7 @@ def test_product_agent_eval_seed_splits_device_hazard_from_ibclc_artifact_contra
     assert by_suite["ibclc_consult"]["forbidden_tool_calls"] == [{"contract": "support_ticket_propose"}]
 
 
-def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract() -> None:
+def test_product_agent_eval_seed_uses_only_supported_device_guidance_contracts() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
@@ -425,10 +426,8 @@ def test_product_agent_eval_seed_does_not_reference_missing_device_tool_contract
     known_device_contracts = {tool_call["contract"] for tool_call in by_suite["device_known_guidance"]["expected_tool_calls"]}
 
     assert "device_reference_lookup" not in clarify_contracts | known_device_contracts
-    assert "devices_pump_status_read" not in clarify_contracts
     assert by_suite["device_guidance"]["expected_behavior"]["must_clarify"] == ["device_model", "first_use_context"]
-    assert "devices_pump_status_read" in known_device_contracts
-    assert "devices_guidance_read" in known_device_contracts
+    assert known_device_contracts == {"devices_guidance"}
     assert by_suite["device_known_guidance"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 

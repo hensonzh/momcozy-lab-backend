@@ -14,6 +14,12 @@ def test_default_product_asset_manifest_is_owned_by_production_backend() -> None
     assert "/skills/" not in manifest_path
 
 
+def test_default_product_asset_manifest_excludes_faq_images_until_rag_indexes_them() -> None:
+    assets = ProductAssetService().list_assets(limit=200)
+
+    assert all("/faq-images/" not in str(asset.object_key or "") for asset in assets)
+
+
 def test_product_asset_service_builds_allowlisted_manifest(tmp_path: Path) -> None:
     asset_root = tmp_path / "assets"
     (asset_root / "air1" / "images").mkdir(parents=True)

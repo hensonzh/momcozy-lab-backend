@@ -73,12 +73,12 @@ def test_workflow_reply_guard_accepts_the_current_cursor() -> None:
         ("pregnancy_plan_workflow", {"command": "start_or_resume"}, None),
         ("pregnancy_plan_workflow", {"command": "resume"}, None),
         ("records_milk_analysis_intake", {"action": "answer"}, "milk_analysis"),
-        ("devices_unboxing_advance", {"action": "complete_current"}, "device_unboxing"),
-        ("devices_unboxing_advance", {"action": "cancel"}, "device_unboxing"),
+        ("devices_guidance", {"operation": "complete_current"}, "device_unboxing"),
+        ("devices_guidance", {"operation": "cancel"}, "device_unboxing"),
         ("records_milk_analysis_intake", {"action": "start"}, None),
         ("records_milk_analysis_intake", {"action": "resume"}, None),
-        ("devices_unboxing_advance", {"action": "start"}, None),
-        ("devices_unboxing_advance", {"action": "resume"}, None),
+        ("devices_guidance", {"operation": "read"}, None),
+        ("devices_guidance", {"operation": "start_or_resume"}, None),
     ],
 )
 def test_only_reply_driven_workflow_actions_require_a_cursor(

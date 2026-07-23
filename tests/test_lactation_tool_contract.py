@@ -1,11 +1,10 @@
 from app.agents.cozymate.tools import default_tool_registry
-from app.agents.cozymate.tools.namespaces import default_tool_namespace_registry
 
 
-def test_lactation_context_read_replaces_raw_growth_history_in_milk_namespace() -> None:
+def test_lactation_context_read_replaces_raw_growth_history_as_direct_tool() -> None:
     registry = default_tool_registry()
     contract = registry.get("lactation_context_read")
-    namespace = default_tool_namespace_registry(registry).get("milk_management")
+    names = set(registry.names_for_sdk())
 
     assert contract.domain == "profiles"
     assert contract.effect_scope == "none"
@@ -15,8 +14,8 @@ def test_lactation_context_read_replaces_raw_growth_history_in_milk_namespace() 
         "properties": {},
     }
     assert "出生时性别" in contract.description
-    assert "lactation_context_read" in namespace.tool_contracts
-    assert "records_growth_read" not in namespace.tool_contracts
+    assert "lactation_context_read" in names
+    assert "records_growth_read" not in names
 
 
 def test_lactation_context_read_declares_described_nested_output_schema() -> None:

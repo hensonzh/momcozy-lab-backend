@@ -288,10 +288,6 @@ class FakeModelRunner:
         self.requests.append(request)
         return SdkNodeResult(final_text=json.dumps(self.payload, ensure_ascii=False))
 
-    def supports_tool_namespaces(self) -> bool:
-        return False
-
-
 class FakeConsolidationRepository:
     def __init__(self, *, owner_user_id: UUID, memory_enabled: bool = True) -> None:
         self.owner_user_id = owner_user_id

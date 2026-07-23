@@ -5,7 +5,6 @@ from app.infrastructure.object_storage.base import ObjectStorage
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agent_runtime.tools.executor import ToolHandler
 from app.modules.assets.service import ProductAssetService
-from app.modules.devices.service import DevicesService
 from app.modules.diary.service import DiaryService
 from app.modules.plans.service import PlansService
 from app.modules.profiles.lactation_context import LactationContextService
@@ -56,9 +55,7 @@ from .plans_diary import (
 )
 from .pregnancy_plan import PregnancyPlanWorkflowToolHandler
 from .devices import (
-    DevicesPumpStatusReadToolHandler,
-    DeviceGuidanceReadToolHandler,
-    DeviceUnboxingAdvanceToolHandler,
+    DeviceGuidanceToolHandler,
     ConversationHistoryImageLoadToolHandler,
 )
 
@@ -70,7 +67,6 @@ def build_default_tool_handlers(
     records_service: RecordsService,
     plans_service: PlansService,
     diary_service: DiaryService,
-    devices_service: DevicesService,
     asset_service: ProductAssetService,
     agent_runtime_service: AgentRuntimeService,
     object_storage: ObjectStorage | None = None,
@@ -106,12 +102,7 @@ def build_default_tool_handlers(
         "pregnancy_diary_query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
         "pregnancy_diary_save": PregnancyDiarySaveToolHandler(runtime_service=agent_runtime_service),
         "pregnancy_diary_delete": PregnancyDiaryDeleteToolHandler(runtime_service=agent_runtime_service),
-        "devices_pump_status_read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
-        "devices_guidance_read": DeviceGuidanceReadToolHandler(
-            asset_service=asset_service,
-            reference_service=guidance_reference_service,
-        ),
-        "devices_unboxing_advance": DeviceUnboxingAdvanceToolHandler(
+        "devices_guidance": DeviceGuidanceToolHandler(
             runtime_service=agent_runtime_service,
             asset_service=asset_service,
             reference_service=guidance_reference_service,

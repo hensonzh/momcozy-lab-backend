@@ -38,16 +38,6 @@ class SdkToolDefinition:
     description: str
     params_json_schema: dict[str, Any]
     invoke: SdkToolInvoker
-    namespace_name: str = ""
-    defer_loading: bool = False
-
-
-@dataclass(frozen=True)
-class SdkToolNamespace:
-    name: str
-    description: str
-    tool_names: tuple[str, ...]
-    deferred_tool_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,8 +48,6 @@ class SdkNodeRequest:
     instructions: str
     model_input: list[dict[str, Any]]
     tool_names: tuple[str, ...] = ()
-    tool_namespaces: tuple[SdkToolNamespace, ...] = ()
-    tool_search_enabled: bool = False
     tools: tuple[SdkToolDefinition, ...] = ()
     prompt_version: str = ""
     trace_id: str = ""
@@ -87,8 +75,6 @@ class SdkRunnerBackend(Protocol):
 
 class AgentModelRunner(Protocol):
     async def run_reasoning(self, request: SdkNodeRequest) -> SdkNodeResult: ...
-
-    def supports_tool_namespaces(self) -> bool: ...
 
     def supports_web_search(self) -> bool: ...
 
@@ -127,7 +113,7 @@ class OpenAIResponsesApiBackend:
         if _is_real_openai_module(openai_module) and not _has_openai_credentials(api_key=self.api_key):
             raise ApiError(
                 code="dependency_not_configured",
-                message="OpenAI SDK credentials are not configured for Responses tool search.",
+                message="OpenAI SDK credentials are not configured for Responses API.",
                 status=503,
             )
 
@@ -148,7 +134,6 @@ class OpenAIResponsesApiBackend:
             actor_user_id=request.actor_user_id,
             image_url_resolver=self.image_url_resolver,
         )
-        tools_by_address = {(tool.namespace_name, tool.contract_name): tool for tool in request.tools}
         tools_by_name = {tool.contract_name: tool for tool in request.tools}
         observed_tool_calls: list[dict[str, Any]] = []
         latest_response: Any | None = None
@@ -214,9 +199,7 @@ class OpenAIResponsesApiBackend:
 
             context.extend(input_output_items)
             for function_call in function_calls:
-                tool = tools_by_address.get((function_call["namespace"], function_call["name"]))
-                if tool is None and not function_call["namespace"]:
-                    tool = tools_by_name.get(function_call["name"])
+                tool = tools_by_name.get(function_call["name"])
                 if tool is None:
                     raise ApiError(
                         code="sdk_unknown_tool_call",
@@ -336,9 +319,6 @@ class OpenAIResponsesRunner:
                 details=_provider_error_details(exc),
             ) from exc
 
-    def supports_tool_namespaces(self) -> bool:
-        return True
-
     def supports_web_search(self) -> bool:
         return True
 
@@ -353,40 +333,7 @@ class OpenAIResponsesRunner:
 
 
 def responses_tools_payload(request: SdkNodeRequest) -> list[dict[str, Any]]:
-    tools_by_contract = {tool.contract_name: tool for tool in request.tools}
-    if not request.tool_namespaces:
-        flat_payload = [_responses_function_tool_payload(tool) for tool in request.tools]
-        if request.tool_search_enabled:
-            flat_payload.append({"type": "tool_search"})
-        if request.web_search_enabled:
-            flat_payload.append(_responses_web_search_tool_payload(request.web_search_allowed_domains))
-        return flat_payload
-
-    payload: list[dict[str, Any]] = []
-    namespaced_contracts = {contract_name for namespace in request.tool_namespaces for contract_name in namespace.tool_names}
-    for tool in request.tools:
-        if tool.contract_name not in namespaced_contracts:
-            payload.append(_responses_function_tool_payload(tool))
-    for namespace in request.tool_namespaces:
-        missing_tool_names = [contract_name for contract_name in namespace.tool_names if contract_name not in tools_by_contract]
-        if missing_tool_names:
-            raise ApiError(
-                code="sdk_tool_namespace_mismatch",
-                message="SDK tool namespace references unavailable tool contracts.",
-                status=500,
-                details={"namespace": namespace.name, "missing_tool_names": missing_tool_names},
-            )
-        namespace_tools = [_responses_function_tool_payload(tools_by_contract[contract_name]) for contract_name in namespace.tool_names]
-        payload.append(
-            {
-                "type": "namespace",
-                "name": namespace.name,
-                "description": namespace.description,
-                "tools": namespace_tools,
-            }
-        )
-    if request.tool_search_enabled:
-        payload.append({"type": "tool_search"})
+    payload = [_responses_function_tool_payload(tool) for tool in request.tools]
     if request.web_search_enabled:
         payload.append(_responses_web_search_tool_payload(request.web_search_allowed_domains))
     return payload
@@ -400,15 +347,12 @@ def _responses_web_search_tool_payload(allowed_domains: tuple[str, ...]) -> dict
 
 
 def _responses_function_tool_payload(tool: SdkToolDefinition) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+    return {
         "type": "function",
         "name": tool.contract_name,
         "description": tool.description,
         "parameters": tool.params_json_schema,
     }
-    if tool.defer_loading:
-        payload["defer_loading"] = True
-    return payload
 
 
 async def _responses_input_items(
@@ -672,8 +616,6 @@ def _response_output_item_for_input(item: Any) -> dict[str, Any]:
             value = _item_value(item, key)
             if isinstance(value, str) and value:
                 payload[key] = value
-        if function_call["namespace"]:
-            payload["namespace"] = function_call["namespace"]
         return payload
 
     if isinstance(item, dict):
@@ -726,8 +668,7 @@ def _response_function_call(item: Any) -> dict[str, str] | None:
             status=502,
             details={"item_type": _item_value(item, "type")},
         )
-    namespace = str(_item_value(item, "namespace", "") or "")
-    return {"namespace": namespace, "name": name, "call_id": call_id, "arguments": arguments}
+    return {"name": name, "call_id": call_id, "arguments": arguments}
 
 
 def _response_output_text(response: Any, *, output_items: list[Any]) -> str:

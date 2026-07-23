@@ -9,9 +9,7 @@ from app.agent_runtime.runs.models import AgentAction, AgentArtifact, AgentWorkf
 from app.agent_runtime.tools.result import ToolResult
 from app.agents.cozymate.tools import (
     ConversationHistoryImageLoadToolHandler,
-    DeviceGuidanceReadToolHandler,
-    DeviceUnboxingAdvanceToolHandler,
-    DevicesPumpStatusReadToolHandler,
+    DeviceGuidanceToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
     GrowthRecordDeleteProposeToolHandler,
@@ -55,7 +53,6 @@ from app.agents.cozymate.tools import (
 from app.modules.auth import CurrentUser
 from app.modules.assets.models import ProductAsset
 from app.modules.assets.service import ProductAssetService
-from app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from app.modules.diary.models import PregnancyDiaryEntry
 from app.modules.diary.repository import DiaryEntryMutation
 from app.agents.cozymate.actions.notifications import MILK_REMINDER_CREATE_ACTION
@@ -323,7 +320,6 @@ def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idem
         records_service=FakeRecordsService(owner_user_id=actor.user_id),
         plans_service=FakePlansService(owner_user_id=actor.user_id),
         diary_service=FakeDiaryService(owner_user_id=actor.user_id),
-        devices_service=FakeDevicesService(owner_user_id=actor.user_id),
         asset_service=FakeAssetService(),
         agent_runtime_service=runtime_service,
     )
@@ -984,44 +980,102 @@ def test_pregnancy_diary_read_tool_handler_returns_owner_scoped_entry() -> None:
     assert result["entry"]["content"] == "x" * 600
 
 
-def test_devices_pump_status_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
-    actor = _user()
-    devices_service = FakeDevicesService(owner_user_id=actor.user_id)
-    handler = DevicesPumpStatusReadToolHandler(devices_service=devices_service)
+def test_device_guidance_tool_reads_target_content_without_creating_workflow() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=runtime_service,
+        asset_service=FakeAssetService(),
+    )
 
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"limit": 2, "owner_user_id": str(uuid4())})))
-
-    assert devices_service.owner_user_id == actor.user_id
-    assert devices_service.limit == 2
-    assert result["pumps"][0]["device_id"] == "pump-1"
-    assert result["telemetry"][0]["payload"] == {"mode": "stimulation"}
-    assert result["counts"] == {"pumps": 1, "telemetry": 1}
-
-
-def test_device_guidance_read_tool_handler_returns_reference_and_bounded_metadata() -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
-
-    result = asyncio.run(handler.execute(_context(args={"limit": 1, "content_type": "application/pdf", "model": "Air1", "topic": "setup"})))
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                args={
+                    "model": "Air1",
+                    "operation": "read",
+                    "topic": "setup",
+                    "resource_kind": "pdf",
+                }
+            )
+        )
+    )
 
     assert result["device_model"] == "Air1"
-    assert result["current_step"]["id"] == "guide.parts"
-    assert result["assets"][0]["id"] == "asset-guide"
-    assert result["count"] == 1
-    assert result["query_context"] == {
-        "model": "Air1",
-        "topic": "setup",
-        "step": "",
-        "query": "",
-        "measured_nipple_mm": None,
-    }
+    assert result["schema_version"] == "device-guidance.result.v1"
+    assert result["status"] == "content_ready"
+    assert result["mode"] == "direct"
+    assert result["guidance"]["step"]["id"] == "guide.parts"
+    assert result["guidance"]["assets"][0]["id"] == "asset-guide"
+    assert result["workflow"] is None
+    assert runtime_service.workflow_calls == []
 
 
-def test_device_guidance_read_tool_handler_returns_copyable_image_markdown() -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
+def test_device_guidance_read_during_walkthrough_does_not_advance_or_rewrite_progress() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=actor.user_id,
+        run_id=uuid4(),
+        workflow_type="device_unboxing",
+        status="waiting",
+        schema_version="device-unboxing.v1",
+        state={
+            "phase": "guiding",
+            "device_model": "Air1",
+            "completed_steps": ["guide.parts"],
+        },
+        active_step="guide.controls",
+    )
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=runtime_service,
+        asset_service=FakeAssetService(),
+    )
 
-    result = asyncio.run(handler.execute(_context(args={"model": "Air1", "content_type": "image/png", "step": "guide.parts"})))
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={
+                    "model": "Air1",
+                    "operation": "read",
+                    "topic": "cleaning",
+                },
+            )
+        )
+    )
 
-    assert result["assets"] == [
+    assert result["status"] == "content_ready"
+    assert result["mode"] == "direct"
+    assert result["workflow"] is None
+    assert runtime_service.workflow_state.active_step == "guide.controls"
+    assert runtime_service.workflow_state.state["completed_steps"] == ["guide.parts"]
+    assert runtime_service.workflow_calls == []
+
+
+def test_device_guidance_tool_returns_copyable_image_markdown() -> None:
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=FakeAssetService(),
+    )
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                args={
+                    "model": "Air1",
+                    "operation": "read",
+                    "resource_kind": "image",
+                    "step": "guide.parts",
+                }
+            )
+        )
+    )
+
+    assert result["guidance"]["assets"] == [
         {
             "id": "asset-image",
             "label": "Air1 components overview",
@@ -1033,7 +1087,7 @@ def test_device_guidance_read_tool_handler_returns_copyable_image_markdown() -> 
             "markdown_image": "![Air1 components overview](/v1/assets/asset-image?kind=image)",
         }
     ]
-    assert result["media_voice"] == [
+    assert result["guidance"]["media_voice"] == [
         {
             "media_id": "/v1/assets/asset-image?kind=image",
             "kind": "image",
@@ -1073,82 +1127,80 @@ def test_device_guidance_explicit_step_returns_only_manual_images(
     step: str,
     expected_labels: list[str],
 ) -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=ProductAssetService())
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=ProductAssetService(),
+    )
 
     result = asyncio.run(
         handler.execute(
             _context(
                 args={
                     "model": "Air1",
-                    "content_type": "image/png",
+                    "operation": "read",
+                    "resource_kind": "image",
                     "step": step,
-                    "limit": 10,
                 }
             )
         )
     )
 
-    assert [asset["label"] for asset in result["assets"]] == expected_labels
+    assert [asset["label"] for asset in result["guidance"]["assets"]] == expected_labels
 
 
-def test_device_guidance_read_tool_handler_restores_unboxing_overview_resources() -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
-
-    result = asyncio.run(handler.execute(_context(args={"model": "Air1", "topic": "unboxing", "limit": 10})))
-
-    assert result["product_highlights"]
-    assert any("无线可穿戴" in item for item in result["product_highlights"])
-    assert [resource["kind"] for resource in result["quick_start_resources"]] == ["pdf", "video"]
-    assert all(resource.get("markdown_link") for resource in result["quick_start_resources"])
-
-
-def test_device_guidance_unboxing_query_does_not_erase_topic_resources() -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
+def test_device_guidance_tool_returns_unboxing_overview_resources() -> None:
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=FakeAssetService(),
+    )
 
     result = asyncio.run(
-        handler.execute(
-            _context(
-                args={
-                    "model": "Air1",
-                    "topic": "unboxing",
-                    "query": "我刚收到吸奶器，想开箱",
-                    "limit": 10,
-                }
-            )
-        )
+        handler.execute(_context(args={"model": "Air1", "operation": "read", "topic": "unboxing"}))
     )
 
-    assert [resource["kind"] for resource in result["quick_start_resources"]] == ["pdf", "video"]
+    guidance = result["guidance"]
+    assert guidance["product_highlights"]
+    assert any("无线可穿戴" in item for item in guidance["product_highlights"])
+    assert [resource["kind"] for resource in guidance["resources"]] == ["pdf", "video"]
+    assert all(resource.get("markdown_link") for resource in guidance["resources"])
 
 
-def test_device_guidance_read_tool_handler_returns_real_manifest_quick_start_media() -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=ProductAssetService())
+def test_device_guidance_tool_returns_real_manifest_quick_start_media() -> None:
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=ProductAssetService(),
+    )
 
-    result = asyncio.run(handler.execute(_context(args={"model": "Air1", "topic": "unboxing", "limit": 10})))
+    result = asyncio.run(
+        handler.execute(_context(args={"model": "Air1", "operation": "read", "topic": "unboxing"}))
+    )
 
-    resources = result["quick_start_resources"]
+    resources = result["guidance"]["resources"]
     assert [resource["kind"] for resource in resources] == ["pdf", "video"]
     assert resources[0]["content_type"] == "application/pdf"
     assert resources[1]["content_type"] == "video/mp4"
 
 
-def test_device_guidance_read_tool_handler_restores_flange_recommendation() -> None:
-    handler = DeviceGuidanceReadToolHandler(asset_service=FakeAssetService())
+def test_device_guidance_tool_returns_flange_recommendation() -> None:
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=FakeAssetService(),
+    )
 
     result = asyncio.run(
         handler.execute(
             _context(
                 args={
                     "model": "Air1",
+                    "operation": "read",
                     "topic": "flange",
-                    "query": "量到 14 毫米",
                     "measured_nipple_mm": 14,
                 }
             )
         )
     )
 
-    recommendation = result["flange_recommendation"]
+    recommendation = result["guidance"]["flange_recommendation"]
     assert recommendation["status"] == "recommended"
     assert recommendation["matched_range"] == "13-15mm"
     assert recommendation["recommended_flange_mm"] == 17
@@ -1156,11 +1208,11 @@ def test_device_guidance_read_tool_handler_restores_flange_recommendation() -> N
     assert recommendation["included_with_air1"] is True
 
 
-def test_device_unboxing_advance_tool_starts_and_returns_first_step_reference() -> None:
+def test_device_guidance_tool_starts_and_returns_first_walkthrough_step() -> None:
     actor = _user()
     thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
-    handler = DeviceUnboxingAdvanceToolHandler(
+    handler = DeviceGuidanceToolHandler(
         runtime_service=runtime_service,
         asset_service=FakeAssetService(),
     )
@@ -1170,25 +1222,26 @@ def test_device_unboxing_advance_tool_starts_and_returns_first_step_reference() 
             _context(
                 actor=actor,
                 thread_id=thread_id,
-                args={"model": "Air1", "action": "start"},
+                args={"model": "Air1", "operation": "start_or_resume"},
             )
         )
     )
 
-    assert result["status"] == "unboxing_started"
+    assert result["status"] == "walkthrough_started"
+    assert result["mode"] == "walkthrough"
     assert result["workflow"] == {
         "device_model": "Air1",
         "phase": "guiding",
         "current_step": "guide.parts",
         "completed_steps": [],
     }
-    assert result["guidance"]["current_step"]["id"] == "guide.parts"
+    assert result["guidance"]["step"]["id"] == "guide.parts"
     assert runtime_service.workflow_state.thread_id == thread_id
     assert runtime_service.workflow_state.owner_user_id == actor.user_id
     assert runtime_service.workflow_state.active_step == "guide.parts"
 
 
-def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_step() -> None:
+def test_device_guidance_tool_completes_current_step_and_returns_next_step() -> None:
     actor = _user()
     thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
@@ -1203,7 +1256,7 @@ def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_st
         state={"phase": "guiding", "device_model": "Air1", "completed_steps": []},
         active_step="guide.parts",
     )
-    handler = DeviceUnboxingAdvanceToolHandler(
+    handler = DeviceGuidanceToolHandler(
         runtime_service=runtime_service,
         asset_service=FakeAssetService(),
     )
@@ -1213,16 +1266,88 @@ def test_device_unboxing_advance_tool_completes_current_step_and_returns_next_st
             _context(
                 actor=actor,
                 thread_id=thread_id,
-                args={"model": "Air1", "action": "complete_current"},
+                args={"model": "Air1", "operation": "complete_current"},
             )
         )
     )
 
-    assert result["status"] == "unboxing_step_advanced"
+    assert result["status"] == "walkthrough_step_advanced"
     assert result["workflow"]["completed_steps"] == ["guide.parts"]
     assert result["workflow"]["current_step"] == "guide.controls"
-    assert result["guidance"]["current_step"]["id"] == "guide.controls"
+    assert result["guidance"]["step"]["id"] == "guide.controls"
     assert runtime_service.workflow_state.active_step == "guide.controls"
+
+
+def test_device_guidance_start_or_resume_keeps_existing_progress() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    runtime_service.workflow_state = AgentWorkflowState(
+        id=uuid4(),
+        thread_id=thread_id,
+        owner_user_id=actor.user_id,
+        run_id=uuid4(),
+        workflow_type="device_unboxing",
+        status="waiting",
+        schema_version="device-unboxing.v1",
+        state={"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
+        active_step="guide.controls",
+    )
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=runtime_service,
+        asset_service=FakeAssetService(),
+    )
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={"model": "Air1", "operation": "start_or_resume"},
+            )
+        )
+    )
+
+    assert result["status"] == "walkthrough_resumed"
+    assert result["workflow"]["current_step"] == "guide.controls"
+    assert result["workflow"]["completed_steps"] == ["guide.parts"]
+
+
+def test_device_guidance_read_requires_topic_or_step() -> None:
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=FakeAssetService(),
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            handler.execute(
+                _context(args={"model": "Air1", "operation": "read"})
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"model": "Air1", "operation": "read", "topic": "cleaning", "step": "guide.cleaning"},
+        {"model": "Air1", "operation": "read", "topic": "cleaning", "measured_nipple_mm": 14},
+        {"model": "Air1", "operation": "start_or_resume", "topic": "unboxing"},
+        {"model": "Air1", "operation": "complete_current", "resource_kind": "image"},
+    ],
+)
+def test_device_guidance_tool_rejects_parameters_for_the_wrong_operation(args: dict[str, object]) -> None:
+    handler = DeviceGuidanceToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        asset_service=FakeAssetService(),
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(handler.execute(_context(args=args)))
+
+    assert exc_info.value.code == "validation_failed"
 
 
 def test_conversation_history_image_load_handler_returns_image_in_tool_result() -> None:
@@ -3291,7 +3416,6 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         records_service=FakeRecordsService(owner_user_id=actor_id),
         plans_service=FakePlansService(owner_user_id=actor_id),
         diary_service=FakeDiaryService(owner_user_id=actor_id),
-        devices_service=FakeDevicesService(owner_user_id=actor_id),
         asset_service=FakeAssetService(),
         agent_runtime_service=FakeAgentRuntimeService(),
     )
@@ -3320,9 +3444,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "pregnancy_diary_query",
         "pregnancy_diary_save",
         "pregnancy_diary_delete",
-        "devices_guidance_read",
-        "devices_pump_status_read",
-        "devices_unboxing_advance",
+        "devices_guidance",
         "conversation_history_image_load",
         "notifications_milk_reminder_propose",
         "plans_milk_plan_propose",
@@ -3655,41 +3777,6 @@ class FakeDiaryService:
 class ExistingDiaryService(FakeDiaryService):
     async def create_entry(self, **kwargs):
         raise ApiError(code="conflict", message="Diary entry already exists for this date.", status=409)
-
-
-class FakeDevicesService:
-    def __init__(self, *, owner_user_id) -> None:
-        self._owner_user_id = owner_user_id
-        self.owner_user_id = None
-        self.limit = None
-
-    async def list_devices(self, *, owner_user_id):
-        self.owner_user_id = owner_user_id
-        return [
-            PumpDevice(
-                id=uuid4(),
-                owner_user_id=self._owner_user_id,
-                device_id="pump-1",
-                model="M9",
-                firmware_version="1.0",
-                status="active",
-                last_seen_at=_now(),
-            )
-        ]
-
-    async def list_telemetry_events(self, *, owner_user_id, limit):
-        self.owner_user_id = owner_user_id
-        self.limit = limit
-        return [
-            PumpTelemetryEvent(
-                id=uuid4(),
-                owner_user_id=self._owner_user_id,
-                device_id="pump-1",
-                event_type="mode",
-                occurred_at=_now(),
-                payload={"mode": "stimulation"},
-            )
-        ]
 
 
 class FakeAssetService:

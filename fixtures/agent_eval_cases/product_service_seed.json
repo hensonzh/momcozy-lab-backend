@@ -35,10 +35,6 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "load_service_skill",
-          "timing": "before_contextual_questions"
-        },
-        {
           "contract": "hospital_bag_form_create",
           "timing": "after_user_intent"
         },
@@ -142,23 +138,18 @@
     },
     {
       "suite": "device_known_guidance",
-      "name": "known pump troubleshooting reads status and guidance assets",
+      "name": "known pump Bluetooth question reads official manual assets",
       "domain": "device-guidance",
       "owner_team": "agent",
       "input": {
         "messages": [
           {
             "role": "user",
-            "content": "My Air1 pump suction feels weak today. What should I check?"
+            "content": "How do I connect my Air1 pump to Bluetooth?"
           }
         ],
         "fixtures": {
-          "device_model": "Air1",
-          "registered_device_id": "pump-1",
-          "recent_telemetry": {
-            "mode": "expression",
-            "battery_percent": 82
-          }
+          "device_model": "Air1"
         }
       },
       "expected_behavior": {
@@ -167,7 +158,6 @@
         "requires_confirmation_before_write": false,
         "service_skill_id": "device-guidance",
         "must_include": [
-          "device_status_context",
           "model_specific_assets",
           "support_handoff_if_unresolved"
         ],
@@ -179,11 +169,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "devices_pump_status_read",
-          "timing": "before_guidance"
-        },
-        {
-          "contract": "devices_guidance_read",
+          "contract": "devices_guidance",
           "timing": "before_guidance"
         }
       ]
@@ -219,7 +205,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "devices_guidance_read"
+          "contract": "devices_guidance"
         },
         {
           "contract": "support_ticket_propose"
@@ -576,10 +562,6 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "load_service_skill",
-          "timing": "before_intake"
-        },
-        {
           "contract": "pregnancy_plan_workflow",
           "timing": "after_user_consent",
           "args_subset": {
@@ -825,10 +807,6 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "load_service_skill",
-          "timing": "before_plan_proposal"
-        },
-        {
           "contract": "pregnancy_plan_workflow",
           "timing": "after_supplemental_information_reply",
           "args_subset": {
@@ -877,10 +855,6 @@
         ]
       },
       "expected_tool_calls": [
-        {
-          "contract": "load_service_skill",
-          "timing": "before_task_match"
-        },
         {
           "contract": "plans_task_complete_propose",
           "timing": "after_exact_target_resolution",
@@ -1095,7 +1069,6 @@
           "synchronous_create"
         ],
         "must_not": [
-          "load_service_skill_for_diary",
           "store_diary_in_session_state"
         ]
       },
@@ -1108,11 +1081,7 @@
           }
         }
       ],
-      "forbidden_tool_calls": [
-        {
-          "contract": "load_service_skill"
-        }
-      ]
+      "forbidden_tool_calls": []
     },
     {
       "suite": "pregnancy_diary_implicit_entry",
@@ -1143,8 +1112,7 @@
         ],
         "must_not": [
           "require_explicit_save_phrase",
-          "add_model_advice_to_diary",
-          "load_service_skill_for_diary"
+          "add_model_advice_to_diary"
         ]
       },
       "expected_tool_calls": [
@@ -1156,11 +1124,7 @@
           }
         }
       ],
-      "forbidden_tool_calls": [
-        {
-          "contract": "load_service_skill"
-        }
-      ]
+      "forbidden_tool_calls": []
     },
     {
       "suite": "pregnancy_diary_existing_entry",
@@ -1218,11 +1182,7 @@
           }
         }
       ],
-      "forbidden_tool_calls": [
-        {
-          "contract": "load_service_skill"
-        }
-      ]
+      "forbidden_tool_calls": []
     },
     {
       "suite": "pregnancy_diary_opt_out",
@@ -1969,7 +1929,7 @@
     },
     {
       "suite": "ledger_multi_tool_continuity",
-      "name": "ordered skill and tool results stay distinct across followups",
+      "name": "ordered tool results stay distinct across followups",
       "domain": "agent-runtime",
       "owner_team": "agent",
       "input": {
@@ -1981,13 +1941,9 @@
         ],
         "fixtures": {
           "context_ledger": {
-            "skill_results": [
-              "milk-management",
-              "device-guidance"
-            ],
             "known_information_sources": [
               "records_milk_status_read",
-              "devices_guidance_read"
+              "devices_guidance"
             ]
           }
         }
@@ -2004,20 +1960,15 @@
         ],
         "must_not": [
           "mix_tool_results",
-          "reload_available_skill",
           "invent_missing_fact"
         ]
       },
       "expected_tool_calls": [],
-      "forbidden_tool_calls": [
-        {
-          "contract": "load_service_skill"
-        }
-      ]
+      "forbidden_tool_calls": []
     },
     {
       "suite": "ledger_latest_fact_refresh",
-      "name": "historical skill remains available while latest facts are refreshed",
+      "name": "historical context remains available while latest facts are refreshed",
       "domain": "agent-runtime",
       "owner_team": "agent",
       "input": {
@@ -2032,8 +1983,7 @@
           }
         ],
         "fixtures": {
-          "context_ledger_available": true,
-          "historical_skill_result": "milk-management"
+          "context_ledger_available": true
         }
       },
       "expected_behavior": {
@@ -2042,11 +1992,10 @@
         "requires_confirmation_before_write": false,
         "service_skill_id": "milk-management",
         "must_include": [
-          "reuse_historical_skill",
+          "reuse_historical_context",
           "fresh_business_fact"
         ],
         "must_not": [
-          "reload_available_skill",
           "claim_cached_value"
         ]
       },
@@ -2098,10 +2047,10 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "devices_unboxing_advance",
+          "contract": "devices_guidance",
           "timing": "after_user_completes_current_step",
           "args_subset": {
-            "action": "complete_current"
+            "operation": "complete_current"
           }
         }
       ]
@@ -2147,7 +2096,10 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "devices_unboxing_advance"
+          "contract": "devices_guidance",
+          "args_subset": {
+            "operation": "complete_current"
+          }
         }
       ]
     },
@@ -2191,7 +2143,10 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "devices_unboxing_advance"
+          "contract": "devices_guidance",
+          "args_subset": {
+            "operation": "complete_current"
+          }
         }
       ]
     },
@@ -2237,10 +2192,6 @@
         ]
       },
       "expected_tool_calls": [
-        {
-          "contract": "load_service_skill",
-          "timing": "before_form"
-        },
         {
           "contract": "hospital_bag_form_create",
           "timing": "after_user_intent"
@@ -2304,10 +2255,6 @@
         ]
       },
       "expected_tool_calls": [
-        {
-          "contract": "load_service_skill",
-          "timing": "before_intake"
-        },
         {
           "contract": "pregnancy_plan_workflow",
           "timing": "after_user_intent",

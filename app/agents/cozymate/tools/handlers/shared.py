@@ -17,7 +17,6 @@ from app.agent_runtime.tools.result import ToolResult, ToolTextOutput
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.modules.assets.models import ProductAsset
 from app.modules.assets.service import ProductAssetService
-from app.modules.devices.models import PumpDevice, PumpTelemetryEvent
 from app.modules.diary.models import PregnancyDiaryEntry
 from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CALENDAR_APPEND,
@@ -1755,17 +1754,6 @@ def _diary_reference_payload(entry: PregnancyDiaryEntry) -> dict[str, Any]:
     }
 
 
-def _device_payload(device: PumpDevice) -> dict[str, Any]:
-    return {
-        "id": str(device.id),
-        "device_id": device.device_id,
-        "model": device.model,
-        "firmware_version": device.firmware_version,
-        "status": device.status,
-        "last_seen_at": _datetime_iso(device.last_seen_at),
-    }
-
-
 def _asset_payload(asset: ProductAsset) -> dict[str, Any]:
     kind = _asset_kind(asset.content_type)
     url = f"/v1/assets/{quote(asset.id, safe='')}?kind={kind}"
@@ -1823,8 +1811,8 @@ def _markdown_label(label: str) -> str:
     return label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
-def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: str, query: str) -> list[ProductAsset]:
-    topic_groups = _guidance_search_term_groups(model=model, topic=topic, query="")
+def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: str) -> list[ProductAsset]:
+    topic_groups = _guidance_search_term_groups(model=model, topic=topic)
     if not topic_groups:
         return assets
     topic_matches: list[ProductAsset] = []
@@ -1832,22 +1820,7 @@ def _filter_guidance_assets(*, assets: list[ProductAsset], model: str, topic: st
         haystack = _normalized_search_term(" ".join([asset.id, asset.label, asset.domain, asset.object_key or ""]))
         if all(any(term in haystack for term in group) for group in topic_groups):
             topic_matches.append(asset)
-    query_terms = _normalized_search_terms(query)
-    if not query_terms:
-        return topic_matches
-    query_matches = [
-        asset
-        for asset in topic_matches
-        if any(
-            term in _normalized_search_term(" ".join([asset.id, asset.label, asset.domain, asset.object_key or ""]))
-            for term in query_terms
-        )
-    ]
-    if not query_matches:
-        return topic_matches
-    if topic:
-        return [*query_matches, *(asset for asset in topic_matches if asset not in query_matches)]
-    return query_matches
+    return topic_matches
 
 
 def _exact_guidance_step_assets(*, assets: list[ProductAsset], image_urls: tuple[str, ...]) -> list[ProductAsset]:
@@ -1908,7 +1881,7 @@ def _normalized_search_terms(value: object) -> list[str]:
     return [term for term in (_normalized_search_term(raw_term) for raw_term in raw_terms) if term]
 
 
-def _guidance_search_term_groups(*, model: str, topic: str, query: str) -> list[list[str]]:
+def _guidance_search_term_groups(*, model: str, topic: str) -> list[list[str]]:
     groups: list[list[str]] = []
     model_terms = _normalized_search_terms(model)
     if model_terms:
@@ -1916,7 +1889,6 @@ def _guidance_search_term_groups(*, model: str, topic: str, query: str) -> list[
     topic_terms = _normalized_search_terms(topic)
     if topic_terms:
         groups.append(_expand_guidance_terms(topic_terms, aliases=_GUIDANCE_TOPIC_ALIASES))
-    groups.extend([term] for term in _normalized_search_terms(query))
     return groups
 
 
@@ -2018,16 +1990,6 @@ def _air1_flange_recommendation(value: Any) -> dict[str, Any] | None:
         "included_with_air1": included,
         "purchase_note": purchase_note,
         "message": f"{display_measurement:g}mm 落在 {range_label} 区间，建议使用 {accessory_label}。{purchase_note}",
-    }
-
-
-def _telemetry_payload(event: PumpTelemetryEvent) -> dict[str, Any]:
-    return {
-        "id": str(event.id),
-        "device_id": event.device_id,
-        "event_type": event.event_type,
-        "occurred_at": _datetime_iso(event.occurred_at),
-        "payload": event.payload,
     }
 
 

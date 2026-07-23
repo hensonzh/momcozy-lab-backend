@@ -5,7 +5,7 @@ import pytest
 
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.core.errors import ApiError
-from app.agents.cozymate.tools import default_tool_namespace_registry, default_tool_registry
+from app.agents.cozymate.tools import default_tool_registry
 from app.agents.cozymate.tools.handlers.pregnancy_plan import PregnancyPlanWorkflowToolHandler
 from app.agents.cozymate.tools.policy import CozymateToolExecutionPolicy
 from app.modules.auth import CurrentUser
@@ -53,16 +53,12 @@ def test_pregnancy_plan_workflow_contract_exposes_state_machine_commands() -> No
     assert {"choice_id", "answer", "step_id", "restart"} <= set(schema["properties"])
 
 
-def test_pregnancy_plan_workflow_is_the_only_intake_contract_in_birth_prep_namespace() -> None:
-    namespaces = {
-        namespace.name: namespace
-        for namespace in default_tool_namespace_registry(default_tool_registry()).list()
-    }
-    birth_prep = set(namespaces["birth_prep"].tool_contracts)
+def test_pregnancy_plan_workflow_is_the_only_model_visible_intake_contract() -> None:
+    names = set(default_tool_registry().names_for_sdk())
 
-    assert PREGNANCY_PLAN_WORKFLOW_TOOL in birth_prep
-    assert LEGACY_PREGNANCY_PLAN_TOOLS.isdisjoint(birth_prep)
-    assert "pregnancy_plan_todo_propose" not in birth_prep
+    assert PREGNANCY_PLAN_WORKFLOW_TOOL in names
+    assert LEGACY_PREGNANCY_PLAN_TOOLS.isdisjoint(names)
+    assert "pregnancy_plan_todo_propose" not in names
 
 
 def test_pregnancy_plan_workflow_effect_is_dynamic_but_action_binding_remains_static() -> None:

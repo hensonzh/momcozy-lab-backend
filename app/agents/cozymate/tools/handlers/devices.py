@@ -11,7 +11,6 @@ from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agent_runtime.tools.result import ToolImageOutput, ToolResult, ToolTextOutput
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.modules.assets.service import ProductAssetService
-from app.modules.devices.service import DevicesService
 from app.agents.cozymate.device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
 
 
@@ -24,44 +23,20 @@ from .shared import (
     _asset_media_voice_payloads,
     _asset_payload,
     _device_guidance_step_asset_topic,
-    _device_payload,
     _device_unboxing_workflow_payload,
     _exact_guidance_step_assets,
     _filter_guidance_assets,
-    _limit,
     _packaged_image_asset_for_url,
     _quick_start_resources,
     _read_product_asset_bytes,
     _require_active_device_unboxing,
     _required_thread_id,
     _string_list,
-    _telemetry_payload,
     _text,
 )
 
 
-class DevicesPumpStatusReadToolHandler(_StandardToolHandler):
-    def __init__(self, *, devices_service: DevicesService) -> None:
-        self.devices_service = devices_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        owner_user_id = context.actor.user_id
-        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
-        devices = await self.devices_service.list_devices(owner_user_id=owner_user_id)
-        telemetry = await self.devices_service.list_telemetry_events(owner_user_id=owner_user_id, limit=limit)
-        bounded_devices = devices[:limit]
-        output: dict[str, Any] = {
-            "pumps": [_device_payload(device) for device in bounded_devices],
-            "telemetry": [_telemetry_payload(event) for event in telemetry],
-            "counts": {
-                "pumps": len(bounded_devices),
-                "telemetry": len(telemetry),
-            },
-        }
-        return output
-
-
-class DeviceGuidanceReadToolHandler(_StandardToolHandler):
+class _DeviceGuidanceContentService:
     def __init__(
         self,
         *,
@@ -71,23 +46,19 @@ class DeviceGuidanceReadToolHandler(_StandardToolHandler):
         self.asset_service = asset_service
         self.reference_service = reference_service or DeviceGuidanceReferenceService()
 
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        limit = _limit(context.args.get("limit"), default=10, max_limit=20)
-        content_type = _text(context.args, "content_type")
-        model = _text(context.args, "model")
-        topic = _text(context.args, "topic")
-        step = _text(context.args, "step")
-        query = _text(context.args, "query")
+    async def read(self, args: dict[str, Any]) -> dict[str, Any]:
+        model = _text(args, "model")
+        topic = _text(args, "topic")
+        step = _text(args, "step")
+        resource_kind = _text(args, "resource_kind") or "auto"
+        if resource_kind not in {"auto", "image", "pdf", "video"}:
+            raise ApiError(code="validation_failed", message="Unsupported device guidance resource kind.", status=422)
         reference = self.reference_service.read(
             model=model,
             topic=topic,
             step=step,
-            query=query,
-            limit=limit,
         )
         assets = self.asset_service.list_assets(limit=200)
-        if content_type:
-            assets = [asset for asset in assets if asset.content_type == content_type]
         current_step = reference.get("current_step")
         resolved_step = _text(current_step, "id") if isinstance(current_step, dict) else ""
         if step and resolved_step:
@@ -100,36 +71,36 @@ class DeviceGuidanceReadToolHandler(_StandardToolHandler):
                 assets=assets,
                 model=model,
                 topic=topic or _device_guidance_step_asset_topic(step),
-                query=query,
             )
-        bounded_assets = assets[:limit]
+        assets = _filter_assets_by_resource_kind(assets, resource_kind=resource_kind)
+        bounded_assets = assets[:10]
         asset_payloads = [_asset_payload(asset) for asset in bounded_assets]
         all_asset_payloads = [_asset_payload(asset) for asset in assets]
-        result = {
-            **reference,
+        guidance = {
+            "topic": topic,
+            "step": current_step,
+            "guide_outline": reference["guide_outline"],
             "assets": asset_payloads,
             "count": len(bounded_assets),
             "available_count": len(assets),
             "product_highlights": list(_AIR1_PRODUCT_HIGHLIGHTS),
-            "quick_start_resources": _quick_start_resources(all_asset_payloads),
-            "flange_recommendation": _air1_flange_recommendation(context.args.get("measured_nipple_mm")),
-            "query_context": {
-                "model": model,
-                "topic": topic,
-                "step": step,
-                "query": query,
-                "measured_nipple_mm": context.args.get("measured_nipple_mm"),
-            },
+            "resources": _quick_start_resources(all_asset_payloads),
+            "flange_recommendation": _air1_flange_recommendation(args.get("measured_nipple_mm")),
         }
         media_voice = _asset_media_voice_payloads(asset_payloads)
         if media_voice:
-            result["media_voice"] = media_voice
-        return result
+            guidance["media_voice"] = media_voice
+        return {
+            "device_model": reference["device_model"],
+            "document_version": reference["document_version"],
+            "guidance": guidance,
+        }
 
 
-class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
+class DeviceGuidanceToolHandler(_StandardToolHandler):
     WORKFLOW_TYPE = "device_unboxing"
     SCHEMA_VERSION = "device-unboxing.v1"
+    RESULT_SCHEMA_VERSION = "device-guidance.result.v1"
 
     def __init__(
         self,
@@ -140,30 +111,38 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
     ) -> None:
         self.runtime_service = runtime_service
         self.reference_service = reference_service or DeviceGuidanceReferenceService()
-        self.guidance_reader = DeviceGuidanceReadToolHandler(
+        self.content_service = _DeviceGuidanceContentService(
             asset_service=asset_service,
             reference_service=self.reference_service,
         )
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        if context.thread_id is None:
-            raise ApiError(code="missing_thread_context", message="Device unboxing requires a thread context.", status=409)
-        action = _text(context.args, "action")
+        operation = _text(context.args, "operation")
         model = _text(context.args, "model")
+        _validate_device_guidance_args(args=context.args, operation=operation, model=model)
+        if operation == "read":
+            content = await self.content_service.read(context.args)
+            return {
+                "schema_version": self.RESULT_SCHEMA_VERSION,
+                "status": "content_ready",
+                "mode": "direct",
+                **content,
+                "workflow": None,
+            }
+        if context.thread_id is None:
+            raise ApiError(code="missing_thread_context", message="Device walkthrough requires a thread context.", status=409)
         existing = await self.runtime_service.get_latest_workflow_state(
             owner_user_id=context.actor.user_id,
             thread_id=context.thread_id,
             workflow_type=self.WORKFLOW_TYPE,
         )
-        if action == "start":
-            return await self._start_or_resume(context=context, model=model, existing=existing, started=True)
-        if action == "resume":
-            return await self._start_or_resume(context=context, model=model, existing=existing, started=False)
-        if action == "complete_current":
+        if operation == "start_or_resume":
+            return await self._start_or_resume(context=context, model=model, existing=existing)
+        if operation == "complete_current":
             return await self._complete_current(context=context, model=model, existing=existing)
-        if action == "cancel":
+        if operation == "cancel":
             return await self._finish(context=context, model=model, existing=existing, phase="cancelled")
-        raise ApiError(code="validation_failed", message="Unsupported device unboxing action.", status=422)
+        raise ApiError(code="validation_failed", message="Unsupported device guidance operation.", status=422)
 
     async def _start_or_resume(
         self,
@@ -171,14 +150,13 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
         context: ToolHandlerContext,
         model: str,
         existing: AgentWorkflowState | None,
-        started: bool,
     ) -> dict[str, Any]:
         thread_id = _required_thread_id(context)
         if existing is not None and existing.status in {"collecting", "ready", "waiting", "paused"}:
             state = dict(existing.state) if isinstance(existing.state, dict) else {}
             current_step = existing.active_step or _text(state, "current_step")
             normalized_model = _text(state, "device_model") or model
-            status = "unboxing_resumed"
+            status = "walkthrough_resumed"
         else:
             current_step = AIR1_UNBOXING_STEPS[0]
             initial_reference = self.reference_service.read(model=model, step=current_step)
@@ -189,7 +167,7 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
                 "completed_steps": [],
                 "document_version": _text(initial_reference, "document_version"),
             }
-            status = "unboxing_started" if started else "unboxing_resumed"
+            status = "walkthrough_started"
         workflow = await self.runtime_service.upsert_workflow_state(
             owner_user_id=context.actor.user_id,
             thread_id=thread_id,
@@ -241,7 +219,7 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
             state=state,
             active_step=next_step,
         )
-        return await self._step_result(context=context, workflow=updated, status="unboxing_step_advanced")
+        return await self._step_result(context=context, workflow=updated, status="walkthrough_step_advanced")
 
     async def _finish(
         self,
@@ -277,7 +255,12 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
         )
         workflow_projection = _device_unboxing_workflow_payload(updated)
         return {
-            "status": "unboxing_completed" if phase == "completed" else "unboxing_cancelled",
+            "schema_version": self.RESULT_SCHEMA_VERSION,
+            "status": "walkthrough_completed" if phase == "completed" else "walkthrough_cancelled",
+            "mode": "walkthrough",
+            "device_model": workflow_projection["device_model"],
+            "document_version": _text(state, "document_version"),
+            "guidance": None,
             "workflow": workflow_projection,
         }
 
@@ -289,26 +272,68 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
         status: str,
     ) -> dict[str, Any]:
         workflow_projection = _device_unboxing_workflow_payload(workflow)
-        guidance_result = await self.guidance_reader.execute(
-            ToolHandlerContext(
-                actor=context.actor,
-                run_id=context.run_id,
-                tool_name="devices_guidance_read",
-                call_id=context.call_id,
-                args={
-                    "model": workflow_projection["device_model"],
-                    "step": workflow_projection["current_step"],
-                    "limit": 10,
-                },
-                thread_id=context.thread_id,
-            )
+        content = await self.content_service.read(
+            {
+                "model": workflow_projection["device_model"],
+                "step": workflow_projection["current_step"],
+                "resource_kind": "auto",
+            }
         )
-        output = {
+        return {
+            "schema_version": self.RESULT_SCHEMA_VERSION,
             "status": status,
+            "mode": "walkthrough",
+            **content,
             "workflow": workflow_projection,
-            "guidance": guidance_result,
         }
-        return output
+
+
+def _filter_assets_by_resource_kind(assets: list[Any], *, resource_kind: str) -> list[Any]:
+    if resource_kind == "image":
+        return [asset for asset in assets if asset.content_type.startswith("image/")]
+    if resource_kind == "pdf":
+        return [asset for asset in assets if asset.content_type == "application/pdf"]
+    if resource_kind == "video":
+        return [asset for asset in assets if asset.content_type.startswith("video/")]
+    return assets
+
+
+def _validate_device_guidance_args(*, args: dict[str, Any], operation: str, model: str) -> None:
+    if not model:
+        raise ApiError(code="validation_failed", message="Device guidance requires a model.", status=422)
+    if operation not in {"read", "start_or_resume", "complete_current", "cancel"}:
+        raise ApiError(code="validation_failed", message="Unsupported device guidance operation.", status=422)
+
+    topic = _text(args, "topic")
+    step = _text(args, "step")
+    if operation == "read":
+        if not topic and not step:
+            raise ApiError(
+                code="validation_failed",
+                message="Device guidance read requires a topic or step.",
+                status=422,
+            )
+        if topic and step:
+            raise ApiError(
+                code="validation_failed",
+                message="Device guidance read accepts either topic or step, not both.",
+                status=422,
+            )
+        if "measured_nipple_mm" in args and topic != "flange":
+            raise ApiError(
+                code="validation_failed",
+                message="measured_nipple_mm is only supported for the flange topic.",
+                status=422,
+            )
+        return
+
+    workflow_only_extras = {"topic", "step", "resource_kind", "measured_nipple_mm"} & args.keys()
+    if workflow_only_extras:
+        raise ApiError(
+            code="validation_failed",
+            message="Walkthrough operations do not accept direct-read parameters.",
+            status=422,
+        )
 
 
 class ConversationHistoryImageLoadToolHandler(_StandardToolHandler):

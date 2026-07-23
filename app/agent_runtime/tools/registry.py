@@ -30,12 +30,6 @@ class ToolContractRegistry:
     def names_for_sdk(self) -> tuple[str, ...]:
         return tuple(sorted(self._contracts))
 
-    def eager_names(self) -> tuple[str, ...]:
-        return tuple(sorted(contract.name for contract in self._contracts.values() if contract.loading_mode == "eager"))
-
-    def deferred_names(self) -> tuple[str, ...]:
-        return tuple(sorted(contract.name for contract in self._contracts.values() if contract.loading_mode == "deferred"))
-
     def validate_action_bindings(
         self,
         *,

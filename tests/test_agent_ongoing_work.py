@@ -88,8 +88,8 @@ def test_workflow_context_rehydrates_other_long_running_service_steps() -> None:
     assert projected[1]["completed_steps"] == ["guide.parts", "guide.controls"]
     assert projected[1]["current_step"] == {"name": "guide.charging"}
     assert projected[1]["next_transition"] == {
-        "tool": "devices_unboxing_advance",
-        "allowed_actions": ["complete_current", "cancel"],
+        "tool": "devices_guidance",
+        "allowed_operations": ["complete_current", "cancel"],
     }
     assert "does not prove that the step was fully presented" in projected[1]["instruction"]
     assert "immediately preceding assistant message" in projected[1]["instruction"]

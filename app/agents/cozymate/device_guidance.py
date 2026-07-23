@@ -13,7 +13,6 @@ from app.core.errors import ApiError
 _DEVICE_GUIDANCE_ROOT = Path(__file__).resolve().parent / "skills" / "device-guidance" / "references" / "air1"
 _MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]*)\)")
 _GUIDE_HEADING_PATTERN = re.compile(r"^###\s+(guide\.[A-Za-z0-9_-]+)\s+(.+?)\s*$")
-_FAQ_HEADING_PATTERN = re.compile(r"^##\s+\d+\.\s+(.+?)\s*$")
 _TOPIC_DEFAULT_STEPS = {
     "unboxing": "guide.parts",
     "setup": "guide.parts",
@@ -23,10 +22,6 @@ _TOPIC_DEFAULT_STEPS = {
     "charging": "guide.charging",
     "bluetooth": "guide.bluetooth",
     "flange": "guide.flange",
-}
-_TOPIC_FAQ_QUERIES = {
-    "suction": "吸力减小 低吸力 没有母乳流出",
-    "troubleshooting": "吸奶器不工作 没有母乳流出 吸力减小",
 }
 AIR1_UNBOXING_STEPS = (
     "guide.parts",
@@ -62,13 +57,13 @@ class DeviceGuidanceReferenceService:
         model: str,
         topic: str = "",
         step: str = "",
-        query: str = "",
-        limit: int = 5,
     ) -> dict[str, Any]:
         normalized_model = _normalize_model(model)
         if normalized_model != "air1":
             raise ApiError(code="unsupported_device_model", message="Only Air1/BP334 guidance is currently available.", status=422)
         normalized_topic = str(topic or "").strip().lower()
+        if normalized_topic and normalized_topic not in _TOPIC_DEFAULT_STEPS:
+            raise ApiError(code="device_guidance_topic_not_found", message="Device guidance topic was not found.", status=404)
         normalized_step = str(step or "").strip()
         if not normalized_step:
             normalized_step = _TOPIC_DEFAULT_STEPS.get(normalized_topic, "")
@@ -90,9 +85,6 @@ class DeviceGuidanceReferenceService:
                 "image_labels": list(section.image_labels),
             }
 
-        faq_query = query or _TOPIC_FAQ_QUERIES.get(normalized_topic, "")
-        if normalized_topic == "faq" or faq_query and not normalized_step:
-            result["faq_matches"] = self._faq_matches(query=faq_query, limit=limit)
         return result
 
     @cached_property
@@ -129,41 +121,10 @@ class DeviceGuidanceReferenceService:
         return section.image_urls if section is not None else ()
 
     @cached_property
-    def faq_entries(self) -> tuple[dict[str, str], ...]:
-        lines = self._read_text("faq.md").splitlines()
-        headings: list[tuple[int, str]] = []
-        for index, line in enumerate(lines):
-            match = _FAQ_HEADING_PATTERN.match(line)
-            if match:
-                headings.append((index, match.group(1).strip()))
-        entries: list[dict[str, str]] = []
-        for position, (start, question) in enumerate(headings):
-            end = headings[position + 1][0] if position + 1 < len(headings) else len(lines)
-            answer = "\n".join(lines[start + 1 : end]).strip()
-            if answer:
-                entries.append({"question": question[:300], "answer": answer[:1600]})
-        return tuple(entries)
-
-    @cached_property
     def document_version(self) -> str:
         digest = hashlib.sha256()
         digest.update(self._read_text("manual.md").encode("utf-8"))
-        digest.update(self._read_text("faq.md").encode("utf-8"))
         return f"air1-{digest.hexdigest()[:12]}"
-
-    def _faq_matches(self, *, query: str, limit: int) -> list[dict[str, str]]:
-        bounded_limit = max(1, min(int(limit), 10))
-        query_terms = _search_terms(query)
-        if not query_terms:
-            return [dict(item) for item in self.faq_entries[:bounded_limit]]
-        ranked: list[tuple[int, int, dict[str, str]]] = []
-        for index, item in enumerate(self.faq_entries):
-            item_terms = _search_terms(f"{item['question']} {item['answer']}")
-            score = len(query_terms & item_terms)
-            if score:
-                ranked.append((score, -index, item))
-        ranked.sort(reverse=True, key=lambda item: (item[0], item[1]))
-        return [dict(item) for _score, _index, item in ranked[:bounded_limit]]
 
     def _read_text(self, file_name: str) -> str:
         path = (self.root / file_name).resolve()
@@ -192,11 +153,3 @@ def _completion_condition(lines: list[str]) -> str:
     if conditions:
         return " ".join(conditions)[-1600:]
     return "用户确认已完成当前步骤中的全部动作和检查点。"
-
-
-def _search_terms(value: str) -> set[str]:
-    normalized = re.sub(r"\s+", "", str(value or "").lower())
-    latin_terms = set(re.findall(r"[a-z0-9]{2,}", normalized))
-    chinese = "".join(re.findall(r"[\u4e00-\u9fff]", normalized))
-    chinese_terms = {chinese[index : index + 2] for index in range(max(0, len(chinese) - 1))}
-    return latin_terms | chinese_terms

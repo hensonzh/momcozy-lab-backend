@@ -14,6 +14,15 @@
 
 主智能体只持有公共 Tool、有界专业能力 Tool 和三个 Handoff，不持有子智能体的完整专业指令与底层 Tool。
 
+## 专业能力装配
+
+- 产前、泌乳和设备三个子智能体在创建时静态绑定各自的完整专业指令与领域 Tool Allowlist。
+- 各子智能体 Allowlist 中的 Tool 均作为顶层函数工具直接暴露，不使用 Namespace、deferred loading 或 `tool_search`。
+- 主智能体只根据 Handoff 的名称、描述和输入契约进行路由，不通过模型可见 Tool 动态获取专业指令。
+- 业务事实通过 owner-scoped Read Tool 或内部 Context Projector 按需读取，不与专业指令一起装载。
+- 上下文账本记录 Handoff、Tool 调用和结果，不维护“已加载专业 Skill”状态。
+- `service_skill_id` 仅用于 run 归属、评测和观测，不代表可调用的动态加载能力。
+
 ## 场景归属
 
 | 归属 | 场景 |
@@ -21,12 +30,12 @@
 | 主智能体 | 通用问答、健康咨询、普通情绪支持、孕期日记、用户资料、通用计划任务、产后恢复问答、范围澄清和多意图汇总 |
 | 产前服务智能体 | 孕期计划、孕期计划任务、待产包、待产包购物车和事项型孕期焦虑 |
 | 泌乳服务智能体 | 奶量摘要与分析、泌乳计划、日程调整、喂养/吸奶/生长记录、吸奶小结、提醒和 IBCLC 衔接 |
-| 设备服务智能体 | 吸奶器选型、设备状态、开箱使用、清洁消毒、蓝牙与法兰指导、故障排查和售后工单 |
+| 设备服务智能体 | 吸奶器选型、开箱使用、清洁消毒、蓝牙与法兰指导、故障排查和售后工单 |
 | 全局能力 | 健康红旗、情绪危机、设备安全、权限、Prompt 防护、上下文账本和 Memory |
 
-## Tool 归属
+## Tool 归属（39）
 
-Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Allowlist 暴露给多个智能体。
+当前共有 39 个模型可见 Tool Contract。Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Allowlist 暴露给多个智能体。
 
 ### 主智能体与公共能力（13）
 
@@ -77,9 +86,26 @@ App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregn
 - Tool Contract 同时声明空对象 Input Schema 和嵌套 `output_schema`；输出的每个字段都描述单位、枚举、可空和派生语义，Tool Executor 在结果进入模型上下文前执行输出校验。
 - `missing_fields` 与 `data_quality_issues` 返回 `{code, birth_order}` 对象；`code` 是固定枚举，妈妈或集合级问题的 `birth_order` 为 `null`，宝宝级问题使用对应出生顺序，不再返回需要解析的动态路径字符串。
 
-### 设备服务智能体（5）
+### 设备服务智能体（3）
 
-`devices_pump_status_read`、`devices_guidance_read`、`devices_unboxing_advance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
+`devices_guidance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
+
+以上 3 个 Tool 全部直接暴露给设备服务智能体。`devices_guidance` 同时负责按主题读取官方资料和维护一步步开箱流程。
+
+#### `devices_guidance` 统一契约
+
+必填参数为已确认的 `model` 和 `operation`。当前支持以下操作：
+
+| `operation` | 用途 | 额外参数 | 是否修改流程 |
+| --- | --- | --- | --- |
+| `read` | 按需读取某一说明书主题或明确步骤 | `topic`、`step` 二选一；可选 `resource_kind`；法兰主题可传 `measured_nipple_mm` | 否 |
+| `start_or_resume` | 开始新开箱指导，或恢复当前线程的已有进度 | 无 | 是 |
+| `complete_current` | 在用户明确完成当前步骤后，只推进一个主步骤 | 无 | 是 |
+| `cancel` | 取消当前开箱指导 | 无 | 是 |
+
+工具统一返回 `device-guidance.result.v1`，包含 `status`、`mode`、`device_model`、`document_version`、`guidance` 和 `workflow`。直接查询的 `mode=direct`、`workflow=null`；连续指导的 `mode=walkthrough`，以 `workflow.current_step` 作为唯一当前步骤。
+
+连续指导沿用内部 `device_unboxing` Workflow。`start_or_resume` 必须幂等恢复已有进度，`complete_current` 每次只持久化推进一步；流程中的临时清洗、蓝牙或当前步骤问题使用 `read`，不得改变 `active_step` 或 `completed_steps`。
 
 ## `propose` 语义
 

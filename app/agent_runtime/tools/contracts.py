@@ -13,7 +13,6 @@ class ToolContract(BaseModel):
     description: str = ""
     input_schema: dict[str, Any]
     output_schema: dict[str, Any] | None = None
-    loading_mode: Literal["eager", "deferred"] = "deferred"
     effect_scope: Literal["none", "agent_internal", "user_resource", "external_resource"]
     action_type: str | None = Field(default=None, min_length=1, max_length=120)
     blocking_policy: Literal["must_wait", "enqueue_and_continue", "wait_for_confirmation"]

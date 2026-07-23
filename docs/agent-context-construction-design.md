@@ -31,7 +31,6 @@ runtime_context
 - memory
 - workflow_context
 - working_context
-  - skills
   - ongoing_work
   - known_information
   - client_events
@@ -45,7 +44,7 @@ runtime_context
 - 当前用户文本按原始形式进入模型；图片在上下文中只保留稳定 `asset_id`，由 Provider Adapter 在调用前临时解析为 HTTPS 签名 URL。
 - 每轮从数据库重新读取活动工作流并构造 `workflow_context`。
 - 从活动工作流生成简洁的 `ongoing_work`。
-- 在 Redis working context 中短期保留已加载的 Skill 和工具查询结果。
+- 在 Redis working context 中短期保留需要跨轮复用的工具查询结果。
 - 加载长期 Memory 快照。
 - 加载近期客户端结构化事件。
 
@@ -86,7 +85,6 @@ runtime_context
 - memory
 - workflow_context
 - working_context
-  - skills
   - ongoing_work
   - known_information
   - client_events
@@ -139,21 +137,14 @@ runtime_context
 - 本阶段保持现有 Memory 投影方式。
 - 后续如需相关性检索，采用语义检索或模型判断，不采用关键词规则。
 
-### 4.4 `working_context.skills`
-
-- 只有 `load_service_skill` 成功执行后，Skill 才进入已加载 Skill 集合。
-- 模型根据当前消息、对话历史和 Skill manifest 进行语义判断，自主决定是否加载 Skill。
-- 不建立“关键词 -> Skill”的映射。
-- 已加载 Skill 按现有 turn TTL 规则短期保留。
-
-### 4.5 `working_context.ongoing_work`
+### 4.4 `working_context.ongoing_work`
 
 - 每轮从数据库中的活动工作流重新生成。
-- 只包含尚未结束的工作流、当前阶段、建议下一步以及所需 Skill 是否已加载。
+- 只包含尚未结束的工作流、当前阶段和建议下一步。
 - 不从聊天文本中猜测工作流状态。
 - `ongoing_work` 是简洁的恢复提示；详细执行约束仍由 `workflow_context` 提供。
 
-### 4.6 `workflow_context`
+### 4.5 `workflow_context`
 
 - 每轮从数据库中的活动工作流状态重建。
 - 合并可信的表单提交、当前附件情况和显式工作流回复关系。
@@ -161,7 +152,7 @@ runtime_context
 - 工作流当前步骤、已采集字段、当前问题和下一步约束以数据库投影为准。
 - 对话状态归纳器不能修改工作流状态。
 
-### 4.7 `working_context.known_information`
+### 4.6 `working_context.known_information`
 
 - 只保存成功工具调用明确声明需要保留的信息。
 - 保留信息来源、使用说明和现有 TTL/预算规则。
@@ -287,7 +278,6 @@ class ConversationStateDelta:
 | 用户时间、时区、位置 | 已有 | 不变 |
 | 当前消息和附件 | 已有 | 不变 |
 | Memory | 已有 | 暂时不变 |
-| 已加载 Skill | Redis working context | 不变 |
 | `known_information` | 工具结果短期保留 | 不变 |
 | `ongoing_work` | 从活动 workflow 生成 | 不变 |
 | `workflow_context` | 每轮从数据库重建 | 不变 |

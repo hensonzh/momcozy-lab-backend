@@ -117,10 +117,7 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
             BusinessFactSource("records_milk_status_read", "milk_status", {"days": config.milk_days, "limit": default_limit}),
         )
     if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
-        return (
-            BusinessFactSource("profile_read", "profile"),
-            BusinessFactSource("devices_pump_status_read", "devices", {"limit": default_limit}),
-        )
+        return (BusinessFactSource("profile_read", "profile"),)
     return ()
 
 

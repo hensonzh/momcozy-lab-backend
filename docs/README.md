@@ -10,8 +10,8 @@ legacy-route comparison documents do not belong here.
   bounded capability tools, specialist handoffs, and response ownership.
 - `agent-context-construction-design.md`: proposed context projection,
   conversation-continuity state, and durable-workflow boundaries.
-- `agent-tool-catalog.md`: model-visible global tools, namespaces, loading
-  modes, and internal non-model handlers.
+- `agent-tool-catalog.md`: model-visible tools, static allowlists, action
+  boundaries, and internal non-model handlers.
 - `product/momcozy-mai-integrated-prd.md`: current product requirements and
   user journeys.
 - `product/momcozy-agent-service-test-plan.md`: product-level agent scenarios

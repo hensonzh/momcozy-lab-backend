@@ -27,10 +27,7 @@ from app.agents.cozymate.prompts import (  # noqa: E402
 from app.agents.cozymate.skill_registry import (  # noqa: E402
     default_service_skill_registry,
 )
-from app.agents.cozymate.tools import (  # noqa: E402
-    default_tool_namespace_registry,
-    default_tool_registry,
-)
+from app.agents.cozymate.tools import default_tool_registry  # noqa: E402
 from app.agent_runtime.evals.service import (  # noqa: E402
     AgentEvalTrace,
 )
@@ -43,7 +40,6 @@ from app.agent_runtime.providers import (  # noqa: E402
     AgentModelRunner,
     SdkNodeRequest,
     SdkToolDefinition,
-    SdkToolNamespace,
     create_agent_model_runner,
 )
 
@@ -182,59 +178,40 @@ def _decision_request(
     reference = DeviceGuidanceReferenceService().read(model="Air1", step="guide.parts")
     model_input = [
         *_historical_tool_result(
-            call_id="load-device-guidance",
-            tool_name="load_service_skill",
-            args={"service_skill_id": skill.service_skill_id},
-            output={
-                "schema_version": "service_skill_load.v2",
-                "service_skill_id": skill.service_skill_id,
-                "skill_version": skill.version,
-                "skill": {
-                    "service_skill_id": skill.service_skill_id,
-                    "name": skill.name,
-                    "description": skill.description,
-                    "instructions": skill.prompt_block(),
-                },
-                "business_facts": {},
-            },
-        ),
-        *_historical_tool_result(
             call_id="start-device-unboxing",
-            tool_name="devices_unboxing_advance",
-            args={"action": "start", "device_model": "Air1"},
+            tool_name="devices_guidance",
+            args={"operation": "start_or_resume", "model": "Air1"},
             output={
-                "status": "unboxing_started",
+                "schema_version": "device-guidance.result.v1",
+                "status": "walkthrough_started",
+                "mode": "walkthrough",
+                "device_model": "Air1",
+                "document_version": reference["document_version"],
                 "workflow": project_workflow_context([workflow], workflow_reply=workflow_reply)[0],
-                "guidance": reference,
+                "guidance": {
+                    "step": reference["current_step"],
+                    "guide_outline": reference["guide_outline"],
+                },
             },
         ),
         {"role": "assistant", "content": case.previous_assistant_text},
         {"role": "user", "content": case.user_text},
     ]
     tool_registry = default_tool_registry()
-    tool_contract = tool_registry.get("devices_unboxing_advance")
-    namespace = default_tool_namespace_registry(tool_registry).get("device_support")
+    tool_contract = tool_registry.get("devices_guidance")
     return SdkNodeRequest(
         run_id=str(run_id),
         thread_id=str(thread_id),
         actor_user_id=str(actor_user_id),
-        instructions=instructions,
+        instructions=f"{instructions}\n\n{skill.prompt_block()}",
         model_input=model_input,
         tool_names=(tool_contract.name,),
-        tool_namespaces=(
-            SdkToolNamespace(
-                name=namespace.name,
-                description=namespace.description,
-                tool_names=(tool_contract.name,),
-            ),
-        ),
         tools=(
             SdkToolDefinition(
                 contract_name=tool_contract.name,
                 description=tool_contract.description,
                 params_json_schema=tool_contract.input_schema,
                 invoke=_advance_tool_result,
-                namespace_name=namespace.name,
             ),
         ),
         trace_id=f"device-unboxing-decision-eval-{run_id}",
@@ -267,7 +244,10 @@ def _historical_tool_result(
 async def _advance_tool_result(args_json: str) -> ToolResult:
     args = json.loads(args_json)
     output = {
-        "status": "unboxing_step_advanced",
+        "schema_version": "device-guidance.result.v1",
+        "status": "walkthrough_step_advanced",
+        "mode": "walkthrough",
+        "device_model": "Air1",
         "workflow": {
             "device_model": "Air1",
             "phase": "guiding",
@@ -275,15 +255,15 @@ async def _advance_tool_result(args_json: str) -> ToolResult:
             "completed_steps": ["guide.parts"],
         },
         "guidance": {
-            "current_step": {
+            "step": {
                 "id": "guide.controls",
                 "title": "主机按钮与指示灯",
                 "content": "从充电舱中取出主机，认识按钮和电量指示灯。",
             }
         },
     }
-    if args.get("action") != "complete_current":
-        output = {"status": "unexpected_action", "received_action": args.get("action")}
+    if args.get("operation") != "complete_current":
+        output = {"status": "unexpected_operation", "received_operation": args.get("operation")}
     return ToolResult.json(output)
 
 

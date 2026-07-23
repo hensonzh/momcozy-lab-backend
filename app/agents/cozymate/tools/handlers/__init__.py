@@ -43,9 +43,7 @@ from .plans_diary import (
     MilkReminderProposeToolHandler,
 )
 from .devices import (
-    DevicesPumpStatusReadToolHandler,
-    DeviceGuidanceReadToolHandler,
-    DeviceUnboxingAdvanceToolHandler,
+    DeviceGuidanceToolHandler,
     ConversationHistoryImageLoadToolHandler,
 )
 from .pregnancy_plan import PregnancyPlanWorkflowToolHandler
@@ -54,9 +52,7 @@ from .registry import build_default_tool_handlers
 __all__ = [
     "BirthPreparationArtifactToolHandler",
     "ConversationHistoryImageLoadToolHandler",
-    "DeviceGuidanceReadToolHandler",
-    "DeviceUnboxingAdvanceToolHandler",
-    "DevicesPumpStatusReadToolHandler",
+    "DeviceGuidanceToolHandler",
     "FeedingRecordDeleteProposeToolHandler",
     "FeedingRecordProposeToolHandler",
     "GrowthRecordDeleteProposeToolHandler",
