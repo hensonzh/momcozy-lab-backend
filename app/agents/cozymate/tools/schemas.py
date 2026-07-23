@@ -28,12 +28,12 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "profile.read": {
+    "profile_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
-    "profile.update": {
+    "profile_update": {
         "type": "object",
         "additionalProperties": False,
         "minProperties": 1,
@@ -95,7 +95,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "records.milk_summary.read": {
+    "records_milk_summary_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -115,7 +115,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "records.milk_status.read": {
+    "records_milk_status_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -135,7 +135,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "records.milk_analysis.read": {
+    "records_milk_analysis_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -155,7 +155,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "records.milk_analysis.intake": {
+    "records_milk_analysis_intake": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -195,12 +195,12 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "records.milk_analysis.evaluate": {
+    "records_milk_analysis_evaluate": {
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
-    "records.growth.read": {
+    "records_growth_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -214,7 +214,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "plans.current.read": {
+    "plans_current_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -227,7 +227,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "plans.calendar.read": {
+    "plans_calendar_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -242,7 +242,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "pregnancy_diary.query": {
+    "pregnancy_diary_query": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -263,7 +263,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "pregnancy_diary.save": {
+    "pregnancy_diary_save": {
         "type": "object",
         "additionalProperties": False,
         "required": ["operation", "content"],
@@ -287,7 +287,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "pregnancy_diary.delete": {
+    "pregnancy_diary_delete": {
         "type": "object",
         "additionalProperties": False,
         "required": ["entry_date", "confirmation_evidence"],
@@ -306,7 +306,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "devices.pump_status.read": {
+    "devices_pump_status_read": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -319,7 +319,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             }
         },
     },
-    "devices.guidance.read": {
+    "devices_guidance_read": {
         "type": "object",
         "additionalProperties": False,
         "required": ["model"],
@@ -364,7 +364,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "devices.unboxing.advance": {
+    "devices_unboxing_advance": {
         "type": "object",
         "additionalProperties": False,
         "required": ["model", "action"],
@@ -382,7 +382,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "conversation_history.image.load": {
+    "conversation_history_image_load": {
         "type": "object",
         "additionalProperties": False,
         "required": ["image_url"],
@@ -401,7 +401,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "plans.milk_plan.propose": {
+    "plans_milk_plan_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["direction"],
@@ -430,7 +430,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "plans.milk_schedule.propose": {
+    "plans_milk_schedule_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["plan_id"],
@@ -483,7 +483,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "default_duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240, "default": 30},
         },
     },
-    "pregnancy.plan.propose": {
+    "pregnancy_plan_propose": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -496,7 +496,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "pregnancy.plan_intake.start": {
+    "pregnancy_plan_intake_start": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -506,12 +506,12 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "pregnancy.plan_intake.analyze": {
+    "pregnancy_plan_intake_analyze": {
         "type": "object",
         "additionalProperties": False,
         "properties": {},
     },
-    "pregnancy.plan_intake.advance": {
+    "pregnancy_plan_intake_advance": {
         "type": "object",
         "additionalProperties": False,
         "required": ["action"],
@@ -536,7 +536,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "additional_info": {"type": "string", "maxLength": 2000},
         },
     },
-    "plans.task_create.propose": {
+    "plans_task_create_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -555,7 +555,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "plans.task_complete.propose": {
+    "plans_task_complete_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -567,7 +567,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "pregnancy.plan_todo.propose": {
+    "pregnancy_plan_todo_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["plan_id", "item_id", "completed", "expected_version"],
@@ -579,7 +579,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "plans.task_update.propose": {
+    "plans_task_update_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -596,7 +596,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "plans.task_delete.propose": {
+    "plans_task_delete_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["task_id"],
@@ -608,7 +608,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "plans.plan_delete.propose": {
+    "plans_plan_delete_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["plan_id"],
@@ -620,7 +620,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "notifications.milk_reminder.propose": {
+    "notifications_milk_reminder_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["title"],
@@ -637,7 +637,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "records.feeding_record.propose": {
+    "records_feeding_record_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["feed_time", "feed_type"],
@@ -654,7 +654,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "records.pumping_record.propose": {
+    "records_pumping_record_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["pump_start_time"],
@@ -671,7 +671,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "records.feeding_record_delete.propose": {
+    "records_feeding_record_delete_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["record_id"],
@@ -683,7 +683,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "records.growth_record.propose": {
+    "records_growth_record_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["measured_at"],
@@ -698,7 +698,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "records.growth_record_update.propose": {
+    "records_growth_record_update_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["record_id"],
@@ -827,7 +827,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "need_single_unit": {"type": ["boolean", "null"]},
         },
     },
-    "support.ticket.propose": {
+    "support_ticket_propose": {
         "type": "object",
         "additionalProperties": False,
         "required": ["issue_summary", "user_confirmed"],
@@ -888,11 +888,11 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
 }
 
 
-for _tool_name in ("records.pumping_record_delete.propose", "records.growth_record_delete.propose"):
-    _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["records.feeding_record_delete.propose"]
+for _tool_name in ("records_pumping_record_delete_propose", "records_growth_record_delete_propose"):
+    _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["records_feeding_record_delete_propose"]
 
-_TOOL_INPUT_SCHEMAS["plans.milk_task_update.propose"] = _TOOL_INPUT_SCHEMAS["plans.task_update.propose"]
-_TOOL_INPUT_SCHEMAS["plans.milk_task_delete.propose"] = _TOOL_INPUT_SCHEMAS["plans.task_delete.propose"]
+_TOOL_INPUT_SCHEMAS["plans_milk_task_update_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_update_propose"]
+_TOOL_INPUT_SCHEMAS["plans_milk_task_delete_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_delete_propose"]
 
 for _tool_name in ("labor_communication_card_create", "hospital_bag_form_create", "hospital_bag_card_create"):
     _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["birth_plan_form_create"]

@@ -10,6 +10,9 @@ from app.agent_runtime.tools.registry import ToolContractRegistry
 
 def test_tool_contract_requires_action_binding_only_for_business_or_external_effects() -> None:
     with pytest.raises(ValidationError):
+        _contract(name="profile.read", effect_scope="none")
+
+    with pytest.raises(ValidationError):
         _contract(effect_scope="user_resource")
 
     with pytest.raises(ValidationError):
@@ -22,18 +25,18 @@ def test_tool_contract_requires_action_binding_only_for_business_or_external_eff
 def test_cozymate_registry_exposes_new_effect_scopes_and_no_legacy_mixed_write_tools() -> None:
     registry = default_tool_registry()
 
-    assert "profile_update" not in registry.names_for_sdk()
+    assert "profile_update" in registry.names_for_sdk()
     assert "pregnancy_diary.manage" not in registry.names_for_sdk()
 
-    assert registry.get("profile.update").effect_scope == "user_resource"
-    assert registry.get("profile.update").action_type == "profile.update"
-    assert registry.get("pregnancy_diary.query").effect_scope == "none"
-    assert registry.get("pregnancy_diary.save").action_type == "pregnancy_diary.entry.save"
-    assert registry.get("pregnancy_diary.delete").action_type == "pregnancy_diary.entry.delete"
+    assert registry.get("profile_update").effect_scope == "user_resource"
+    assert registry.get("profile_update").action_type == "profile.update"
+    assert registry.get("pregnancy_diary_query").effect_scope == "none"
+    assert registry.get("pregnancy_diary_save").action_type == "pregnancy_diary.entry.save"
+    assert registry.get("pregnancy_diary_delete").action_type == "pregnancy_diary.entry.delete"
 
-    assert registry.get("records.milk_analysis.intake").effect_scope == "agent_internal"
-    assert registry.get("support.ticket.propose").effect_scope == "agent_internal"
-    assert registry.get("support.ticket.propose").action_type is None
+    assert registry.get("records_milk_analysis_intake").effect_scope == "agent_internal"
+    assert registry.get("support_ticket_propose").effect_scope == "agent_internal"
+    assert registry.get("support_ticket_propose").action_type is None
 
 
 def test_every_action_backed_tool_is_registered_in_action_policy() -> None:
@@ -67,9 +70,9 @@ def test_model_result_has_no_out_of_band_action_proposal_channel() -> None:
     assert "action_proposals" not in SdkNodeResult.__dataclass_fields__
 
 
-def _contract(*, effect_scope: str, action_type: str | None = None) -> ToolContract:
+def _contract(*, effect_scope: str, action_type: str | None = None, name: str = "test_tool") -> ToolContract:
     return ToolContract(
-        name="test.tool",
+        name=name,
         domain="test",
         input_schema={"type": "object", "additionalProperties": False, "properties": {}},
         effect_scope=effect_scope,

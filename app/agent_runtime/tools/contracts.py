@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class ToolContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=1, max_length=120, pattern=r"^[a-zA-Z0-9_-]+$")
     domain: str = Field(min_length=1, max_length=120)
     description: str = ""
     input_schema: dict[str, Any]

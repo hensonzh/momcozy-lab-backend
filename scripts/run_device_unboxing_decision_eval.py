@@ -45,7 +45,6 @@ from app.agent_runtime.providers import (  # noqa: E402
     SdkToolDefinition,
     SdkToolNamespace,
     create_agent_model_runner,
-    sdk_tool_name,
 )
 
 
@@ -201,7 +200,7 @@ def _decision_request(
         ),
         *_historical_tool_result(
             call_id="start-device-unboxing",
-            tool_name=sdk_tool_name("devices.unboxing.advance"),
+            tool_name="devices_unboxing_advance",
             args={"action": "start", "device_model": "Air1"},
             output={
                 "status": "unboxing_started",
@@ -213,7 +212,7 @@ def _decision_request(
         {"role": "user", "content": case.user_text},
     ]
     tool_registry = default_tool_registry()
-    tool_contract = tool_registry.get("devices.unboxing.advance")
+    tool_contract = tool_registry.get("devices_unboxing_advance")
     namespace = default_tool_namespace_registry(tool_registry).get("device_support")
     return SdkNodeRequest(
         run_id=str(run_id),
@@ -232,7 +231,6 @@ def _decision_request(
         tools=(
             SdkToolDefinition(
                 contract_name=tool_contract.name,
-                sdk_name=sdk_tool_name(tool_contract.name),
                 description=tool_contract.description,
                 params_json_schema=tool_contract.input_schema,
                 invoke=_advance_tool_result,

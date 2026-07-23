@@ -7,7 +7,7 @@ from app.agent_runtime.tools.result import ToolResult
 
 
 _PREGNANCY_DIARY_TOOLS = frozenset(
-    {"pregnancy_diary.query", "pregnancy_diary.save", "pregnancy_diary.delete"}
+    {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}
 )
 
 

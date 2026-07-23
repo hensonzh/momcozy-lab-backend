@@ -89,7 +89,7 @@ class ProfileUpdateToolHandler(_StandardToolHandler):
             raise ApiError(code="validation_failed", message="user requires at least one field.", status=422)
         infant_updates = _profile_infant_updates(context.args)
         if not user_values and not infant_updates:
-            raise ApiError(code="validation_failed", message="profile.update requires at least one field.", status=422)
+            raise ApiError(code="validation_failed", message="profile_update requires at least one field.", status=422)
 
         apply_payload: dict[str, Any] = {}
         if user_values:
@@ -439,7 +439,7 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
             artifact_type="form",
             schema_version="1.0",
             status="created",
-            payload={"tool_name": "pregnancy.plan_intake.start", "form": form},
+            payload={"tool_name": "pregnancy_plan_intake_start", "form": form},
             emit_event=False,
         )
         await _upsert_pregnancy_plan_workflow(

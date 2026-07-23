@@ -106,7 +106,7 @@ def _runtime_repository(*, owner_user_id, thread_id) -> FakeActionRepository:
         actor_user_id=owner_user_id,
         status="running",
         runtime_pattern="sdk_only",
-        runtime_version="momcozy-agent-v1",
+        runtime_version="momcozy-agent-v2",
         prompt_version="",
         request_id="req",
         trace_id="trace",

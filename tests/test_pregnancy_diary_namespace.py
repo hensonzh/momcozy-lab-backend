@@ -10,9 +10,9 @@ from app.agents.cozymate.executor import (
 
 
 PREGNANCY_DIARY_TOOL_CONTRACTS = {
-    "pregnancy_diary.query",
-    "pregnancy_diary.save",
-    "pregnancy_diary.delete",
+    "pregnancy_diary_query",
+    "pregnancy_diary_save",
+    "pregnancy_diary_delete",
 }
 OBSOLETE_PREGNANCY_DIARY_TOOL_CONTRACTS = {
     "pregnancy_diary.manage",
@@ -47,8 +47,8 @@ def test_pregnancy_diary_writes_use_the_action_policy() -> None:
 
 def test_pregnancy_diary_action_backed_writes_wait_for_real_database_result() -> None:
     registry = default_tool_registry()
-    save_contract = registry.get("pregnancy_diary.save")
-    delete_contract = registry.get("pregnancy_diary.delete")
+    save_contract = registry.get("pregnancy_diary_save")
+    delete_contract = registry.get("pregnancy_diary_delete")
 
     assert save_contract.loading_mode == "eager"
     assert save_contract.blocking_policy == "must_wait"
@@ -59,9 +59,9 @@ def test_pregnancy_diary_action_backed_writes_wait_for_real_database_result() ->
 
 def test_pregnancy_diary_schemas_separate_query_save_and_delete() -> None:
     registry = default_tool_registry()
-    query_schema = registry.get("pregnancy_diary.query").input_schema
-    save_schema = registry.get("pregnancy_diary.save").input_schema
-    delete_schema = registry.get("pregnancy_diary.delete").input_schema
+    query_schema = registry.get("pregnancy_diary_query").input_schema
+    save_schema = registry.get("pregnancy_diary_save").input_schema
+    delete_schema = registry.get("pregnancy_diary_delete").input_schema
 
     assert "required" not in query_schema
     assert save_schema["required"] == ["operation", "content"]
@@ -74,8 +74,8 @@ def test_pregnancy_diary_behavior_is_owned_by_global_safety_and_tool_description
     namespace = default_tool_namespace_registry().get("pregnancy_diary")
     instructions = BASE_AGENT_INSTRUCTIONS
     registry = default_tool_registry()
-    save_description = registry.get("pregnancy_diary.save").description
-    delete_description = registry.get("pregnancy_diary.delete").description
+    save_description = registry.get("pregnancy_diary_save").description
+    delete_description = registry.get("pregnancy_diary_delete").description
 
     assert "只保存用户明确表达的事实和感受" in instructions
     assert "不把模型建议、推断、风险判断、通用知识或诊断保存成用户事实" in instructions
@@ -90,9 +90,9 @@ def test_pregnancy_diary_behavior_is_owned_by_global_safety_and_tool_description
 
 
 def test_pregnancy_diary_conflict_contract_requires_complete_rewrite() -> None:
-    description = default_tool_registry().get("pregnancy_diary.save").description
+    description = default_tool_registry().get("pregnancy_diary_save").description
 
-    assert "先调用 pregnancy_diary.query" in description
+    assert "先调用 pregnancy_diary_query" in description
     assert "完整正文" in description
     assert "不能只传增量或追加" in description
     assert "不能声称已保存" in description

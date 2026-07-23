@@ -10,7 +10,7 @@
     {
       "id": "lactation_trend",
       "prompt": "My baby is 6 weeks old. I pump 5 times a day and my total dropped from 800ml to 600ml this week. What should I do?",
-      "expected_output": "The routing layer selects lactation. The model can use records.milk_summary.read and lactation-scoped tools, summarizes uncertainty, asks for key missing context, and gives a bounded 24-72 hour plan.",
+      "expected_output": "The routing layer selects lactation. The model can use records_milk_summary_read and lactation-scoped tools, summarizes uncertainty, asks for key missing context, and gives a bounded 24-72 hour plan.",
       "files": []
     },
     {

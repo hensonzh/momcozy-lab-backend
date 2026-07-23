@@ -151,7 +151,7 @@ def _completed_tool_semantic(
 
 
 def _failed_tool_label(*, tool_name: str, tool_copy: dict[str, str] | None, label: str) -> str:
-    if tool_name in {"pregnancy_diary.query", "pregnancy_diary.save", "pregnancy_diary.delete"}:
+    if tool_name in {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}:
         return "孕期日记这一步暂时没处理好"
     if tool_copy is not None and tool_copy.get("failed"):
         return tool_copy["failed"]
@@ -183,9 +183,9 @@ def _tool_phase(*, tool_copy: dict[str, str] | None, effect_scope: str) -> str:
 def _dynamic_tool_started_label(*, tool_name: str, safe_args: dict[str, Any]) -> str:
     del safe_args
     return {
-        "pregnancy_diary.query": "我先看看孕期日记～",
-        "pregnancy_diary.save": "我先帮你保存孕期日记～",
-        "pregnancy_diary.delete": "我先帮你删除孕期日记～",
+        "pregnancy_diary_query": "我先看看孕期日记～",
+        "pregnancy_diary_save": "我先帮你保存孕期日记～",
+        "pregnancy_diary_delete": "我先帮你删除孕期日记～",
     }.get(tool_name, "")
 
 
@@ -196,7 +196,7 @@ def _dynamic_tool_completed_label(
     safe_output: dict[str, Any],
 ) -> str:
     status = str(safe_output.get("status") or "").strip()
-    if tool_name in {"pregnancy_diary.query", "pregnancy_diary.save", "pregnancy_diary.delete"}:
+    if tool_name in {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}:
         return {
             "action_failed": "孕期日记这一步暂时没处理好",
             "needs_delete_confirmation": "删除前还需要你确认一下",
@@ -216,7 +216,7 @@ def _dynamic_tool_completed_label(
             "entry_saved": "我已经保存好孕期日记啦",
             "entry_deleted": "我已经删除这条孕期日记啦",
         }.get(status, "孕期日记这一步处理好了")
-    if tool_name == "pregnancy.plan_intake.advance":
+    if tool_name == "pregnancy_plan_intake_advance":
         return {
             "ready_to_generate": "孕期计划信息已经确认好啦",
             "blocked_by_symptoms": "我先帮你确认当前情况",
@@ -259,97 +259,97 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "completed": "我准备好继续处理啦",
         "failed": "这个场景暂时没准备好",
     },
-    "profile.read": {
+    "profile_read": {
         "phase": "reading",
         "started": "我先看看你的基础信息～",
         "completed": "我把基础信息看好啦",
     },
-    "profile.update": {
+    "profile_update": {
         "phase": "saving",
         "started": "我先帮你记一下基础信息～",
         "completed": "我已经保存好基础信息啦",
     },
-    "business.context.read": {
+    "business_context_read": {
         "phase": "reading",
         "started": "我先看看相关业务信息～",
         "completed": "我把相关业务信息整理好啦",
     },
-    "records.milk_status.read": {
+    "records_milk_status_read": {
         "phase": "reading",
         "started": "我先看看今天的奶量状态～",
         "completed": "我看好今天的奶量状态啦",
     },
-    "records.milk_summary.read": {
+    "records_milk_summary_read": {
         "phase": "reading",
         "started": "我先看看吸奶和喂养记录～",
         "completed": "我把吸奶和喂养记录整理好啦",
     },
-    "records.milk_analysis.read": {
+    "records_milk_analysis_read": {
         "phase": "reading",
         "started": "我先看看之前的奶量分析～",
         "completed": "我把奶量分析看好啦",
     },
-    "records.milk_analysis.intake": {
+    "records_milk_analysis_intake": {
         "phase": "reading",
         "started": "我先把奶量分析需要的信息核对齐全～",
         "completed": "我把需要的信息核对好啦",
     },
-    "records.milk_analysis.evaluate": {
+    "records_milk_analysis_evaluate": {
         "phase": "evaluating",
         "started": "我来综合评估一下奶量问题～",
         "completed": "我完成奶量分析啦",
     },
-    "records.growth.read": {
+    "records_growth_read": {
         "phase": "reading",
         "started": "我先看看宝宝的生长记录～",
         "completed": "我把宝宝生长记录整理好啦",
     },
-    "plans.current.read": {
+    "plans_current_read": {
         "phase": "reading",
         "started": "我先看看计划和日程任务～",
         "completed": "我把计划和日程整理好啦",
     },
-    "plans.calendar.read": {
+    "plans_calendar_read": {
         "phase": "reading",
         "started": "我先看看计划和日程任务～",
         "completed": "我把计划和日程整理好啦",
     },
-    "pregnancy_diary.query": {
+    "pregnancy_diary_query": {
         "phase": "reading",
         "started": "我先看看孕期日记～",
         "completed": "我把孕期日记看好啦",
     },
-    "pregnancy_diary.save": {
+    "pregnancy_diary_save": {
         "phase": "saving",
         "started": "我先帮你保存孕期日记～",
         "completed": "我已经保存好孕期日记啦",
     },
-    "pregnancy_diary.delete": {
+    "pregnancy_diary_delete": {
         "phase": "saving",
         "started": "我先帮你删除孕期日记～",
         "completed": "我已经删除这条孕期日记啦",
     },
-    "pregnancy.plan_context.read": {
+    "pregnancy_plan_context_read": {
         "phase": "reading",
         "started": "我先看看孕期计划上下文～",
         "completed": "我把孕期计划上下文整理好啦",
     },
-    "devices.pump_status.read": {
+    "devices_pump_status_read": {
         "phase": "reading",
         "started": "我先看看设备状态～",
         "completed": "我把设备状态看好啦",
     },
-    "devices.guidance.read": {
+    "devices_guidance_read": {
         "phase": "reading",
         "started": "我先看看设备说明～",
         "completed": "我把设备说明整理好啦",
     },
-    "devices.unboxing.advance": {
+    "devices_unboxing_advance": {
         "phase": "planning",
         "started": "我继续带你完成这一步～",
         "completed": "这一步已经衔接好啦",
     },
-    "conversation_history.image.load": {
+    "conversation_history_image_load": {
         "phase": "reading",
         "started": "我回看一下之前的图片～",
         "completed": "我看清之前那张图片啦",
@@ -364,112 +364,112 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你整理分娩沟通单～",
         "completed": "我整理好分娩沟通单啦",
     },
-    "pregnancy.plan_intake.start": {
+    "pregnancy_plan_intake_start": {
         "phase": "planning",
         "started": "我先帮你准备孕期计划信息表～",
         "completed": "孕期计划信息表已经准备好啦",
     },
-    "pregnancy.plan_intake.analyze": {
+    "pregnancy_plan_intake_analyze": {
         "phase": "planning",
         "started": "我先按你填写的信息做针对性分析～",
         "completed": "我已经把会影响计划的重点分析好啦",
     },
-    "pregnancy.plan_intake.advance": {
+    "pregnancy_plan_intake_advance": {
         "phase": "planning",
         "started": "我先整理孕期计划信息～",
         "completed": "我整理好这一步信息啦",
     },
-    "pregnancy.plan.propose": {
+    "pregnancy_plan_propose": {
         "phase": "planning",
         "started": "我先帮你整理孕期计划～",
         "completed": "我已经准备好孕期计划预览，等你确认～",
     },
-    "pregnancy.plan_todo.propose": {
+    "pregnancy_plan_todo_propose": {
         "phase": "planning",
         "started": "我先帮你更新孕期计划事项～",
         "completed": "孕期计划事项已经更新好啦",
     },
-    "plans.milk_plan.propose": {
+    "plans_milk_plan_propose": {
         "phase": "planning",
         "started": "我先帮你整理奶量计划～",
         "completed": "我已经准备好奶量计划预览，等你确认～",
     },
-    "plans.milk_schedule.propose": {
+    "plans_milk_schedule_propose": {
         "phase": "planning",
         "started": "我先帮你调整一下日程～",
         "completed": "我整理好日程调整预览啦",
     },
-    "plans.task_create.propose": {
+    "plans_task_create_propose": {
         "phase": "planning",
         "started": "我先帮你准备一项任务～",
         "completed": "我已经准备好任务预览，等你确认～",
     },
-    "plans.task_complete.propose": {
+    "plans_task_complete_propose": {
         "phase": "planning",
         "started": "我先帮你记录任务完成情况～",
         "completed": "我已经准备好任务状态修改，等你确认～",
     },
-    "plans.task_update.propose": {
+    "plans_task_update_propose": {
         "phase": "planning",
         "started": "我先帮你调整这项任务～",
         "completed": "我已经准备好任务修改，等你确认～",
     },
-    "plans.task_delete.propose": {
+    "plans_task_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的任务～",
         "completed": "我已经准备好任务删除预览，等你确认～",
     },
-    "plans.milk_task_update.propose": {
+    "plans_milk_task_update_propose": {
         "phase": "planning",
         "started": "我先帮你调整奶量任务～",
         "completed": "我已经准备好奶量任务修改，等你确认～",
     },
-    "plans.milk_task_delete.propose": {
+    "plans_milk_task_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的奶量任务～",
         "completed": "我已经准备好奶量任务删除预览，等你确认～",
     },
-    "plans.plan_delete.propose": {
+    "plans_plan_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的计划～",
         "completed": "我已经准备好计划删除预览，等你确认～",
     },
-    "notifications.milk_reminder.propose": {
+    "notifications_milk_reminder_propose": {
         "phase": "planning",
         "started": "我先帮你准备奶量提醒～",
         "completed": "我已经准备好提醒预览，等你确认～",
     },
-    "records.feeding_record.propose": {
+    "records_feeding_record_propose": {
         "phase": "planning",
         "started": "我先帮你整理这条喂养记录～",
         "completed": "我已经准备好喂养记录预览，等你确认～",
     },
-    "records.pumping_record.propose": {
+    "records_pumping_record_propose": {
         "phase": "planning",
         "started": "我先帮你整理这条吸奶记录～",
         "completed": "我已经准备好吸奶记录预览，等你确认～",
     },
-    "records.feeding_record_delete.propose": {
+    "records_feeding_record_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的喂养记录～",
         "completed": "我已经准备好删除预览，等你确认～",
     },
-    "records.pumping_record_delete.propose": {
+    "records_pumping_record_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的吸奶记录～",
         "completed": "我已经准备好删除预览，等你确认～",
     },
-    "records.growth_record.propose": {
+    "records_growth_record_propose": {
         "phase": "planning",
         "started": "我先帮你整理宝宝成长记录～",
         "completed": "我已经准备好成长记录预览，等你确认～",
     },
-    "records.growth_record_update.propose": {
+    "records_growth_record_update_propose": {
         "phase": "planning",
         "started": "我先帮你调整宝宝成长记录～",
         "completed": "我已经准备好成长记录修改，等你确认～",
     },
-    "records.growth_record_delete.propose": {
+    "records_growth_record_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的成长记录～",
         "completed": "我已经准备好成长记录删除预览，等你确认～",
@@ -494,7 +494,7 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你看看吸奶器型号～",
         "completed": "我把吸奶器型号整理好啦",
     },
-    "support.ticket.propose": {
+    "support_ticket_propose": {
         "phase": "planning",
         "started": "我先帮你准备售后信息表～",
         "completed": "请确认售后信息",

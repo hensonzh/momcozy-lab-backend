@@ -12,7 +12,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "records.milk_analysis.intake",
+              "name": "records_milk_analysis_intake",
               "execution_status": "completed",
               "result": {
                 "status": "milk_analysis_intake_collecting"
@@ -52,7 +52,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "pregnancy.plan_intake.advance",
+              "name": "pregnancy_plan_intake_advance",
               "execution_status": "completed",
               "result": {
                 "status": "ready_to_generate"

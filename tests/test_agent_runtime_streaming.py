@@ -176,7 +176,7 @@ def test_agent_transient_stream_round_trips_optimistic_application_event() -> No
             thread_id=thread_id,
             run_id=run_id,
             event_type="tool.started",
-            payload={"tool_call_id": tool_call_id, "tool_name": "records.milk_status.read"},
+            payload={"tool_call_id": tool_call_id, "tool_name": "records_milk_status_read"},
             dedupe_key=f"{run_id}:tool.started:{tool_call_id}",
         )
         events = await stream.read(run_id=run_id, after_cursor="0-0")
@@ -247,7 +247,7 @@ def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(m
             run_id=run_id,
             sequence=2,
             event_type="tool.completed",
-            payload={"tool_name": "plans.milk_plan.propose"},
+            payload={"tool_name": "plans_milk_plan_propose"},
         ),
         AgentEvent(
             event_id=uuid4(),
@@ -757,7 +757,7 @@ def test_stream_run_event_chunks_dedupes_optimistic_tool_event_before_persisted_
         cursor="1-0",
         payload={
             "tool_call_id": tool_call_id,
-            "tool_name": "records.milk_status.read",
+            "tool_name": "records_milk_status_read",
             "_live_semantic": {
                 "dedupe_key": f"{run_id}:tool.started:{tool_call_id}",
                 "optimistic": True,
@@ -772,7 +772,7 @@ def test_stream_run_event_chunks_dedupes_optimistic_tool_event_before_persisted_
         run_id=run_id,
         sequence=1,
         event_type="tool.started",
-        payload={"tool_call_id": tool_call_id, "tool_name": "records.milk_status.read"},
+        payload={"tool_call_id": tool_call_id, "tool_name": "records_milk_status_read"},
     )
     completed = AgentEvent(
         event_id=uuid4(),
@@ -820,7 +820,7 @@ def test_stream_run_event_chunks_dedupes_stale_transient_tool_event_after_persis
         cursor="1-0",
         payload={
             "tool_call_id": tool_call_id,
-            "tool_name": "records.milk_status.read",
+            "tool_name": "records_milk_status_read",
             "_live_semantic": {
                 "dedupe_key": f"{run_id}:tool.started:{tool_call_id}",
                 "optimistic": True,
@@ -835,7 +835,7 @@ def test_stream_run_event_chunks_dedupes_stale_transient_tool_event_after_persis
         run_id=run_id,
         sequence=1,
         event_type="tool.started",
-        payload={"tool_call_id": tool_call_id, "tool_name": "records.milk_status.read"},
+        payload={"tool_call_id": tool_call_id, "tool_name": "records_milk_status_read"},
     )
     completed = AgentEvent(
         event_id=uuid4(),

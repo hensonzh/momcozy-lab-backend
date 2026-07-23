@@ -82,83 +82,83 @@ def build_default_tool_handlers(
 ) -> dict[str, ToolHandler]:
     guidance_reference_service = device_guidance_reference_service or DeviceGuidanceReferenceService()
     handlers: dict[str, ToolHandler] = {
-        "profile.read": ProfileReadToolHandler(service=profile_service),
-        "profile.update": ProfileUpdateToolHandler(runtime_service=agent_runtime_service),
-        "business.context.read": BusinessContextReadToolHandler(
+        "profile_read": ProfileReadToolHandler(service=profile_service),
+        "profile_update": ProfileUpdateToolHandler(runtime_service=agent_runtime_service),
+        "business_context_read": BusinessContextReadToolHandler(
             records_service=records_service,
             plans_service=plans_service,
             devices_service=devices_service,
         ),
-        "records.milk_summary.read": MilkSummaryReadToolHandler(
+        "records_milk_summary_read": MilkSummaryReadToolHandler(
             records_service=records_service,
             profile_service=profile_service,
         ),
-        "records.milk_status.read": MilkStatusReadToolHandler(
+        "records_milk_status_read": MilkStatusReadToolHandler(
             records_service=records_service,
             profile_service=profile_service,
         ),
-        "records.milk_analysis.read": MilkAnalysisReadToolHandler(
+        "records_milk_analysis_read": MilkAnalysisReadToolHandler(
             records_service=records_service,
             profile_service=profile_service,
         ),
-        "records.milk_analysis.intake": MilkAnalysisIntakeToolHandler(
+        "records_milk_analysis_intake": MilkAnalysisIntakeToolHandler(
             records_service=records_service,
             profile_service=profile_service,
             runtime_service=agent_runtime_service,
         ),
-        "records.milk_analysis.evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
-        "records.growth.read": GrowthRecordsReadToolHandler(records_service=records_service),
-        "plans.current.read": PlansCurrentReadToolHandler(plans_service=plans_service),
-        "plans.calendar.read": PlansCalendarReadToolHandler(plans_service=plans_service),
-        "pregnancy_diary.query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
-        "pregnancy_diary.save": PregnancyDiarySaveToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_diary.delete": PregnancyDiaryDeleteToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy.plan_context.read": PregnancyPlanContextReadToolHandler(
+        "records_milk_analysis_evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
+        "records_growth_read": GrowthRecordsReadToolHandler(records_service=records_service),
+        "plans_current_read": PlansCurrentReadToolHandler(plans_service=plans_service),
+        "plans_calendar_read": PlansCalendarReadToolHandler(plans_service=plans_service),
+        "pregnancy_diary_query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
+        "pregnancy_diary_save": PregnancyDiarySaveToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_diary_delete": PregnancyDiaryDeleteToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_context_read": PregnancyPlanContextReadToolHandler(
             profile_service=profile_service,
             plans_service=plans_service,
         ),
-        "devices.pump_status.read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
-        "devices.guidance.read": DeviceGuidanceReadToolHandler(
+        "devices_pump_status_read": DevicesPumpStatusReadToolHandler(devices_service=devices_service),
+        "devices_guidance_read": DeviceGuidanceReadToolHandler(
             asset_service=asset_service,
             reference_service=guidance_reference_service,
         ),
-        "devices.unboxing.advance": DeviceUnboxingAdvanceToolHandler(
+        "devices_unboxing_advance": DeviceUnboxingAdvanceToolHandler(
             runtime_service=agent_runtime_service,
             asset_service=asset_service,
             reference_service=guidance_reference_service,
         ),
-        "conversation_history.image.load": ConversationHistoryImageLoadToolHandler(
+        "conversation_history_image_load": ConversationHistoryImageLoadToolHandler(
             asset_service=asset_service,
             object_storage=object_storage,
         ),
-        "plans.milk_plan.propose": MilkPlanProposeToolHandler(
+        "plans_milk_plan_propose": MilkPlanProposeToolHandler(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
         ),
-        "plans.milk_schedule.propose": MilkScheduleRescheduleProposeToolHandler(
+        "plans_milk_schedule_propose": MilkScheduleRescheduleProposeToolHandler(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
         ),
-        "pregnancy.plan_intake.start": PregnancyPlanIntakeStartToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy.plan_intake.analyze": PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy.plan_intake.advance": PregnancyPlanIntakeAdvanceToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy.plan.propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.task_create.propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.task_complete.propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy.plan_todo.propose": PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.task_delete.propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.milk_task_update.propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.milk_task_delete.propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans.plan_delete.propose": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "notifications.milk_reminder.propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.feeding_record.propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.pumping_record.propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.feeding_record_delete.propose": FeedingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.pumping_record_delete.propose": PumpingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.growth_record.propose": GrowthRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.growth_record_update.propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "records.growth_record_delete.propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_intake_start": PregnancyPlanIntakeStartToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_intake_analyze": PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_intake_advance": PregnancyPlanIntakeAdvanceToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_propose": PregnancyPlanProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_task_create_propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_task_complete_propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "pregnancy_plan_todo_propose": PregnancyPlanTodoUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_task_delete_propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_milk_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_milk_task_delete_propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "plans_plan_delete_propose": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "notifications_milk_reminder_propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_feeding_record_propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_pumping_record_propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_feeding_record_delete_propose": FeedingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_pumping_record_delete_propose": PumpingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_growth_record_propose": GrowthRecordProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_growth_record_update_propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
+        "records_growth_record_delete_propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "birth_plan_form_create": BirthPreparationArtifactToolHandler(runtime_service=agent_runtime_service, tool_name="birth_plan_form_create"),
         "labor_communication_card_create": BirthPreparationArtifactToolHandler(
             runtime_service=agent_runtime_service, tool_name="labor_communication_card_create"
@@ -172,6 +172,6 @@ def build_default_tool_handlers(
             runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"
         ),
         "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
-        "support.ticket.propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
+        "support_ticket_propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
     return handlers

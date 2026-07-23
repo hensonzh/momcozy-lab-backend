@@ -402,7 +402,7 @@ def _confirmation_failures(*, case: dict[str, Any], trace: AgentEvalTrace) -> li
     if not bool(behavior.get("requires_confirmation_before_write")):
         return []
     proposal_contracts = [
-        _contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call).endswith(".propose")
+        _contract(tool_call) for tool_call in case.get("expected_tool_calls", []) if _contract(tool_call).endswith("_propose")
     ]
     if not proposal_contracts:
         return []
@@ -484,7 +484,7 @@ def _observed_write_tool_contracts(
         {
             contract
             for tool_call in trace.tool_calls
-            if ((contract := _observed_tool_contract(tool_call)) in write_tool_names or contract.endswith(".propose"))
+            if ((contract := _observed_tool_contract(tool_call)) in write_tool_names or contract.endswith("_propose"))
             and str(_observed_tool_args(tool_call).get("action") or "").strip()
             not in non_write_tool_actions.get(contract, frozenset())
         }

@@ -34,11 +34,11 @@ _PREGNANCY_REPLY_PHASES = frozenset(
 
 def guarded_workflow_type(tool_name: str, args: dict[str, Any]) -> str | None:
     action = str(args.get("action") or "").strip()
-    if tool_name == "pregnancy.plan_intake.advance" and action in _PREGNANCY_REPLY_ACTIONS:
+    if tool_name == "pregnancy_plan_intake_advance" and action in _PREGNANCY_REPLY_ACTIONS:
         return "pregnancy_plan"
-    if tool_name == "records.milk_analysis.intake" and action == "answer":
+    if tool_name == "records_milk_analysis_intake" and action == "answer":
         return "milk_analysis"
-    if tool_name == "devices.unboxing.advance" and action in {"complete_current", "cancel"}:
+    if tool_name == "devices_unboxing_advance" and action in {"complete_current", "cancel"}:
         return "device_unboxing"
     return None
 

@@ -26,19 +26,19 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 ### 主智能体与公共能力（13）
 
-`profile.read`、`profile.update`、`plans.current.read`、`plans.calendar.read`、`plans.task_create.propose`、`plans.task_complete.propose`、`plans.task_update.propose`、`plans.task_delete.propose`、`plans.plan_delete.propose`、`pregnancy_diary.query`、`pregnancy_diary.save`、`pregnancy_diary.delete`、`conversation_history.image.load`。
+`profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`。
 
 ### 产前服务智能体（10）
 
-`pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`pregnancy.plan.propose`、`pregnancy.plan_todo.propose`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
+`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`pregnancy_plan_propose`、`pregnancy_plan_todo_propose`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
 
 ### 泌乳服务智能体（19）
 
-`records.milk_summary.read`、`records.milk_status.read`、`records.milk_analysis.read`、`records.milk_analysis.intake`、`records.milk_analysis.evaluate`、`records.growth.read`、`plans.milk_plan.propose`、`plans.milk_schedule.propose`、`plans.milk_task_update.propose`、`plans.milk_task_delete.propose`、`notifications.milk_reminder.propose`、`records.feeding_record.propose`、`records.feeding_record_delete.propose`、`records.pumping_record.propose`、`records.pumping_record_delete.propose`、`records.growth_record.propose`、`records.growth_record_update.propose`、`records.growth_record_delete.propose`、`ibclc_consult_card_create`。
+`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`records_growth_read`、`plans_milk_plan_propose`、`plans_milk_schedule_propose`、`plans_milk_task_update_propose`、`plans_milk_task_delete_propose`、`notifications_milk_reminder_propose`、`records_feeding_record_propose`、`records_feeding_record_delete_propose`、`records_pumping_record_propose`、`records_pumping_record_delete_propose`、`records_growth_record_propose`、`records_growth_record_update_propose`、`records_growth_record_delete_propose`、`ibclc_consult_card_create`。
 
 ### 设备服务智能体（5）
 
-`devices.pump_status.read`、`devices.guidance.read`、`devices.unboxing.advance`、`hospital_bag_pump_recommend`、`support.ticket.propose`。
+`devices_pump_status_read`、`devices_guidance_read`、`devices_unboxing_advance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
 
 ### 移除（1）
 
@@ -50,7 +50,7 @@ Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Al
 
 ## Tool 之外的能力
 
-`health-consultation` 和 `emotion-support` 当前是 Skill，`business.context.read` 与 `pregnancy.plan_context.read` 是内部 Handler，Health Web Search 是 Provider 能力。
+`health-consultation` 和 `emotion-support` 当前是 Skill，`business_context_read` 与 `pregnancy_plan_context_read` 是内部 Handler，Health Web Search 是 Provider 能力。
 
 ## 跨域边界
 

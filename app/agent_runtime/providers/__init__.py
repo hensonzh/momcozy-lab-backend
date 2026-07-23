@@ -9,7 +9,6 @@ from .openai_responses import (
     SdkToolDefinition,
     SdkToolNamespace,
     responses_tools_payload,
-    sdk_tool_name,
 )
 from .testing import ScriptedSdkBackend, ScriptedSdkResponse, ScriptedToolInvocation, scripted_sdk_response, scripted_tool_invocation
 
@@ -29,5 +28,4 @@ __all__ = [
     "responses_tools_payload",
     "scripted_sdk_response",
     "scripted_tool_invocation",
-    "sdk_tool_name",
 ]

@@ -20,7 +20,7 @@ def test_device_unboxing_live_eval_uses_model_decisions_and_writes_provider_trac
                 final_text="下一步认识主机按键。",
                 tool_calls=[
                     {
-                        "tool_name": "devices.unboxing.advance",
+                        "tool_name": "devices_unboxing_advance",
                         "status": "completed",
                         "args": {"model": "Air1", "action": "complete_current"},
                     }

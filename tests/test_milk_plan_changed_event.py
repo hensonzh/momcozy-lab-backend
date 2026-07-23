@@ -157,7 +157,7 @@ class MilkActionRepository:
             actor_user_id=uuid4(),
             status="running",
             runtime_pattern="sdk_only",
-            runtime_version="momcozy-agent-v1",
+            runtime_version="momcozy-agent-v2",
             prompt_version="",
             request_id="req",
             trace_id="trace",

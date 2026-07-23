@@ -1,6 +1,7 @@
 import asyncio
 import ast
 import json
+import re
 import sys
 import types
 from importlib.machinery import ModuleSpec
@@ -25,7 +26,6 @@ from app.agent_runtime.providers import (
     SdkToolDefinition,
     SdkToolNamespace,
     responses_tools_payload,
-    sdk_tool_name,
 )
 from app.agents.cozymate.skill_registry import (
     SERVICE_SKILL_FILE_NAME,
@@ -183,7 +183,7 @@ def test_agent_worker_entrypoint_is_thin_and_product_wiring_is_agent_owned() -> 
 
 def test_runtime_constants_define_the_only_supported_pattern() -> None:
     assert SDK_ONLY_RUNTIME_PATTERN == "sdk_only"
-    assert DEFAULT_RUNTIME_VERSION == "momcozy-agent-v1"
+    assert DEFAULT_RUNTIME_VERSION == "momcozy-agent-v2"
 
 
 def test_service_skill_registry_is_the_model_facing_entrypoint() -> None:
@@ -250,7 +250,6 @@ def test_service_skills_do_not_reference_legacy_tool_namespaces() -> None:
         "milk_status_query",
         "milk_records_query",
         "milk_analysis_intake_manage",
-        "milk_analysis_evaluate",
         "milk_plan_preview_create",
         "milk_plan_mutate",
         "milk_calendar_query",
@@ -374,7 +373,7 @@ def test_static_prompt_keeps_outcome_and_progressive_loading_boundaries() -> Non
     assert "产前准备服务" in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "角色定位：CozyMate 的孕期服务专家" not in DEFAULT_STABLE_SYSTEM_PROMPT
     assert "## 服务范围" not in DEFAULT_STABLE_SYSTEM_PROMPT
-    assert "records.milk_status.read" not in global_prompt
+    assert "records_milk_status_read" not in global_prompt
     assert "artifacts.hospital_bag_card.create" not in global_prompt
     assert "birth_journey_intake_manage" not in global_prompt
     assert "milk_analysis_intake_manage" not in global_prompt
@@ -468,31 +467,31 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     after_sales = registry.get("device-guidance").prompt_block()
     safety = registry.get("emotion-support").prompt_block()
 
-    assert "pregnancy.plan.propose" in pregnancy
-    assert "pregnancy.plan_intake.start" in pregnancy
-    assert "pregnancy.plan_intake.analyze" in pregnancy
-    assert "pregnancy.plan_intake.advance" in pregnancy
+    assert "pregnancy_plan_propose" in pregnancy
+    assert "pregnancy_plan_intake_start" in pregnancy
+    assert "pregnancy_plan_intake_analyze" in pregnancy
+    assert "pregnancy_plan_intake_advance" in pregnancy
     assert "0..3 轮" in pregnancy
     assert "3 轮只是上限，不是目标" in pregnancy
     assert "产检记录" in pregnancy
     assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
-    assert "plans.plan_delete.propose" in pregnancy
-    assert "pregnancy.plan_todo.propose" in pregnancy
+    assert "plans_plan_delete_propose" in pregnancy
+    assert "pregnancy_plan_todo_propose" in pregnancy
     assert "version_conflict" in pregnancy
     assert "hospital_bag_form_create" in pregnancy
     assert "hospital_bag_card_create" in pregnancy
     assert "labor_communication_card_create" in pregnancy
 
     assert "追奶、稳奶还是减奶" in lactation
-    assert "records.milk_status.read" in lactation
-    assert "records.milk_summary.read" in lactation
-    assert "plans.milk_plan.propose" in lactation
+    assert "records_milk_status_read" in lactation
+    assert "records_milk_summary_read" in lactation
+    assert "plans_milk_plan_propose" in lactation
 
     assert "Air1 (BP334)" in after_sales
     assert "每轮给 1 个主步骤" in after_sales
-    assert "devices.guidance.read" in after_sales
-    assert "support.ticket.propose" in after_sales
+    assert "devices_guidance_read" in after_sales
+    assert "support_ticket_propose" in after_sales
 
     assert "宝宝交给身边可信成年人" in safety
     assert "当前没有情绪支持专用工具" in safety
@@ -501,26 +500,26 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
 def test_tool_contract_registry_contains_only_model_visible_tools_and_loading_policy() -> None:
     registry = default_tool_registry()
     registered_names = set(registry.names_for_sdk())
-    support_ticket = registry.get("support.ticket.propose")
+    support_ticket = registry.get("support_ticket_propose")
     ibclc_consult = registry.get("ibclc_consult_card_create")
-    milk_status = registry.get("records.milk_status.read")
+    milk_status = registry.get("records_milk_status_read")
 
     assert registered_names.isdisjoint(
         {
-            "business.context.read",
+            "business_context_read",
             "diary.recent.read",
-            "pregnancy.plan_context.read",
+            "pregnancy_plan_context_read",
             "memory.create.propose",
             "plans.milk_plan_preview.create",
             "pregnancy.plan_create.propose",
             "birth_journey_plan_card_create",
         }
     )
-    assert "plans.milk_plan.propose" in registered_names
-    assert "pregnancy.plan.propose" in registered_names
-    assert "pregnancy.plan_intake.start" in registered_names
-    assert "pregnancy.plan_intake.analyze" in registered_names
-    assert "pregnancy.plan_intake.advance" in registered_names
+    assert "plans_milk_plan_propose" in registered_names
+    assert "pregnancy_plan_propose" in registered_names
+    assert "pregnancy_plan_intake_start" in registered_names
+    assert "pregnancy_plan_intake_analyze" in registered_names
+    assert "pregnancy_plan_intake_advance" in registered_names
     assert {contract.loading_mode for contract in registry.list()} == {"eager", "deferred"}
     assert set(registry.eager_names()).isdisjoint(registry.deferred_names())
     assert set(registry.eager_names()) | set(registry.deferred_names()) == registered_names
@@ -546,19 +545,26 @@ def test_model_tool_schema_registry_has_no_internal_or_legacy_orphans() -> None:
     assert set(input_schema_tool_names()) == set(registry.names_for_sdk())
 
 
+def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
+    registry = default_tool_registry()
+
+    for contract in registry.list():
+        assert re.fullmatch(r"[a-zA-Z0-9_-]+", contract.name)
+
+
 @pytest.mark.parametrize(
     ("tool_name", "effect_scope", "action_type", "loading_mode"),
     [
-        ("profile.update", "user_resource", "profile.update", "eager"),
-        ("records.milk_status.read", "none", None, "eager"),
-        ("records.feeding_record.propose", "user_resource", "records.feeding_record.create", "deferred"),
-        ("records.feeding_record_delete.propose", "user_resource", "records.feeding_record.delete", "deferred"),
-        ("records.growth_record_update.propose", "user_resource", "records.growth_record.update", "deferred"),
-        ("plans.task_complete.propose", "user_resource", "plans.task.complete", "deferred"),
-        ("plans.milk_plan.propose", "user_resource", "plans.milk_plan.create", "deferred"),
-        ("pregnancy_diary.save", "user_resource", "pregnancy_diary.entry.save", "eager"),
+        ("profile_update", "user_resource", "profile.update", "eager"),
+        ("records_milk_status_read", "none", None, "eager"),
+        ("records_feeding_record_propose", "user_resource", "records.feeding_record.create", "deferred"),
+        ("records_feeding_record_delete_propose", "user_resource", "records.feeding_record.delete", "deferred"),
+        ("records_growth_record_update_propose", "user_resource", "records.growth_record.update", "deferred"),
+        ("plans_task_complete_propose", "user_resource", "plans.task.complete", "deferred"),
+        ("plans_milk_plan_propose", "user_resource", "plans.milk_plan.create", "deferred"),
+        ("pregnancy_diary_save", "user_resource", "pregnancy_diary.entry.save", "eager"),
         ("hospital_bag_card_create", "agent_internal", None, "deferred"),
-        ("support.ticket.propose", "agent_internal", None, "deferred"),
+        ("support_ticket_propose", "agent_internal", None, "deferred"),
     ],
 )
 def test_model_tool_contracts_keep_effect_boundary(
@@ -583,38 +589,38 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
 
     assert len(assigned_contracts) == len(set(assigned_contracts))
     assert root_contracts == [
-        "conversation_history.image.load",
+        "conversation_history_image_load",
         "load_service_skill",
-        "profile.read",
-        "profile.update",
+        "profile_read",
+        "profile_update",
     ]
     assert "records" not in namespaces
     assert "plans" not in namespaces
     assert "devices" not in namespaces
     assert "milk_management" in namespaces
     assert "device_support" in namespaces
-    assert "records.milk_status.read" in namespaces["milk_management"].tool_contracts
-    assert "records.milk_summary.read" in namespaces["milk_management"].tool_contracts
-    assert "records.milk_analysis.read" in namespaces["milk_management"].tool_contracts
-    assert "records.growth.read" in namespaces["milk_management"].tool_contracts
-    assert "records.feeding_record.propose" in namespaces["milk_management"].deferred_tool_contracts
-    assert "records.pumping_record.propose" in namespaces["milk_management"].deferred_tool_contracts
-    assert "records.growth_record.propose" in namespaces["milk_management"].deferred_tool_contracts
-    assert "records.milk_status.read" not in namespaces["milk_management"].deferred_tool_contracts
-    assert "records.milk_analysis.read" not in namespaces["milk_management"].deferred_tool_contracts
-    assert "records.growth.read" not in namespaces["milk_management"].deferred_tool_contracts
-    assert "plans.milk_plan.propose" in namespaces["milk_management"].deferred_tool_contracts
-    assert "pregnancy.plan.propose" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "pregnancy.plan_intake.start" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "pregnancy.plan_intake.analyze" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "pregnancy.plan_intake.advance" in namespaces["birth_prep"].deferred_tool_contracts
-    assert "plans.calendar.read" not in namespaces["milk_management"].deferred_tool_contracts
-    assert "plans.task_update.propose" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "records_milk_status_read" in namespaces["milk_management"].tool_contracts
+    assert "records_milk_summary_read" in namespaces["milk_management"].tool_contracts
+    assert "records_milk_analysis_read" in namespaces["milk_management"].tool_contracts
+    assert "records_growth_read" in namespaces["milk_management"].tool_contracts
+    assert "records_feeding_record_propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "records_pumping_record_propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "records_growth_record_propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "records_milk_status_read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "records_milk_analysis_read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "records_growth_read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "plans_milk_plan_propose" in namespaces["milk_management"].deferred_tool_contracts
+    assert "pregnancy_plan_propose" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "pregnancy_plan_intake_start" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "pregnancy_plan_intake_analyze" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "pregnancy_plan_intake_advance" in namespaces["birth_prep"].deferred_tool_contracts
+    assert "plans_calendar_read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "plans_task_update_propose" in namespaces["birth_prep"].deferred_tool_contracts
     assert "hospital_bag_cart_update" in namespaces["hospital_bag_cart"].deferred_tool_contracts
     assert "hospital_bag_pump_recommend" in namespaces["pump_recommendation"].deferred_tool_contracts
-    assert "devices.pump_status.read" in namespaces["device_support"].tool_contracts
-    assert "devices.guidance.read" in namespaces["device_support"].tool_contracts
-    assert "support.ticket.propose" in namespaces["device_support"].deferred_tool_contracts
+    assert "devices_pump_status_read" in namespaces["device_support"].tool_contracts
+    assert "devices_guidance_read" in namespaces["device_support"].tool_contracts
+    assert "support_ticket_propose" in namespaces["device_support"].deferred_tool_contracts
     assert "ibclc_consult_card_create" in namespaces["health_consultation"].deferred_tool_contracts
 
 
@@ -636,7 +642,6 @@ def test_responses_tool_parameters_match_registered_input_schemas() -> None:
     tools = tuple(
         SdkToolDefinition(
             contract_name=contract.name,
-            sdk_name=sdk_tool_name(contract.name),
             description=contract.description,
             params_json_schema=contract.input_schema,
             invoke=invoke,
@@ -654,46 +659,46 @@ def test_responses_tool_parameters_match_registered_input_schemas() -> None:
 
     payload_by_name = {item["name"]: item for item in responses_tools_payload(request)}
     for contract in registry.list():
-        assert payload_by_name[sdk_tool_name(contract.name)]["parameters"] == contract.input_schema
+        assert payload_by_name[contract.name]["parameters"] == contract.input_schema
 
 
 def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     registry = default_tool_registry()
-    profile_schema = registry.get("profile.read").input_schema
-    profile_update_schema = registry.get("profile.update").input_schema
-    support_schema = registry.get("support.ticket.propose").input_schema
-    milk_schema = registry.get("records.milk_summary.read").input_schema
-    milk_status_schema = registry.get("records.milk_status.read").input_schema
-    milk_analysis_schema = registry.get("records.milk_analysis.read").input_schema
-    growth_read_schema = registry.get("records.growth.read").input_schema
-    plans_schema = registry.get("plans.current.read").input_schema
-    calendar_schema = registry.get("plans.calendar.read").input_schema
-    diary_query_schema = registry.get("pregnancy_diary.query").input_schema
-    diary_save_schema = registry.get("pregnancy_diary.save").input_schema
-    diary_delete_schema = registry.get("pregnancy_diary.delete").input_schema
-    devices_schema = registry.get("devices.pump_status.read").input_schema
-    device_guidance_schema = registry.get("devices.guidance.read").input_schema
-    history_image_contract = registry.get("conversation_history.image.load")
+    profile_schema = registry.get("profile_read").input_schema
+    profile_update_schema = registry.get("profile_update").input_schema
+    support_schema = registry.get("support_ticket_propose").input_schema
+    milk_schema = registry.get("records_milk_summary_read").input_schema
+    milk_status_schema = registry.get("records_milk_status_read").input_schema
+    milk_analysis_schema = registry.get("records_milk_analysis_read").input_schema
+    growth_read_schema = registry.get("records_growth_read").input_schema
+    plans_schema = registry.get("plans_current_read").input_schema
+    calendar_schema = registry.get("plans_calendar_read").input_schema
+    diary_query_schema = registry.get("pregnancy_diary_query").input_schema
+    diary_save_schema = registry.get("pregnancy_diary_save").input_schema
+    diary_delete_schema = registry.get("pregnancy_diary_delete").input_schema
+    devices_schema = registry.get("devices_pump_status_read").input_schema
+    device_guidance_schema = registry.get("devices_guidance_read").input_schema
+    history_image_contract = registry.get("conversation_history_image_load")
     history_image_schema = history_image_contract.input_schema
-    milk_plan_schema = registry.get("plans.milk_plan.propose").input_schema
-    milk_schedule_schema = registry.get("plans.milk_schedule.propose").input_schema
-    pregnancy_plan_schema = registry.get("pregnancy.plan.propose").input_schema
-    pregnancy_todo_schema = registry.get("pregnancy.plan_todo.propose").input_schema
-    pregnancy_intake_start_schema = registry.get("pregnancy.plan_intake.start").input_schema
-    pregnancy_intake_analyze_schema = registry.get("pregnancy.plan_intake.analyze").input_schema
-    pregnancy_intake_advance_schema = registry.get("pregnancy.plan_intake.advance").input_schema
-    task_create_schema = registry.get("plans.task_create.propose").input_schema
-    task_complete_schema = registry.get("plans.task_complete.propose").input_schema
-    task_update_schema = registry.get("plans.task_update.propose").input_schema
-    task_delete_schema = registry.get("plans.task_delete.propose").input_schema
-    plan_delete_schema = registry.get("plans.plan_delete.propose").input_schema
-    plan_delete_description = registry.get("plans.plan_delete.propose").description
-    milk_reminder_schema = registry.get("notifications.milk_reminder.propose").input_schema
-    feeding_schema = registry.get("records.feeding_record.propose").input_schema
-    pumping_schema = registry.get("records.pumping_record.propose").input_schema
-    record_delete_schema = registry.get("records.feeding_record_delete.propose").input_schema
-    growth_schema = registry.get("records.growth_record.propose").input_schema
-    growth_update_schema = registry.get("records.growth_record_update.propose").input_schema
+    milk_plan_schema = registry.get("plans_milk_plan_propose").input_schema
+    milk_schedule_schema = registry.get("plans_milk_schedule_propose").input_schema
+    pregnancy_plan_schema = registry.get("pregnancy_plan_propose").input_schema
+    pregnancy_todo_schema = registry.get("pregnancy_plan_todo_propose").input_schema
+    pregnancy_intake_start_schema = registry.get("pregnancy_plan_intake_start").input_schema
+    pregnancy_intake_analyze_schema = registry.get("pregnancy_plan_intake_analyze").input_schema
+    pregnancy_intake_advance_schema = registry.get("pregnancy_plan_intake_advance").input_schema
+    task_create_schema = registry.get("plans_task_create_propose").input_schema
+    task_complete_schema = registry.get("plans_task_complete_propose").input_schema
+    task_update_schema = registry.get("plans_task_update_propose").input_schema
+    task_delete_schema = registry.get("plans_task_delete_propose").input_schema
+    plan_delete_schema = registry.get("plans_plan_delete_propose").input_schema
+    plan_delete_description = registry.get("plans_plan_delete_propose").description
+    milk_reminder_schema = registry.get("notifications_milk_reminder_propose").input_schema
+    feeding_schema = registry.get("records_feeding_record_propose").input_schema
+    pumping_schema = registry.get("records_pumping_record_propose").input_schema
+    record_delete_schema = registry.get("records_feeding_record_delete_propose").input_schema
+    growth_schema = registry.get("records_growth_record_propose").input_schema
+    growth_update_schema = registry.get("records_growth_record_update_propose").input_schema
     birth_form_schema = registry.get("birth_plan_form_create").input_schema
     labor_card_schema = registry.get("labor_communication_card_create").input_schema
     hospital_bag_form_schema = registry.get("hospital_bag_form_create").input_schema
@@ -820,7 +825,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "abandon",
     }
     assert "topic" not in pregnancy_intake_advance_schema["properties"]
-    assert "expected_step" not in registry.get("devices.unboxing.advance").input_schema["properties"]
+    assert "expected_step" not in registry.get("devices_unboxing_advance").input_schema["properties"]
     assert "runtime_workflow_context" not in pregnancy_intake_advance_schema["properties"]
     assert "runtime_checkup_attachment_count" not in pregnancy_intake_advance_schema["properties"]
     assert task_create_schema["additionalProperties"] is False
@@ -971,13 +976,13 @@ def test_sdk_runner_uses_injected_backend_and_never_legacy_loop() -> None:
         actor_user_id="user_1",
         instructions="Be concise.",
         model_input=[{"role": "user", "content": "hello"}],
-        tool_names=("profile.read",),
+        tool_names=("profile_read",),
     )
 
     result = asyncio.run(OpenAIResponsesRunner(backend=FakeSdkBackend()).run_reasoning(request))
 
     assert result.final_text == "hello"
-    assert result.tool_calls == [{"tool_name": "profile.read"}]
+    assert result.tool_calls == [{"tool_name": "profile_read"}]
 
 
 def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
@@ -990,35 +995,32 @@ def test_sdk_request_can_render_responses_namespace_tool_payload() -> None:
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "milk summary"}],
-        tool_names=("load_service_skill", "records.milk_status.read", "records.feeding_record.propose"),
+        tool_names=("load_service_skill", "records_milk_status_read", "records_feeding_record_propose"),
         tool_namespaces=(
             SdkToolNamespace(
                 name="records",
                 description="记录工具。",
-                tool_names=("records.milk_status.read", "records.feeding_record.propose"),
-                deferred_tool_names=("records.feeding_record.propose",),
+                tool_names=("records_milk_status_read", "records_feeding_record_propose"),
+                deferred_tool_names=("records_feeding_record_propose",),
             ),
         ),
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
                 contract_name="load_service_skill",
-                sdk_name="load_service_skill",
                 description="加载服务技能。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
             ),
             SdkToolDefinition(
-                contract_name="records.milk_status.read",
-                sdk_name=sdk_tool_name("records.milk_status.read"),
+                contract_name="records_milk_status_read",
                 description="读取奶量状态。",
                 params_json_schema={"type": "object", "properties": {}},
                 namespace_name="records",
                 invoke=invoke_json,
             ),
             SdkToolDefinition(
-                contract_name="records.feeding_record.propose",
-                sdk_name=sdk_tool_name("records.feeding_record.propose"),
+                contract_name="records_feeding_record_propose",
                 description="提出喂养记录草稿。",
                 params_json_schema={"type": "object", "properties": {}},
                 namespace_name="records",
@@ -1106,20 +1108,19 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
         actor_user_id="user_1",
         instructions="Use namespace tools.",
         model_input=[{"role": "user", "content": "帮我记录一次瓶喂 80ml"}],
-        tool_names=("records.feeding_record.propose",),
+        tool_names=("records_feeding_record_propose",),
         tool_namespaces=(
             SdkToolNamespace(
                 name="records",
                 description="记录工具。",
-                tool_names=("records.feeding_record.propose",),
-                deferred_tool_names=("records.feeding_record.propose",),
+                tool_names=("records_feeding_record_propose",),
+                deferred_tool_names=("records_feeding_record_propose",),
             ),
         ),
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
-                contract_name="records.feeding_record.propose",
-                sdk_name=sdk_tool_name("records.feeding_record.propose"),
+                contract_name="records_feeding_record_propose",
                 description="提出喂养记录草稿。",
                 params_json_schema={"type": "object", "properties": {"volume_ml": {"type": "number"}}},
                 invoke=invoke_json,
@@ -1140,7 +1141,7 @@ def test_sdk_runner_uses_responses_namespace_backend_for_tool_search(monkeypatch
     assert result.final_text == "记录草稿已准备好。"
     assert result.tool_calls == [
         {
-            "tool_name": "records.feeding_record.propose",
+            "tool_name": "records_feeding_record_propose",
             "status": "completed",
             "args": {"volume_ml": 80},
             "safe_output": {"ok": True},
@@ -1262,7 +1263,7 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
                     {
                         "type": "function_call",
                         "namespace": "milk_records",
-                        "name": "read_status",
+                        "name": "milk_records_read_status",
                         "call_id": "call_1",
                         "arguments": "{}",
                     }
@@ -1301,27 +1302,25 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
             SdkToolNamespace(
                 name="milk_records",
                 description="奶量记录工具。",
-                tool_names=("milk_records.read_status",),
+                tool_names=("milk_records_read_status",),
             ),
             SdkToolNamespace(
                 name="device_records",
                 description="设备记录工具。",
-                tool_names=("device_records.read_status",),
+                tool_names=("device_records_read_status",),
             ),
         ),
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
-                contract_name="milk_records.read_status",
-                sdk_name="read_status",
+                contract_name="milk_records_read_status",
                 description="读取奶量状态。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
                 namespace_name="milk_records",
             ),
             SdkToolDefinition(
-                contract_name="device_records.read_status",
-                sdk_name="read_status",
+                contract_name="device_records_read_status",
                 description="读取设备状态。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=conflicting_invoke_json,
@@ -1334,7 +1333,7 @@ def test_sdk_runner_routes_responses_function_call_by_namespace_and_name(monkeyp
 
     assert result.final_text == "已读取。"
     assert invoked == ["milk"]
-    assert result.tool_calls[0]["tool_name"] == "milk_records.read_status"
+    assert result.tool_calls[0]["tool_name"] == "milk_records_read_status"
 
 
 def test_responses_runner_appends_skill_as_function_call_output(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1377,7 +1376,6 @@ def test_responses_runner_appends_skill_as_function_call_output(monkeypatch: pyt
         tools=(
             SdkToolDefinition(
                 contract_name="load_service_skill",
-                sdk_name="load_service_skill",
                 description="加载服务技能。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1435,8 +1433,7 @@ def test_responses_runner_returns_recoverable_tool_errors_to_the_model(monkeypat
         model_input=[{"role": "user", "content": "还没确认"}],
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy.plan_intake.advance",
-                sdk_name="pregnancy_plan_intake_advance",
+                contract_name="pregnancy_plan_intake_advance",
                 description="Advance the active intake.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1494,8 +1491,7 @@ def test_responses_runner_keeps_tool_commit_failures_fatal(monkeypatch: pytest.M
         model_input=[{"role": "user", "content": "继续"}],
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy.plan_intake.advance",
-                sdk_name="pregnancy_plan_intake_advance",
+                contract_name="pregnancy_plan_intake_advance",
                 description="Advance the active intake.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1551,8 +1547,7 @@ def test_responses_runner_appends_image_inside_function_call_output(monkeypatch:
         model_input=[{"role": "user", "content": "这张图里有什么？"}],
         tools=(
             SdkToolDefinition(
-                contract_name="conversation_history.image.load",
-                sdk_name="conversation_history_image_load",
+                contract_name="conversation_history_image_load",
                 description="加载对话历史中由智能体回复展示过的图片。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1629,8 +1624,7 @@ def test_responses_runner_persists_loop_items_in_provider_order(monkeypatch: pyt
         on_context_items=persist,
         tools=(
             SdkToolDefinition(
-                contract_name="profile.read",
-                sdk_name="profile_read",
+                contract_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -2070,8 +2064,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
-                contract_name="profile.read",
-                sdk_name="profile_read",
+                contract_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2086,7 +2079,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
     assert result.final_text == "保存好了。"
     assert result.tool_calls == [
         {
-            "tool_name": "profile.read",
+            "tool_name": "profile_read",
             "status": "completed",
             "args": {"owner_user_id": "user_1"},
             "safe_output": {"args": {"owner_user_id": "user_1"}, "status": "ok"},
@@ -2154,8 +2147,7 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
         model_input=[{"role": "user", "content": "读取资料"}],
         tools=(
             SdkToolDefinition(
-                contract_name="profile.read",
-                sdk_name="profile_read",
+                contract_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2246,8 +2238,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
-                contract_name="profile.update",
-                sdk_name="profile_update",
+                contract_name="profile_update",
                 description="Update profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2291,8 +2282,7 @@ def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(
         tool_search_enabled=True,
         tools=(
             SdkToolDefinition(
-                contract_name="profile.read",
-                sdk_name="profile_read",
+                contract_name="profile_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2333,7 +2323,7 @@ def test_sdk_runner_records_backend_metrics() -> None:
         actor_user_id="user_1",
         instructions="Be concise.",
         model_input=[{"role": "user", "content": "hello"}],
-        tool_names=("profile.read",),
+        tool_names=("profile_read",),
     )
 
     asyncio.run(OpenAIResponsesRunner(backend=FakeSdkBackend(), metrics=metrics).run_reasoning(request))

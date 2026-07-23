@@ -98,24 +98,24 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
     default_limit = config.default_limit
     recent_limit = config.recent_limit
     if skill_id == ServiceSkillId.BIRTH_PREP:
-        return (BusinessFactSource("pregnancy.plan_context.read", "pregnancy", {"limit": default_limit}),)
+        return (BusinessFactSource("pregnancy_plan_context_read", "pregnancy", {"limit": default_limit}),)
     if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
-            BusinessFactSource("profile.read", "profile"),
-            BusinessFactSource("records.milk_status.read", "milk_status", {"days": config.milk_days, "limit": default_limit}),
+            BusinessFactSource("profile_read", "profile"),
+            BusinessFactSource("records_milk_status_read", "milk_status", {"days": config.milk_days, "limit": default_limit}),
         )
     if skill_id == ServiceSkillId.HEALTH_CONSULTATION:
         return (
-            BusinessFactSource("profile.read", "profile"),
-            BusinessFactSource("plans.current.read", "plans", {"limit": default_limit}),
-            BusinessFactSource("records.milk_summary.read", "milk_summary", {"days": config.milk_days, "limit": recent_limit}),
+            BusinessFactSource("profile_read", "profile"),
+            BusinessFactSource("plans_current_read", "plans", {"limit": default_limit}),
+            BusinessFactSource("records_milk_summary_read", "milk_summary", {"days": config.milk_days, "limit": recent_limit}),
         )
     if skill_id == ServiceSkillId.EMOTION_SUPPORT:
-        return (BusinessFactSource("profile.read", "profile"),)
+        return (BusinessFactSource("profile_read", "profile"),)
     if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
         return (
-            BusinessFactSource("profile.read", "profile"),
-            BusinessFactSource("devices.pump_status.read", "devices", {"limit": default_limit}),
+            BusinessFactSource("profile_read", "profile"),
+            BusinessFactSource("devices_pump_status_read", "devices", {"limit": default_limit}),
         )
     return ()
 

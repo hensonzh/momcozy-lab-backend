@@ -68,15 +68,15 @@ def test_workflow_reply_guard_accepts_the_current_cursor() -> None:
 @pytest.mark.parametrize(
     ("tool_name", "action", "workflow_type"),
     [
-        ("pregnancy.plan_intake.advance", "submit_personalized_followup", "pregnancy_plan"),
-        ("pregnancy.plan_intake.advance", "skip_checkup_records", "pregnancy_plan"),
-        ("records.milk_analysis.intake", "answer", "milk_analysis"),
-        ("devices.unboxing.advance", "complete_current", "device_unboxing"),
-        ("devices.unboxing.advance", "cancel", "device_unboxing"),
-        ("records.milk_analysis.intake", "start", None),
-        ("records.milk_analysis.intake", "resume", None),
-        ("devices.unboxing.advance", "start", None),
-        ("devices.unboxing.advance", "resume", None),
+        ("pregnancy_plan_intake_advance", "submit_personalized_followup", "pregnancy_plan"),
+        ("pregnancy_plan_intake_advance", "skip_checkup_records", "pregnancy_plan"),
+        ("records_milk_analysis_intake", "answer", "milk_analysis"),
+        ("devices_unboxing_advance", "complete_current", "device_unboxing"),
+        ("devices_unboxing_advance", "cancel", "device_unboxing"),
+        ("records_milk_analysis_intake", "start", None),
+        ("records_milk_analysis_intake", "resume", None),
+        ("devices_unboxing_advance", "start", None),
+        ("devices_unboxing_advance", "resume", None),
     ],
 )
 def test_only_reply_driven_workflow_actions_require_a_cursor(

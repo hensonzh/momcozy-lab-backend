@@ -62,7 +62,7 @@ Step3：推荐孕期计划服务
 要求：根据流畅度，可以和之前的Step合并
 
 分支2：用户已经有 active 孕期计划
-要求：不要再次邀约“制定一份孕期计划”，不要调用 `pregnancy.plan.propose` 重新生成；直接沿着用户上文的关键线索追问 1 个问题，帮助定位她现在卡在哪里，并继续围绕已有计划查看、推进或更新完成状态。
+要求：不要再次邀约“制定一份孕期计划”，不要调用 `pregnancy_plan_propose` 重新生成；直接沿着用户上文的关键线索追问 1 个问题，帮助定位她现在卡在哪里，并继续围绕已有计划查看、推进或更新完成状态。
 要求：追问要顺藤摸瓜，不要改成泛泛问卷；例如用户说“我好焦虑，不知道接下来怎么办”，可以问她现在最卡的是计划里的某一项、临近产检/入院安排，还是突然冒出来的新担心。
 
 [DONT]
@@ -92,18 +92,18 @@ Step3：推荐孕期计划服务
 - 把“不清楚/忘了/暂时没有/没有特殊情况”当成流程阻塞。
 
 [DO]
-要求：用户确认开始制定孕期计划后，调用 `pregnancy.plan_intake.start`，参数传 `{}`。不要先在聊天里收集 3 个字段，也不要自己手写表单。只有用户明确说“重新开始/放弃当前采集后重来”时，才传 `{"restart": true}`；不要静默覆盖仍在进行的采集。
-要求：用户明确说暂时不做、放弃这次孕期计划采集时，调用 `pregnancy.plan_intake.advance` 的 `abandon`，停止当前流程；之后若要继续，需要重新打开可信表单。
-要求：`pregnancy.plan_intake.start` 创建表单后，最终回复只需简短说明请完成表单；不要同时显示针对性分析、补充信息问题或计划预览。
-要求：当前用户消息包含应用侧校验过的 `birth_journey_basic_info_intake` 表单提交时，调用 `pregnancy.plan_intake.analyze`，参数传 `{}`；不要把表单 JSON 复制到工具参数或正文。
-要求：`pregnancy.plan_intake.analyze` 返回后，只执行工具给出的当前 `workflow_phase`：
-  1. `personalized_followup`：用简短、日常的语言说明 `current_followup` 和计划的关系，再只问 `current_followup.question`，每轮一个信息点。按工具给出的 `current_followup` 动态推进 0..3 轮；3 轮只是上限，不是目标，绝不重复 `asked_followups`。用户回答后调用 `pregnancy.plan_intake.advance` 的 `submit_personalized_followup`；只有用户明确要求跳过全部剩余追问时才调用 `finish_personalized_followups`。
+要求：用户确认开始制定孕期计划后，调用 `pregnancy_plan_intake_start`，参数传 `{}`。不要先在聊天里收集 3 个字段，也不要自己手写表单。只有用户明确说“重新开始/放弃当前采集后重来”时，才传 `{"restart": true}`；不要静默覆盖仍在进行的采集。
+要求：用户明确说暂时不做、放弃这次孕期计划采集时，调用 `pregnancy_plan_intake_advance` 的 `abandon`，停止当前流程；之后若要继续，需要重新打开可信表单。
+要求：`pregnancy_plan_intake_start` 创建表单后，最终回复只需简短说明请完成表单；不要同时显示针对性分析、补充信息问题或计划预览。
+要求：当前用户消息包含应用侧校验过的 `birth_journey_basic_info_intake` 表单提交时，调用 `pregnancy_plan_intake_analyze`，参数传 `{}`；不要把表单 JSON 复制到工具参数或正文。
+要求：`pregnancy_plan_intake_analyze` 返回后，只执行工具给出的当前 `workflow_phase`：
+  1. `personalized_followup`：用简短、日常的语言说明 `current_followup` 和计划的关系，再只问 `current_followup.question`，每轮一个信息点。按工具给出的 `current_followup` 动态推进 0..3 轮；3 轮只是上限，不是目标，绝不重复 `asked_followups`。用户回答后调用 `pregnancy_plan_intake_advance` 的 `submit_personalized_followup`；只有用户明确要求跳过全部剩余追问时才调用 `finish_personalized_followups`。
   2. `checkup_done_question`：孕早期先只确认是否做过产检；分别调用 `confirm_checkup_done`、`confirm_no_checkup_yet` 或 `confirm_checkup_unknown`。
   3. `checkup_records_upload`：只请用户上传目前能找到的产检记录，或允许直接跳过。看到当前消息的真实图片/PDF附件时调用 `mark_checkup_records_uploaded`；仅口头说“上传了”或工具参数不能代替附件。没有附件时继续等待，用户明确跳过时调用 `skip_checkup_records`。
   4. `final_plan_confirmation`：只原样问：“还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。”用户无补充时调用 `confirm_ready_to_generate`；有最后补充时调用 `submit_final_additional_info` 并只传本轮新增信息。
-  5. `ready_to_generate`：同一轮立即调用 `pregnancy.plan.propose`，不要再问一次，也不要重新打开表单。
-要求：每次 `pregnancy.plan_intake.advance` 只提交当前可见步骤的一项动作；不得把内部 workflow、附件数量或 owner 信息放进模型参数。用户对当前个性化问题回答“不知道、还没确认、暂时没有”时，仍使用 `submit_personalized_followup` 记录这项答案；只有用户明确要求跳过全部剩余追问时才使用 `finish_personalized_followups`。
-要求：如果用户表示稍后再说、暂停，或本轮没有回答当前可见问题，不调用 `pregnancy.plan_intake.advance`，保留当前步骤；只有明确放弃整个孕期计划采集时才使用 `abandon`。
+  5. `ready_to_generate`：同一轮立即调用 `pregnancy_plan_propose`，不要再问一次，也不要重新打开表单。
+要求：每次 `pregnancy_plan_intake_advance` 只提交当前可见步骤的一项动作；不得把内部 workflow、附件数量或 owner 信息放进模型参数。用户对当前个性化问题回答“不知道、还没确认、暂时没有”时，仍使用 `submit_personalized_followup` 记录这项答案；只有用户明确要求跳过全部剩余追问时才使用 `finish_personalized_followups`。
+要求：如果用户表示稍后再说、暂停，或本轮没有回答当前可见问题，不调用 `pregnancy_plan_intake_advance`，保留当前步骤；只有明确放弃整个孕期计划采集时才使用 `abandon`。
 要求：不要把模型基于年龄、IVF、双胎、产检信息或用户措辞做出的推断，包装成用户明确表达过的内容。只有用户真的说过焦虑、担心、心里没底等，才能说“你提到/刚才说”；如果只是客观信息提示风险，只能说“这个因素会影响计划重点，我会纳入安排/建议和医生确认”。
 要求：快捷回复由 runtime 在最终回复后统一生成；本技能不要调用快捷回复工具，也不要在正文里输出快捷回复候选。
 
@@ -118,14 +118,14 @@ Step3：推荐孕期计划服务
 - 为用户整理孕期计划，让用户知道当前展开阶段最该做什么、为什么是她要做，以及后续阶段会怎样一路推进到住院生产。
 
 [DO]
-要求：如果 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 显示已经存在 active 孕期计划，说明用户已经有计划；不要再次调用 `pregnancy.plan.propose` 重新生成。用户要求“生成/制定孕期计划”时，先说明已有计划，并围绕查看、继续推进或宝宝和我页面里的计划展开。
-要求：只有 `pregnancy.plan_intake.advance` 返回 `ready_to_generate` 后，才调用 `pregnancy.plan.propose` 整理孕期计划。
-要求：调用 `pregnancy.plan.propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办。
-要求：`pregnancy.plan.propose` 会在当前工具调用中同步写入。只有工具返回 `action_status=applied` / `write_succeeded=true` 后，才说明计划已经生成并同步到宝宝和我；结构化计划卡展示当前阶段待办，正文不要复述完整计划。若返回 `action_status=failed` / `write_succeeded=false`，必须明确说明未生成、未同步并可重试；不得创建成功假象或把未落库的卡片说成计划。
-要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 的 `current_todos` 能用事项名或编号唯一定位到 `item_id`，调用 `pregnancy.plan_todo.propose`，同时传该计划的 `plan_id` 和 `version` 同步完成状态。
+要求：如果 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 显示已经存在 active 孕期计划，说明用户已经有计划；不要再次调用 `pregnancy_plan_propose` 重新生成。用户要求“生成/制定孕期计划”时，先说明已有计划，并围绕查看、继续推进或宝宝和我页面里的计划展开。
+要求：只有 `pregnancy_plan_intake_advance` 返回 `ready_to_generate` 后，才调用 `pregnancy_plan_propose` 整理孕期计划。
+要求：调用 `pregnancy_plan_propose` 前不要输出给用户可见的过渡文本；不要在计划生成前展开阶段、当前重点、温馨提醒、接下来建议或我能帮你做，也不要展开当前阶段、后续阶段或临产住院前的待办。
+要求：`pregnancy_plan_propose` 会在当前工具调用中同步写入。只有工具返回 `action_status=applied` / `write_succeeded=true` 后，才说明计划已经生成并同步到宝宝和我；结构化计划卡展示当前阶段待办，正文不要复述完整计划。若返回 `action_status=failed` / `write_succeeded=false`，必须明确说明未生成、未同步并可重试；不得创建成功假象或把未落库的卡片说成计划。
+要求：如果用户在后续对话里明确表示已经完成或取消完成某一项，并且 `runtime_loaded_service_skill.business_facts.pregnancy.plans` 的 `current_todos` 能用事项名或编号唯一定位到 `item_id`，调用 `pregnancy_plan_todo_propose`，同时传该计划的 `plan_id` 和 `version` 同步完成状态。
 要求：如果当前待办无法唯一定位，先追问编号或事项名；不要猜测，不要用普通 `PlanTask` 工具替代孕期计划卡片待办工具。
 要求：如果用户说“我完成了那个/检查那个”等无法唯一定位的表达，先追问编号或事项名，不要猜测。
-要求：`pregnancy.plan_todo.propose` 返回后，如果工具结果或可信计划上下文给出该事项的下一步价值/后续帮助，可以在最终回复里顺带提供 1 个最相关的后续帮助；不要重新生成计划，不要复述完整计划。
+要求：`pregnancy_plan_todo_propose` 返回后，如果工具结果或可信计划上下文给出该事项的下一步价值/后续帮助，可以在最终回复里顺带提供 1 个最相关的后续帮助；不要重新生成计划，不要复述完整计划。
 要求：如果工具返回 `version_conflict`，重新调用 `load_service_skill(service_skill_id=birth-prep)` 刷新计划版本和当前待办；目标仍唯一时最多重试一次，仍失败则如实说明未同步，不要声称已完成。
 
 ### STATE_D: 删除孕期计划
@@ -135,9 +135,9 @@ Step3：推荐孕期计划服务
 
 [DO]
 要求：用户提到删除当前计划、已有计划或这份计划时，都按已保存的孕期计划处理。
-要求：删除具有后端副作用。用户当前已经明确表达删除意图，并且能从 trusted owner-scoped 上下文唯一定位到已保存 `plan_id` 时，立即调用 `plans.plan_delete.propose`，不要再追问一次口头确认。
+要求：删除具有后端副作用。用户当前已经明确表达删除意图，并且能从 trusted owner-scoped 上下文唯一定位到已保存 `plan_id` 时，立即调用 `plans_plan_delete_propose`，不要再追问一次口头确认。
 要求：如果目标计划含糊，先只澄清要删除哪一份，不要猜测或调用工具。用户只是询问“可以删吗”“怎么删除”而没有表达要现在删除时，只回答方法或澄清意图；一旦用户明确要求删除且目标唯一，不再追加影响说明、确认问题或通用确认卡。
-要求：`plans.plan_delete.propose` 会在当前工具调用中同步删除，不再追加第二张通用确认卡。只有返回 `action_status=applied` / `write_succeeded=true` 后才说明已删除；失败时明确说明没有删除并可重试。不要重新生成计划，不要复述旧计划内容。
+要求：`plans_plan_delete_propose` 会在当前工具调用中同步删除，不再追加第二张通用确认卡。只有返回 `action_status=applied` / `write_succeeded=true` 后才说明已删除；失败时明确说明没有删除并可重试。不要重新生成计划，不要复述旧计划内容。
 
 # 服务2：[SERVICE S2] “准备待产包” 服务
 

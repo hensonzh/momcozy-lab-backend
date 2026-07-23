@@ -27,8 +27,8 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
     facts = asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "profile.read": profile_handler,
-                "records.milk_status.read": milk_status_handler,
+                "profile_read": profile_handler,
+                "records_milk_status_read": milk_status_handler,
             },
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
         ).project(
@@ -39,16 +39,16 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
     )
 
     assert calls == [
-        {"tool_name": "profile.read", "args": {}},
-        {"tool_name": "records.milk_status.read", "args": {"days": 7, "limit": 5}},
+        {"tool_name": "profile_read", "args": {}},
+        {"tool_name": "records_milk_status_read", "args": {"days": 7, "limit": 5}},
     ]
     assert facts == {
         "schema_version": "v1",
         "loaded_at": "2026-07-08T08:00:00+00:00",
         "service_skill_id": "milk-management",
         "sources": [
-            {"key": "profile", "tool_name": "profile.read"},
-            {"key": "milk_status", "tool_name": "records.milk_status.read"},
+            {"key": "profile", "tool_name": "profile_read"},
+            {"key": "milk_status", "tool_name": "records_milk_status_read"},
         ],
         "profile": {"profile": {"preferred_name": "Mai"}},
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
@@ -60,24 +60,24 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
     session_guard = FakeSharedSessionGuard()
 
     async def profile_handler(context):
-        await session_guard.enter("profile.read")
+        await session_guard.enter("profile_read")
         try:
             return ToolResult.json({"profile": {"preferred_name": "Mai"}})
         finally:
-            session_guard.exit("profile.read")
+            session_guard.exit("profile_read")
 
     async def milk_status_handler(context):
-        await session_guard.enter("records.milk_status.read")
+        await session_guard.enter("records_milk_status_read")
         try:
             return ToolResult.json({"totals": {"trend_pumped_volume_ml": 420}})
         finally:
-            session_guard.exit("records.milk_status.read")
+            session_guard.exit("records_milk_status_read")
 
     facts = asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "profile.read": profile_handler,
-                "records.milk_status.read": milk_status_handler,
+                "profile_read": profile_handler,
+                "records_milk_status_read": milk_status_handler,
             },
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
         ).project(
@@ -87,10 +87,10 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
         )
     )
 
-    assert session_guard.calls == ["profile.read", "records.milk_status.read"]
+    assert session_guard.calls == ["profile_read", "records_milk_status_read"]
     assert facts["sources"] == [
-        {"key": "profile", "tool_name": "profile.read"},
-        {"key": "milk_status", "tool_name": "records.milk_status.read"},
+        {"key": "profile", "tool_name": "profile_read"},
+        {"key": "milk_status", "tool_name": "records_milk_status_read"},
     ]
     assert facts["profile"] == {"profile": {"preferred_name": "Mai"}}
     assert facts["milk_status"] == {"totals": {"trend_pumped_volume_ml": 420}}
@@ -106,9 +106,9 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
     asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "profile.read": handler,
-                "plans.current.read": handler,
-                "records.milk_summary.read": handler,
+                "profile_read": handler,
+                "plans_current_read": handler,
+                "records_milk_summary_read": handler,
             },
             config=BusinessFactsProjectorConfig(default_limit=4, recent_limit=2, milk_days=14),
         ).project(
@@ -119,9 +119,9 @@ def test_business_facts_projector_uses_compact_postpartum_limits() -> None:
     )
 
     assert calls == [
-        {"tool_name": "profile.read", "args": {}},
-        {"tool_name": "plans.current.read", "args": {"limit": 4}},
-        {"tool_name": "records.milk_summary.read", "args": {"days": 14, "limit": 2}},
+        {"tool_name": "profile_read", "args": {}},
+        {"tool_name": "plans_current_read", "args": {"limit": 4}},
+        {"tool_name": "records_milk_summary_read", "args": {"days": 14, "limit": 2}},
     ]
 
 
@@ -149,7 +149,7 @@ def test_business_facts_projector_unwraps_standard_tool_results() -> None:
 
     facts = asyncio.run(
         BusinessFactsProjector(
-            handlers={"pregnancy.plan_context.read": pregnancy_context_handler},
+            handlers={"pregnancy_plan_context_read": pregnancy_context_handler},
             clock=lambda: datetime(2026, 7, 13, 8, 0, tzinfo=timezone.utc),
         ).project(
             actor=_actor(),

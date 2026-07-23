@@ -22,7 +22,7 @@ def test_agent_replay_service_exports_redacted_bundle_by_default() -> None:
 
     assert bundle["run"]["id"] == str(repository.run.id)
     assert bundle["run"]["runtime_pattern"] == "sdk_only"
-    assert bundle["run"]["runtime_version"] == "momcozy-agent-v1"
+    assert bundle["run"]["runtime_version"] == "momcozy-agent-v2"
     assert "graph_version" not in bundle["run"]
     assert "prompt_version" not in bundle["run"]
     assert bundle["messages"][0]["content"] == {"redacted": True}
@@ -126,7 +126,7 @@ class FakeReplayRepository:
             actor_user_id=uuid4(),
             status="completed",
             runtime_pattern="sdk_only",
-            runtime_version="momcozy-agent-v1",
+            runtime_version="momcozy-agent-v2",
             prompt_version="prompt-v1",
             request_id="req",
             trace_id="trace",
@@ -154,7 +154,7 @@ class FakeReplayRepository:
         self.tool_call = AgentToolCall(
             id=uuid4(),
             run_id=self.run.id,
-            tool_name="profile.read",
+            tool_name="profile_read",
             call_id="call_1",
             status="completed",
             safe_args={"limit": 1},

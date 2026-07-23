@@ -257,6 +257,32 @@ def test_agent_run_worker_does_not_resume_existing_running_run() -> None:
     assert repository.events == []
 
 
+def test_agent_run_worker_rejects_retired_runtime_without_calling_handler() -> None:
+    repository = FakeAgentRuntimeRepository()
+    repository.run.runtime_version = "momcozy-agent-v1"
+    handler_called = False
+
+    async def handler(_run: AgentRun) -> AgentRunWorkerResult:
+        nonlocal handler_called
+        handler_called = True
+        return AgentRunWorkerResult(status="completed")
+
+    worker = AgentRunWorker(repository=repository, handler=handler)
+
+    run = asyncio.run(worker.run_once(run_id=repository.run.id))
+
+    assert run is repository.run
+    assert run.status == "failed"
+    assert run.error_code == "runtime_version_retired"
+    assert run.error_details == {
+        "code": "runtime_version_retired",
+        "runtime_version": "momcozy-agent-v1",
+        "status": 409,
+        "supported_runtime_version": "momcozy-agent-v2",
+    }
+    assert handler_called is False
+
+
 def test_agent_run_queue_worker_interrupts_stale_running_runs_without_resuming() -> None:
     repository = FakeAgentRuntimeRepository()
     running = repository.add_run(status="running")
@@ -361,7 +387,7 @@ class FakeAgentRuntimeRepository:
             actor_user_id=uuid4(),
             status="queued",
             runtime_pattern="sdk_only",
-            runtime_version="momcozy-agent-v1",
+            runtime_version="momcozy-agent-v2",
             prompt_version="",
             request_id="req",
             trace_id="trace",
@@ -383,7 +409,7 @@ class FakeAgentRuntimeRepository:
             actor_user_id=uuid4(),
             status=status,
             runtime_pattern="sdk_only",
-            runtime_version="momcozy-agent-v1",
+            runtime_version="momcozy-agent-v2",
             prompt_version="",
             request_id="req",
             trace_id="trace",

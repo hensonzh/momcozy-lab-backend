@@ -40,11 +40,11 @@
 | Tool Contract | effect_scope | Action Type |
 | --- | --- | --- |
 | `load_service_skill` | `none` | — |
-| `profile.read` | `none` | — |
-| `profile.update` | `user_resource` | `profile.update` |
-| `conversation_history.image.load` | `none` | — |
+| `profile_read` | `none` | — |
+| `profile_update` | `user_resource` | `profile.update` |
+| `conversation_history_image_load` | `none` | — |
 
-Canonical contract 中的 `.` 传给 Responses API 时会转换为 `_`，例如 `profile.update` 对模型显示为 `profile_update`；Runtime 内部、审计和 Eval 始终使用 canonical contract。
+Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 名称；namespace 和 Action Type 分别使用独立字段表达。
 
 ## 4. Namespace
 
@@ -62,11 +62,11 @@ Canonical contract 中的 `.` 传给 Responses API 时会转换为 `_`，例如 
 
 ### `none`
 
-`load_service_skill`、`profile.read`、`records.milk_summary.read`、`records.milk_status.read`、`records.milk_analysis.read`、`records.growth.read`、`plans.current.read`、`plans.calendar.read`、`pregnancy_diary.query`、`devices.pump_status.read`、`devices.guidance.read`、`conversation_history.image.load`。
+`load_service_skill`、`profile_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_growth_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`devices_pump_status_read`、`devices_guidance_read`、`conversation_history_image_load`。
 
 ### `agent_internal`
 
-`records.milk_analysis.intake`、`records.milk_analysis.evaluate`、`devices.unboxing.advance`、`pregnancy.plan_intake.start`、`pregnancy.plan_intake.analyze`、`pregnancy.plan_intake.advance`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support.ticket.propose`、`ibclc_consult_card_create`。
+`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_unboxing_advance`、`pregnancy_plan_intake_start`、`pregnancy_plan_intake_analyze`、`pregnancy_plan_intake_advance`、`birth_plan_form_create`、`labor_communication_card_create`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
 
 `agent_internal` 仍可以写 Agent Runtime 自身的 Workflow 或 Artifact，但不允许从 Tool Handler 直接修改 Profile、Diary、Plan、Record、Notification 等用户业务资源。
 
@@ -74,42 +74,42 @@ Canonical contract 中的 `.` 传给 Responses API 时会转换为 `_`，例如 
 
 | Tool Contract | Action Type |
 | --- | --- |
-| `profile.update` | `profile.update` |
-| `pregnancy_diary.save` | `pregnancy_diary.entry.save` |
-| `pregnancy_diary.delete` | `pregnancy_diary.entry.delete` |
-| `plans.milk_plan.propose` | `plans.milk_plan.create` |
-| `plans.milk_schedule.propose` | `plans.milk_schedule.reschedule` |
-| `pregnancy.plan.propose` | `pregnancy.plan.create` |
-| `plans.task_create.propose` | `plans.task.create` |
-| `plans.task_complete.propose` | `plans.task.complete` |
-| `pregnancy.plan_todo.propose` | `pregnancy.plan_todo.update` |
-| `plans.task_update.propose` | `plans.task.update` |
-| `plans.task_delete.propose` | `plans.task.delete` |
-| `plans.milk_task_update.propose` | `plans.task.update` |
-| `plans.milk_task_delete.propose` | `plans.task.delete` |
-| `plans.plan_delete.propose` | `plans.plan.delete` |
-| `notifications.milk_reminder.propose` | `notifications.milk_reminder.create` |
-| `records.feeding_record.propose` | `records.feeding_record.create` |
-| `records.pumping_record.propose` | `records.pumping_record.create` |
-| `records.feeding_record_delete.propose` | `records.feeding_record.delete` |
-| `records.pumping_record_delete.propose` | `records.pumping_record.delete` |
-| `records.growth_record.propose` | `records.growth_record.create` |
-| `records.growth_record_update.propose` | `records.growth_record.update` |
-| `records.growth_record_delete.propose` | `records.growth_record.delete` |
+| `profile_update` | `profile.update` |
+| `pregnancy_diary_save` | `pregnancy_diary.entry.save` |
+| `pregnancy_diary_delete` | `pregnancy_diary.entry.delete` |
+| `plans_milk_plan_propose` | `plans.milk_plan.create` |
+| `plans_milk_schedule_propose` | `plans.milk_schedule.reschedule` |
+| `pregnancy_plan_propose` | `pregnancy.plan.create` |
+| `plans_task_create_propose` | `plans.task.create` |
+| `plans_task_complete_propose` | `plans.task.complete` |
+| `pregnancy_plan_todo_propose` | `pregnancy.plan_todo.update` |
+| `plans_task_update_propose` | `plans.task.update` |
+| `plans_task_delete_propose` | `plans.task.delete` |
+| `plans_milk_task_update_propose` | `plans.task.update` |
+| `plans_milk_task_delete_propose` | `plans.task.delete` |
+| `plans_plan_delete_propose` | `plans.plan.delete` |
+| `notifications_milk_reminder_propose` | `notifications.milk_reminder.create` |
+| `records_feeding_record_propose` | `records.feeding_record.create` |
+| `records_pumping_record_propose` | `records.pumping_record.create` |
+| `records_feeding_record_delete_propose` | `records.feeding_record.delete` |
+| `records_pumping_record_delete_propose` | `records.pumping_record.delete` |
+| `records_growth_record_propose` | `records.growth_record.create` |
+| `records_growth_record_update_propose` | `records.growth_record.update` |
+| `records_growth_record_delete_propose` | `records.growth_record.delete` |
 | `hospital_bag_cart_update` | `hospital_bag.cart.update` |
 
 ## 7. Profile 与孕期日记
 
-- `profile.read` 一次返回当前用户与全部宝宝的基础资料；宝宝使用稳定的 `infant_id`。
-- `profile.update` 以 `user` 和 `infants` 两个可选对象执行 PATCH，可在同一 Action 中原子更新用户与指定宝宝；`ProfileUpdateActionHandler` 是唯一业务写入入口。
-- 孕期日记拆成 `pregnancy_diary.query` / `pregnancy_diary.save` / `pregnancy_diary.delete`，不再使用一个混合读写工具。
+- `profile_read` 一次返回当前用户与全部宝宝的基础资料；宝宝使用稳定的 `infant_id`。
+- `profile_update` 以 `user` 和 `infants` 两个可选对象执行 PATCH，可在同一 Action 中原子更新用户与指定宝宝；`ProfileUpdateActionHandler` 是唯一业务写入入口。
+- 孕期日记拆成 `pregnancy_diary_query` / `pregnancy_diary_save` / `pregnancy_diary_delete`，不再使用一个混合读写工具。
 - `save` 只接受 `operation=create|update`；`update` 传完整重写正文。
 - `delete` 在 Tool Handler 中校验当前用户消息的 `confirmation_evidence`，证据成立后直接执行 Action，不再生成第二张确认卡。
 - `pregnancy_diary.changed` 由 Action Handler / Action Executor 产生，不再由 Tool Handler 伪造领域变更事件。
 
 ## 8. 售后提交
 
-`support.ticket.propose` 只生成 `support_ticket_draft` Artifact，不直接创建工单。用户在 Flutter 表单点击“确认并提交”后，`POST /v1/support/tickets` 以 `source=agent_form` 和 `artifact_id` 验证 owner/run/thread 归属，然后同步产生并执行 `support.ticket.create` Action。该点击已是可信用户意图，不再追加二次确认。
+`support_ticket_propose` 只生成 `support_ticket_draft` Artifact，不直接创建工单。用户在 Flutter 表单点击“确认并提交”后，`POST /v1/support/tickets` 以 `source=agent_form` 和 `artifact_id` 验证 owner/run/thread 归属，然后同步产生并执行 `support.ticket.create` Action。该点击已是可信用户意图，不再追加二次确认。
 
 普通、非 Agent 表单来源的 Support API 仍是应用命令，不强制伪装成 Agent Action。
 

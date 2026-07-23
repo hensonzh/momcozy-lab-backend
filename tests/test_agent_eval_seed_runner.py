@@ -32,7 +32,7 @@ def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_ef
 def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_request() -> None:
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "profile.update", "status": "completed"}],
+        tool_calls=[{"tool_name": "profile_update", "status": "completed"}],
         final_text="Saved to profile.",
     )
 
@@ -41,14 +41,14 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "profile.update"
+    assert result.failures[0].observed == "profile_update"
 
 
 def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}}
+            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="Saved.",
     )
@@ -63,9 +63,9 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     case = {
         **_case("pregnancy_diary_entry"),
         "expected_tool_calls": [
-            {"contract": "pregnancy_diary.save", "args_subset": {"operation": "create"}},
+            {"contract": "pregnancy_diary_save", "args_subset": {"operation": "create"}},
             {
-                "contract": "pregnancy_diary.save",
+                "contract": "pregnancy_diary_save",
                 "args_subset": {"operation": "update"},
             },
         ],
@@ -73,11 +73,11 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "pregnancy_diary.save",
+                "tool_name": "pregnancy_diary_save",
                 "status": "completed",
                 "safe_args": {"operation": "update"},
             },
-            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}},
+            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}},
         ],
         final_text="Saved.",
     )
@@ -101,7 +101,7 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
     }
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}}
+            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="",
     )
@@ -120,7 +120,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     case = _case(suite)
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary.save", "status": "completed", "safe_args": {"operation": "create"}}
+            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="Saved.",
     )
@@ -130,7 +130,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "pregnancy_diary.save"
+    assert result.failures[0].observed == "pregnancy_diary_save"
 
 
 @pytest.mark.parametrize("suite", ["health_consultation", "infant_health_red_flag", "emotion_support", "emotion_harm_baby"])
@@ -191,8 +191,8 @@ def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_s
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "records.milk_status.read", "status": "completed"},
-            {"tool_name": "records.milk_summary.read", "status": "completed"},
+            {"tool_name": "records_milk_status_read", "status": "completed"},
+            {"tool_name": "records_milk_summary_read", "status": "completed"},
         ],
         service_skill_id="cozymate_service_agent",
         final_text="Here is your milk summary.",
@@ -208,8 +208,8 @@ def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_h
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "records.milk_status.read", "status": "completed"},
-            {"tool_name": "records.milk_summary.read", "status": "completed"},
+            {"tool_name": "records_milk_status_read", "status": "completed"},
+            {"tool_name": "records_milk_summary_read", "status": "completed"},
         ],
         service_skill_id="birth-prep",
         final_text="Here is your milk summary.",
@@ -227,8 +227,8 @@ def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -
     case = _case("device_known_guidance")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "devices.pump_status.read", "status": "completed"},
-            {"tool_name": "devices.guidance.read", "status": "completed"},
+            {"tool_name": "devices_pump_status_read", "status": "completed"},
+            {"tool_name": "devices_guidance_read", "status": "completed"},
         ],
         final_text="I checked your pump status and the Air1 guidance assets.",
     )

@@ -17,6 +17,7 @@ from ..agent_runtime.events.transient import AgentTransientStream
 from ..agent_runtime.runs.controls import AgentRunControls
 from ..agent_runtime.runs.execution import AgentRunExecutionResult, AgentRunHandler
 from ..agent_runtime.runs.models import AgentAction, AgentEvent, AgentRun
+from ..agent_runtime.runs.registry import validate_runtime
 from ..agent_runtime.runs.repository import AgentRuntimeRepository
 from ..agent_runtime.runs.response_text import (
     APPEND_ONLY_TEXT_STREAM_SCHEMA_VERSION,
@@ -162,10 +163,10 @@ class AgentRunWorker:
         else:
             return run
 
-        if await self._cancel_requested(run):
-            return await self._cancel(run=run, error_code="cancelled_during_startup")
-
         try:
+            validate_runtime(version=run.runtime_version, pattern=run.runtime_pattern)
+            if await self._cancel_requested(run):
+                return await self._cancel(run=run, error_code="cancelled_during_startup")
             result = await self._resume_action(run)
             if result is None:
                 result = await self.handler(run)
@@ -273,6 +274,11 @@ class AgentRunWorker:
         return failed
 
     async def _interrupt_running_locked(self, run: AgentRun) -> AgentRun:
+        try:
+            validate_runtime(version=run.runtime_version, pattern=run.runtime_pattern)
+        except ApiError as exc:
+            error_details = _api_error_details(exc)
+            return await self._fail(run=run, error_code=exc.code, error_details=error_details)
         action = await self._latest_resumable_action(run=run)
         if action is not None:
             queued = await self.repository.mark_run_queued(run=run)

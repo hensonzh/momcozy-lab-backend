@@ -32,7 +32,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="profile.read",
+            name="profile_read",
             domain="profiles",
             description=(
                 "一次读取当前用户及其全部宝宝的基础资料。需要核对用户称呼、年龄、预产期，"
@@ -47,11 +47,11 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="profile.update",
+            name="profile_update",
             domain="global",
             description=(
                 "更新当前用户和指定宝宝的基础资料。用户明确提供、更正或要求清空用户称呼、年龄、预产期，"
-                "或宝宝姓名、出生日期、出生时性别时调用；更新宝宝必须使用 profile.read 返回的 infant_id。"
+                "或宝宝姓名、出生日期、出生时性别时调用；更新宝宝必须使用 profile_read 返回的 infant_id。"
             ),
             loading_mode="eager",
             effect_scope="user_resource",
@@ -63,7 +63,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.milk_summary.read",
+            name="records_milk_summary_read",
             domain="records",
             description="读取当前用户近期喂养、吸奶和趋势记录的简要摘要。用户要回顾近期记录或需要奶量管理概览时调用。",
             loading_mode="eager",
@@ -75,7 +75,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.milk_status.read",
+            name="records_milk_status_read",
             domain="records",
             description="读取当前用户近期奶量状态的确定性快照。用户询问当前奶量表现、近期是否有记录或今日状态时调用。",
             loading_mode="eager",
@@ -87,7 +87,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.milk_analysis.read",
+            name="records_milk_analysis_read",
             domain="records",
             description="读取当前用户近期奶量、宝宝生长和趋势事实并生成分析快照。用户要分析奶量变化、趋势或与生长记录的关系时调用。",
             loading_mode="eager",
@@ -99,7 +99,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.milk_analysis.intake",
+            name="records_milk_analysis_intake",
             domain="records",
             description=(
                 "用户要求完整分析奶量，或回答上一轮奶量分析问题时调用；开始、恢复或推进当前线程的六项采集。"
@@ -114,7 +114,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.milk_analysis.evaluate",
+            name="records_milk_analysis_evaluate",
             domain="records",
             description=(
                 "用户已完成六项奶量采集且 intake 返回 can_evaluate=true 时调用；做确定性评估并生成奶量分析卡、上下文指纹和计划准入结论。"
@@ -128,7 +128,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.growth.read",
+            name="records_growth_read",
             domain="records",
             description="读取当前用户宝宝的身高、体重和头围等生长记录。用户要查看宝宝近期生长数据或趋势时调用。",
             loading_mode="eager",
@@ -140,7 +140,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.current.read",
+            name="plans_current_read",
             domain="plans",
             description="读取当前用户生效中的计划和近期任务摘要。用户要查看当前计划、待办或后续安排时调用。",
             loading_mode="eager",
@@ -152,7 +152,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.calendar.read",
+            name="plans_calendar_read",
             domain="plans",
             description="按日期和状态读取当前用户的计划任务日程。用户询问某天安排、待完成事项或任务状态时调用。",
             loading_mode="eager",
@@ -164,7 +164,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.query",
+            name="pregnancy_diary_query",
             domain="pregnancy_diary",
             description=(
                 "读取当前用户某一天或一段日期范围内的孕期日记。用户需要查看日记、修改前读取完整旧正文或确认目标日期时调用。"
@@ -179,12 +179,12 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.save",
+            name="pregnancy_diary_save",
             domain="pregnancy_diary",
             description=(
                 "创建或完整重写当前用户指定日期的孕期日记。用户明确要求记录，或 query 返回旧正文后需要整合更新时调用。"
                 "正文只保存用户明确表达的事实和感受，不写入模型建议、安抚、风险判断、医疗提醒、观察计划或诊断。"
-                "operation=create 遇到同日记录时不能声称已保存；先调用 pregnancy_diary.query 读取旧正文，再把旧事实与新增事实整合为完整正文，"
+                "operation=create 遇到同日记录时不能声称已保存；先调用 pregnancy_diary_query 读取旧正文，再把旧事实与新增事实整合为完整正文，"
                 "使用 operation=update 重试。update 不能只传增量或追加‘补充’。"
             ),
             loading_mode="eager",
@@ -197,7 +197,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy_diary.delete",
+            name="pregnancy_diary_delete",
             domain="pregnancy_diary",
             description=(
                 "软删除当前用户指定日期的孕期日记。仅在目标日期明确且用户本轮明确确认删除时调用，"
@@ -213,7 +213,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="devices.pump_status.read",
+            name="devices_pump_status_read",
             domain="devices",
             description="读取当前用户吸奶器设备及近期遥测状态摘要。用户询问设备连接、在线状态、固件或近期运行状态时调用。",
             loading_mode="eager",
@@ -225,7 +225,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="devices.guidance.read",
+            name="devices_guidance_read",
             domain="devices",
             description=(
                 "按设备型号、主题或明确步骤读取版本化的 Momcozy 官方说明书、FAQ、图片、PDF 和视频素材。"
@@ -240,7 +240,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="devices.unboxing.advance",
+            name="devices_unboxing_advance",
             domain="devices",
             description=(
                 "开始、恢复、推进或取消当前线程中的设备开箱分步指导，并返回当前或下一步骤的官方资料。"
@@ -256,7 +256,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="conversation_history.image.load",
+            name="conversation_history_image_load",
             domain="images",
             description=(
                 "将当前可见对话历史中由智能体回复展示过的一张图片重新加载到本轮模型上下文。"
@@ -271,7 +271,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.milk_plan.propose",
+            name="plans_milk_plan_propose",
             domain="plans",
             description=(
                 "奶量评估允许制定计划且用户同意推荐方向时调用；模型只提交方向和用户明确给出的周期、目标或时间约束，"
@@ -286,7 +286,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.milk_schedule.propose",
+            name="plans_milk_schedule_propose",
             domain="plans",
             description=(
                 "用户明确要求新增会议、外出等生活事项或避开已有不可用时段时调用；读取当前奶量计划并生成重排预览。"
@@ -301,7 +301,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy.plan_intake.start",
+            name="pregnancy_plan_intake_start",
             domain="birth_prep",
             description=(
                 "为当前用户创建孕期计划基础信息表单。用户同意开始制定孕期计划且当前没有 active 孕期计划时调用；"
@@ -315,7 +315,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy.plan_intake.analyze",
+            name="pregnancy_plan_intake_analyze",
             domain="birth_prep",
             description=(
                 "分析应用侧已校验的孕期计划基础表单提交。当前用户消息包含 birth_journey_basic_info_intake 提交时调用，"
@@ -329,7 +329,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy.plan_intake.advance",
+            name="pregnancy_plan_intake_advance",
             domain="birth_prep",
             description=(
                 "推进当前用户已验证的孕期计划 intake，用户回答当前可见步骤时调用。只提交一项回答：个性化追问、"
@@ -343,11 +343,11 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy.plan.propose",
+            name="pregnancy_plan_propose",
             domain="plans",
             description=(
                 "基于当前用户已完成个性化追问、产检资料步骤和最终补充确认的可信 intake 创建孕期计划。"
-                "只在 pregnancy.plan_intake.advance 返回 ready_to_generate 时调用。"
+                "只在 pregnancy_plan_intake_advance 返回 ready_to_generate 时调用。"
             ),
             effect_scope="user_resource",
             action_type="pregnancy.plan.create",
@@ -358,7 +358,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.task_create.propose",
+            name="plans_task_create_propose",
             domain="plans",
             description="为当前用户创建一个明确的单项计划任务。用户已明确单项内容和归属时调用并同步执行；范围含糊或批量新增时先澄清。",
             effect_scope="user_resource",
@@ -370,7 +370,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.task_complete.propose",
+            name="plans_task_complete_propose",
             domain="plans",
             description="把当前用户唯一指定的单项计划任务标记为完成或取消完成。用户明确表达状态且 trusted task target 唯一时调用并同步执行。",
             effect_scope="user_resource",
@@ -382,7 +382,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="pregnancy.plan_todo.propose",
+            name="pregnancy_plan_todo_propose",
             domain="plans",
             description=(
                 "更新当前用户 active 孕期计划卡片中唯一指定事项的完成状态。用户明确表示某项已完成或取消完成，"
@@ -397,7 +397,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.task_update.propose",
+            name="plans_task_update_propose",
             domain="plans",
             description="同步修改当前用户唯一指定的单项计划任务。用户明确要求调整且 trusted task target 唯一时调用；目标含糊或批量修改时先澄清。",
             effect_scope="user_resource",
@@ -409,7 +409,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.task_delete.propose",
+            name="plans_task_delete_propose",
             domain="plans",
             description="软删除当前用户唯一指定的单项计划任务。用户明确要求删除且 trusted task target 唯一时调用并同步执行；目标含糊时先澄清。",
             effect_scope="user_resource",
@@ -421,9 +421,9 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.milk_task_update.propose",
+            name="plans_milk_task_update_propose",
             domain="plans",
-            description="用户明确要求调整唯一奶量计划任务且目标已确定时调用；目标含糊或批量修改时先澄清，批量避开日程使用 plans.milk_schedule.propose。",
+            description="用户明确要求调整唯一奶量计划任务且目标已确定时调用；目标含糊或批量修改时先澄清，批量避开日程使用 plans_milk_schedule_propose。",
             effect_scope="user_resource",
             action_type="plans.task.update",
             blocking_policy="must_wait",
@@ -433,7 +433,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.milk_task_delete.propose",
+            name="plans_milk_task_delete_propose",
             domain="plans",
             description="软删除当前用户唯一指定的奶量计划任务。用户明确要求删除且目标唯一时调用。",
             effect_scope="user_resource",
@@ -445,7 +445,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="plans.plan_delete.propose",
+            name="plans_plan_delete_propose",
             domain="plans",
             description=(
                 "删除当前用户唯一指定的整个已有计划。用户当前已明确表达删除意图且 trusted owner-scoped plan target 精确时"
@@ -460,7 +460,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="notifications.milk_reminder.propose",
+            name="notifications_milk_reminder_propose",
             domain="notifications",
             description="为当前用户创建奶量、喂养或吸奶提醒并等待确认。用户明确要求在指定时间收到相关提醒时调用。",
             effect_scope="user_resource",
@@ -472,7 +472,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.feeding_record.propose",
+            name="records_feeding_record_propose",
             domain="records",
             description="保存当前用户明确提供的一次喂养记录。用户要求记录喂养时间、方式或奶量时调用。",
             effect_scope="user_resource",
@@ -484,7 +484,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.pumping_record.propose",
+            name="records_pumping_record_propose",
             domain="records",
             description="保存当前用户明确提供的一次吸奶记录。用户要求记录吸奶时间、时长、档位或奶量时调用。",
             effect_scope="user_resource",
@@ -496,7 +496,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.feeding_record_delete.propose",
+            name="records_feeding_record_delete_propose",
             domain="records",
             description="软删除当前用户唯一指定的一次喂养记录。用户明确要求且 trusted record target 唯一时调用并同步执行；目标含糊时先澄清。",
             effect_scope="user_resource",
@@ -508,7 +508,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.pumping_record_delete.propose",
+            name="records_pumping_record_delete_propose",
             domain="records",
             description="软删除当前用户唯一指定的一次吸奶记录。用户明确要求且 trusted record target 唯一时调用并同步执行；目标含糊时先澄清。",
             effect_scope="user_resource",
@@ -520,7 +520,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.growth_record.propose",
+            name="records_growth_record_propose",
             domain="records",
             description="保存当前用户明确提供的一次宝宝生长记录。用户要求记录宝宝身高、体重或头围时调用。",
             effect_scope="user_resource",
@@ -532,7 +532,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.growth_record_update.propose",
+            name="records_growth_record_update_propose",
             domain="records",
             description="同步修改当前用户宝宝唯一指定的一次生长记录。用户明确要求更正且 trusted record target 唯一时调用；目标含糊时先澄清。",
             effect_scope="user_resource",
@@ -544,7 +544,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="records.growth_record_delete.propose",
+            name="records_growth_record_delete_propose",
             domain="records",
             description="软删除当前用户宝宝唯一指定的一次生长记录。用户明确要求且 trusted record target 唯一时调用并同步执行；目标含糊时先澄清。",
             effect_scope="user_resource",
@@ -630,7 +630,7 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="support.ticket.propose",
+            name="support_ticket_propose",
             domain="support",
             description=(
                 "用户明确同意创建售后工单时调用，用于整理可编辑的 Momcozy 售后信息表。"

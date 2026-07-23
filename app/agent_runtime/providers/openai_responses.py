@@ -35,7 +35,6 @@ class SdkImageUrlResolver(Protocol):
 @dataclass(frozen=True)
 class SdkToolDefinition:
     contract_name: str
-    sdk_name: str
     description: str
     params_json_schema: dict[str, Any]
     invoke: SdkToolInvoker
@@ -149,8 +148,8 @@ class OpenAIResponsesApiBackend:
             actor_user_id=request.actor_user_id,
             image_url_resolver=self.image_url_resolver,
         )
-        tools_by_address = {(tool.namespace_name, tool.sdk_name): tool for tool in request.tools}
-        tools_by_name = {tool.sdk_name: tool for tool in request.tools}
+        tools_by_address = {(tool.namespace_name, tool.contract_name): tool for tool in request.tools}
+        tools_by_name = {tool.contract_name: tool for tool in request.tools}
         observed_tool_calls: list[dict[str, Any]] = []
         latest_response: Any | None = None
 
@@ -223,7 +222,7 @@ class OpenAIResponsesApiBackend:
                         code="sdk_unknown_tool_call",
                         message="Responses API returned a function call for an unavailable tool.",
                         status=502,
-                        details={"sdk_tool_name": function_call["name"]},
+                        details={"tool_name": function_call["name"]},
                     )
                 args_json = function_call["arguments"]
                 try:
@@ -403,7 +402,7 @@ def _responses_web_search_tool_payload(allowed_domains: tuple[str, ...]) -> dict
 def _responses_function_tool_payload(tool: SdkToolDefinition) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "type": "function",
-        "name": tool.sdk_name,
+        "name": tool.contract_name,
         "description": tool.description,
         "parameters": tool.params_json_schema,
     }
@@ -885,11 +884,6 @@ def _response_id(response: Any | None) -> str:
 
 def _sanitize_model_text(text: str) -> str:
     return sanitize_agent_response_text(text).text
-
-
-def sdk_tool_name(contract_name: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9_-]+", "_", contract_name).strip("_")
-    return normalized or "tool"
 
 
 def _fatal_tool_error(exc: ApiError) -> bool:

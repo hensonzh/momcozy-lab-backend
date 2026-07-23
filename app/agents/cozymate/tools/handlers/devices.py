@@ -293,7 +293,7 @@ class DeviceUnboxingAdvanceToolHandler(_StandardToolHandler):
             ToolHandlerContext(
                 actor=context.actor,
                 run_id=context.run_id,
-                tool_name="devices.guidance.read",
+                tool_name="devices_guidance_read",
                 call_id=context.call_id,
                 args={
                     "model": workflow_projection["device_model"],

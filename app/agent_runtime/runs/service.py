@@ -18,7 +18,7 @@ from app.modules.audit import IdempotencyKey, IdempotencyService, parse_idempote
 
 from .controls import AgentRunControls
 from .models import AgentAction, AgentArtifact, AgentEvent, AgentRun, AgentThread, AgentWorkflowState
-from .registry import DEFAULT_RUNTIME_VERSION, SDK_ONLY_RUNTIME_PATTERN
+from .registry import DEFAULT_RUNTIME_VERSION, SDK_ONLY_RUNTIME_PATTERN, validate_runtime
 from .repository import AgentRuntimeRepository
 from .state_store import AgentRuntimeStateStore
 
@@ -137,6 +137,7 @@ class AgentRuntimeService:
         if normalized_runtime_pattern != DEFAULT_RUNTIME_PATTERN:
             raise ApiError(code="validation_failed", message="Only the sdk_only runtime pattern is supported.", status=422)
         normalized_runtime_version = runtime_version or DEFAULT_RUNTIME_VERSION
+        validate_runtime(version=normalized_runtime_version, pattern=normalized_runtime_pattern)
         normalized_message = _normalize_text(message, max_length=8000, required=True)
         requested_attachments = attachments or []
         safe_client_context = self.client_context_sanitizer(client_context)

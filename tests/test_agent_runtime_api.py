@@ -92,7 +92,7 @@ def test_create_run_uses_current_user_request_id_and_idempotency_key(caplog) -> 
 
     assert response.status_code == 201
     assert response.json()["runtime_pattern"] == "sdk_only"
-    assert response.json()["runtime_version"] == "momcozy-agent-v1"
+    assert response.json()["runtime_version"] == "momcozy-agent-v2"
     assert "graph_version" not in response.json()
     assert "prompt_version" not in response.json()
     assert fake_service.create_run_kwargs["actor_user_id"] == user_id
@@ -137,7 +137,7 @@ def test_create_run_rejects_retired_runtime_contract() -> None:
         json={
             "message": "Legacy app request",
             "runtime_pattern": "langgraph_sdk",
-            "graph_version": "momcozy-agent-v1",
+            "graph_version": "momcozy-agent-v2",
         },
     )
 
@@ -157,7 +157,7 @@ def test_create_run_rejects_retired_graph_version_field() -> None:
         json={
             "message": "Conflicting runtime versions",
             "runtime_version": "momcozy-agent-v2",
-            "graph_version": "momcozy-agent-v1",
+            "graph_version": "momcozy-agent-v2",
         },
     )
 
@@ -549,7 +549,7 @@ class FakeAgentRuntimeService:
             actor_user_id=self.user_id,
             status="queued",
             runtime_pattern="sdk_only",
-            runtime_version="momcozy-agent-v1",
+            runtime_version="momcozy-agent-v2",
             prompt_version="",
             request_id="req_agent",
             trace_id="req_agent",

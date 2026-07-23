@@ -81,7 +81,7 @@ def test_agent_runtime_log_is_structured(caplog) -> None:
 def test_backend_metrics_record_tool_and_sdk_operations() -> None:
     metrics = RequestMetrics()
 
-    metrics.record_agent_tool(tool_name="profile.read", outcome="failed", error_code="permission_denied", duration_ms=3.0)
+    metrics.record_agent_tool(tool_name="profile_read", outcome="failed", error_code="permission_denied", duration_ms=3.0)
     metrics.record_agent_sdk(node_name="openai_responses", outcome="failed", error_code="dependency_not_configured", duration_ms=4.0)
 
     snapshot = metrics.snapshot()

@@ -500,7 +500,7 @@ def test_pregnancy_plan_result_keeps_legacy_envelope_and_injected_timestamp() ->
         now=datetime(2026, 7, 12, 8, 30, tzinfo=timezone.utc),
     )
 
-    assert result["tool_name"] == "pregnancy.plan.propose"
+    assert result["tool_name"] == "pregnancy_plan_propose"
     assert result["status"] == "card_created"
     card_json = result["card"]["card_json"]
     assert card_json["owner"]["due_date_or_week"] == "32周"

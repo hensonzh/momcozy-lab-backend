@@ -57,7 +57,7 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
 
     assert run.actor_user_id == owner_user_id
     assert run.runtime_pattern == "sdk_only"
-    assert run.runtime_version == "momcozy-agent-v1"
+    assert run.runtime_version == "momcozy-agent-v2"
     assert repository.messages[0].content["text"] == "Review my pumping pattern"
     assert repository.context_items[0].item == {
         "role": "user",
@@ -90,7 +90,7 @@ def test_agent_runtime_service_creates_run_with_thread_message_events_and_idempo
             "attachments": [],
             "client_context": repository.messages[0].content["client_context"],
             "runtime_pattern": "sdk_only",
-            "runtime_version": "momcozy-agent-v1",
+            "runtime_version": "momcozy-agent-v2",
         }
     )
     assert "compatible_request_hashes" not in idempotency_service.reserve_kwargs
@@ -108,11 +108,29 @@ def test_agent_runtime_service_rejects_retired_runtime_pattern() -> None:
                 thread_id=None,
                 message="Hello",
                 runtime_pattern="langgraph_sdk",
-                runtime_version="momcozy-agent-v1",
+                runtime_version="momcozy-agent-v2",
             )
         )
 
     assert exc_info.value.code == "validation_failed"
+
+
+def test_agent_runtime_service_rejects_retired_runtime_version_before_persisting() -> None:
+    repository = FakeAgentRuntimeRepository()
+    service = AgentRuntimeService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.create_run(
+                actor_user_id=uuid4(),
+                thread_id=None,
+                message="Hello",
+                runtime_version="momcozy-agent-v1",
+            )
+        )
+
+    assert exc_info.value.code == "runtime_version_retired"
+    assert repository.runs == []
 
 
 @pytest.mark.parametrize(
@@ -727,7 +745,7 @@ def _run(*, thread_id: UUID, actor_user_id: UUID) -> AgentRun:
         actor_user_id=actor_user_id,
         status="queued",
         runtime_pattern="sdk_only",
-        runtime_version="momcozy-agent-v1",
+        runtime_version="momcozy-agent-v2",
         prompt_version="",
         request_id="",
         trace_id="",

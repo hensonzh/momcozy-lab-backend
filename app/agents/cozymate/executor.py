@@ -32,7 +32,6 @@ from app.agent_runtime.providers import (
     SdkNodeResult,
     SdkToolDefinition,
     SdkToolNamespace,
-    sdk_tool_name,
 )
 from app.agent_runtime.runs.execution import AgentRunExecutionResult
 from app.agent_runtime.runs.models import AgentAction, AgentArtifact, AgentEvent, AgentMessage, AgentRun, AgentWorkflowState
@@ -82,17 +81,17 @@ from .workflows.reply import guarded_workflow_type, workflow_accepts_reply
 
 
 LOAD_SERVICE_SKILL_TOOL_NAME = "load_service_skill"
-CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history.image.load"
+CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history_image_load"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
 FORM_TOOL_IDS = {
-    "pregnancy.plan_intake.analyze": "birth_journey_basic_info_intake",
+    "pregnancy_plan_intake_analyze": "birth_journey_basic_info_intake",
     "hospital_bag_card_create": "hospital_bag_intake",
     "labor_communication_card_create": "birth_plan_card_intake",
 }
-FORM_CREATION_TOOL_NAMES = {"pregnancy.plan_intake.start", "birth_plan_form_create", "hospital_bag_form_create"}
+FORM_CREATION_TOOL_NAMES = {"pregnancy_plan_intake_start", "birth_plan_form_create", "hospital_bag_form_create"}
 FORM_CREATION_IDS = {
-    "pregnancy.plan_intake.start": "birth_journey_basic_info_intake",
+    "pregnancy_plan_intake_start": "birth_journey_basic_info_intake",
     "hospital_bag_form_create": "hospital_bag_intake",
     "birth_plan_form_create": "birth_plan_card_intake",
 }
@@ -665,14 +664,11 @@ class CozymateAgentExecutor:
         namespace: ToolNamespace | None = None,
     ) -> SdkToolDefinition:
         contract = self.tool_registry.get(tool_name)
-        sdk_name = sdk_tool_name(contract.name)
-
         async def invoke(args_json: str) -> ToolResult:
-            return await self._invoke_sdk_tool(run=run, contract_name=contract.name, sdk_name=sdk_name, args_json=args_json)
+            return await self._invoke_sdk_tool(run=run, contract_name=contract.name, args_json=args_json)
 
         return SdkToolDefinition(
             contract_name=contract.name,
-            sdk_name=sdk_name,
             description=contract.description,
             params_json_schema=contract.input_schema,
             invoke=invoke,
@@ -725,7 +721,6 @@ class CozymateAgentExecutor:
         *,
         run: AgentRun,
         contract_name: str,
-        sdk_name: str,
         args_json: str,
     ) -> ToolResult:
         args = _json_object(args_json)
@@ -733,7 +728,7 @@ class CozymateAgentExecutor:
             "actor": _run_actor(run),
             "run_id": run.id,
             "tool_name": contract_name,
-            "call_id": f"sdk-{sdk_name}-{uuid4().hex}",
+            "call_id": f"sdk-{contract_name}-{uuid4().hex}",
             "args": args,
         }
         trusted_args = await self._trusted_tool_args(run=run, contract_name=contract_name, args=args)
@@ -777,7 +772,7 @@ class CozymateAgentExecutor:
                     if exc.code in {"missing_workflow_reply_context", "stale_workflow_step"}:
                         self._turn_state(run.id).workflow_reply_recovery_type = guarded_type
                     raise
-        if contract_name in {"pregnancy_diary.query", "pregnancy_diary.save", "pregnancy_diary.delete"}:
+        if contract_name in {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}:
             local_date = self._turn_state(run.id).local_date
             diary_trusted_args: dict[str, Any] = {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text
@@ -785,17 +780,17 @@ class CozymateAgentExecutor:
             if local_date:
                 diary_trusted_args["runtime_local_date"] = local_date
             return diary_trusted_args
-        if contract_name == "records.milk_analysis.intake":
+        if contract_name == "records_milk_analysis_intake":
             return {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name == "plans.milk_plan.propose":
+        if contract_name == "plans_milk_plan_propose":
             return {
                 "runtime_local_date": self._turn_state(run.id).local_date,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name == "support.ticket.propose":
+        if contract_name == "support_ticket_propose":
             return {"trusted_current_user_text": self._turn_state(run.id).current_user_text}
         expected_form_id = FORM_TOOL_IDS.get(contract_name)
         if expected_form_id is not None:
@@ -806,7 +801,7 @@ class CozymateAgentExecutor:
                 "confirmed_form_data": _dict(submission, "values"),
                 "form_submission_id": _text(submission, "submission_id"),
             }
-            if contract_name == "pregnancy.plan_intake.analyze":
+            if contract_name == "pregnancy_plan_intake_analyze":
                 form_trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
                 facts = await self._birth_prep_business_facts(run=run)
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
@@ -819,7 +814,7 @@ class CozymateAgentExecutor:
                 if workflow_state:
                     form_trusted_args["runtime_workflow_context"] = workflow_state
             return form_trusted_args
-        if contract_name == "pregnancy.plan.propose":
+        if contract_name == "pregnancy_plan_propose":
             facts = await self._birth_prep_business_facts(run=run)
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             return {
@@ -827,7 +822,7 @@ class CozymateAgentExecutor:
                 "runtime_workflow_context": _dict(workflow, "state"),
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
             }
-        if contract_name == "pregnancy.plan_intake.advance":
+        if contract_name == "pregnancy_plan_intake_advance":
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             return {
                 "runtime_workflow_context": _dict(workflow, "state"),
@@ -848,7 +843,7 @@ class CozymateAgentExecutor:
             for key, value in same_turn_defaults.items():
                 default_values.setdefault(key, value)
             creation_trusted_args: dict[str, Any] = {"default_values": default_values} if default_values else {}
-            if contract_name == "pregnancy.plan_intake.start":
+            if contract_name == "pregnancy_plan_intake_start":
                 workflow = await self._latest_pregnancy_plan_workflow(run=run)
                 creation_trusted_args["runtime_plan_context"] = _pregnancy_runtime_plan_context(facts, workflow=workflow)
                 creation_trusted_args["runtime_workflow_context"] = _dict(workflow, "state")
@@ -1244,7 +1239,7 @@ def _elapsed_ms(started_at: float) -> float:
 
 def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> bool:
     return any(
-        _text(tool_call, "tool_name") == "pregnancy.plan_intake.analyze"
+        _text(tool_call, "tool_name") == "pregnancy_plan_intake_analyze"
         and _text(_dict(tool_call, "safe_output"), "status") == "intake_analyzed"
         for tool_call in tool_calls
     )
@@ -1286,14 +1281,14 @@ def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> 
 
 SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] = {
     ServiceSkillId.BIRTH_PREP: (
-        "pregnancy.plan_intake.start",
-        "pregnancy.plan_intake.analyze",
-        "pregnancy.plan_intake.advance",
-        "pregnancy.plan.propose",
-        "pregnancy.plan_todo.propose",
-        "plans.plan_delete.propose",
-        "plans.task_update.propose",
-        "plans.task_delete.propose",
+        "pregnancy_plan_intake_start",
+        "pregnancy_plan_intake_analyze",
+        "pregnancy_plan_intake_advance",
+        "pregnancy_plan_propose",
+        "pregnancy_plan_todo_propose",
+        "plans_plan_delete_propose",
+        "plans_task_update_propose",
+        "plans_task_delete_propose",
         "birth_plan_form_create",
         "labor_communication_card_create",
         "hospital_bag_form_create",
@@ -1302,34 +1297,34 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "hospital_bag_pump_recommend",
     ),
     ServiceSkillId.MILK_MANAGEMENT: (
-        "records.milk_status.read",
-        "records.milk_summary.read",
-        "records.milk_analysis.read",
-        "records.growth.read",
-        "records.feeding_record.propose",
-        "records.feeding_record_delete.propose",
-        "records.pumping_record.propose",
-        "records.pumping_record_delete.propose",
-        "records.growth_record.propose",
-        "records.growth_record_update.propose",
-        "records.growth_record_delete.propose",
-        "plans.current.read",
-        "plans.calendar.read",
-        "plans.milk_plan.propose",
-        "plans.task_complete.propose",
-        "plans.task_create.propose",
-        "notifications.milk_reminder.propose",
+        "records_milk_status_read",
+        "records_milk_summary_read",
+        "records_milk_analysis_read",
+        "records_growth_read",
+        "records_feeding_record_propose",
+        "records_feeding_record_delete_propose",
+        "records_pumping_record_propose",
+        "records_pumping_record_delete_propose",
+        "records_growth_record_propose",
+        "records_growth_record_update_propose",
+        "records_growth_record_delete_propose",
+        "plans_current_read",
+        "plans_calendar_read",
+        "plans_milk_plan_propose",
+        "plans_task_complete_propose",
+        "plans_task_create_propose",
+        "notifications_milk_reminder_propose",
     ),
     ServiceSkillId.HEALTH_CONSULTATION: (
-        "records.milk_status.read",
+        "records_milk_status_read",
         "ibclc_consult_card_create",
     ),
     ServiceSkillId.EMOTION_SUPPORT: (),
     ServiceSkillId.DEVICE_GUIDANCE: (
-        "devices.pump_status.read",
-        "devices.guidance.read",
-        "devices.unboxing.advance",
-        "support.ticket.propose",
+        "devices_pump_status_read",
+        "devices_guidance_read",
+        "devices_unboxing_advance",
+        "support_ticket_propose",
     ),
 }
 
@@ -1352,7 +1347,7 @@ def _recommended_tools_for_service_skill(
         recommendations.append(
             {
                 "namespace": namespace.name if namespace is not None else "",
-                "name": sdk_tool_name(contract.name),
+                "name": contract.name,
             }
         )
     return recommendations
