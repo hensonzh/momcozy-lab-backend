@@ -98,6 +98,23 @@ async def get_file(
     return FileRead.model_validate(file_object)
 
 
+@router.get("/{file_id}/content", response_class=Response)
+async def get_file_content(
+    file_id: UUID,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: FileService = Depends(get_file_service),
+) -> Response:
+    content = await service.read_content_for_owner(
+        file_id=file_id,
+        owner_user_id=current_user.user_id,
+    )
+    return Response(
+        content=content.body,
+        media_type=content.file_object.content_type or "application/octet-stream",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
 @router.get(
     "/{file_id}/vision/events/stream",
     openapi_extra=api_surface("runtime_stream_api", owner="files", clients=["flutter"]),

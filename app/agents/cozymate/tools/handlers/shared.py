@@ -73,52 +73,95 @@ def _device_unboxing_workflow_payload(workflow: AgentWorkflowState) -> dict[str,
 
 
 def _profile_payload(*, profile: UserProfile | None, actor_user_id: UUID) -> dict[str, Any]:
+    del actor_user_id
     if profile is None:
         return {
-            "user_id": str(actor_user_id),
-            "display_name": "",
+            "preferred_name": None,
             "age": None,
-            "delivery_date": None,
-            "lactation_advice": "",
-            "feeding_advice": "",
-            "profile_onboarding_complete": False,
-            "profile_onboarding_skipped": False,
+            "estimated_due_date": None,
         }
     return {
-        "user_id": str(actor_user_id),
-        "display_name": profile.display_name or "",
+        "preferred_name": profile.preferred_name,
         "age": profile.age,
-        "delivery_date": _date_iso(profile.delivery_date),
-        "lactation_advice": profile.lactation_advice or "",
-        "feeding_advice": profile.feeding_advice or "",
-        "profile_onboarding_complete": bool(profile.profile_onboarding_completed_at or (profile.display_name and profile.age)),
-        "profile_onboarding_skipped": bool(profile.profile_onboarding_skipped_at),
+        "estimated_due_date": _date_iso(profile.estimated_due_date),
     }
 
 
 def _infant_payload(infant: InfantProfile) -> dict[str, Any]:
     return {
-        "id": str(infant.id),
-        "owner_user_id": str(infant.owner_user_id),
-        "infant_name": infant.infant_name,
-        "sex": infant.sex,
+        "infant_id": str(infant.id),
+        "name": infant.name,
+        "sex_at_birth": infant.sex_at_birth,
         "birth_date": _date_iso(infant.birth_date),
-        "status": infant.status,
     }
 
 
 def _profile_update_values(args: dict[str, Any]) -> dict[str, Any]:
     values: dict[str, Any] = {}
-    if "display_name" in args:
-        display_name = _text(args, "display_name")
-        if not display_name:
-            raise ApiError(code="validation_failed", message="display_name is required when provided.", status=422)
-        values["display_name"] = display_name
+    if "preferred_name" in args:
+        preferred_name = args["preferred_name"]
+        if preferred_name is not None:
+            preferred_name = str(preferred_name).strip()
+            if not preferred_name:
+                raise ApiError(code="validation_failed", message="preferred_name must not be blank.", status=422)
+        values["preferred_name"] = preferred_name
     if "age" in args:
         values["age"] = args["age"]
-    if "onboarding_skipped" in args:
-        values["profile_onboarding_skipped_at"] = datetime.now(timezone.utc) if args["onboarding_skipped"] else None
+    if "estimated_due_date" in args:
+        estimated_due_date = args["estimated_due_date"]
+        if estimated_due_date is not None:
+            if not isinstance(estimated_due_date, str):
+                raise ApiError(code="validation_failed", message="estimated_due_date must be a date.", status=422)
+            try:
+                estimated_due_date = date.fromisoformat(estimated_due_date)
+            except ValueError as exc:
+                raise ApiError(code="validation_failed", message="estimated_due_date must be a date.", status=422) from exc
+        values["estimated_due_date"] = estimated_due_date
     return values
+
+
+def _profile_infant_updates(args: dict[str, Any]) -> list[dict[str, Any]]:
+    if "infants" not in args:
+        return []
+    raw_updates = args["infants"]
+    if not isinstance(raw_updates, list) or not raw_updates:
+        raise ApiError(code="validation_failed", message="infants must contain at least one update.", status=422)
+
+    updates: list[dict[str, Any]] = []
+    seen_ids: set[UUID] = set()
+    for raw_update in raw_updates:
+        if not isinstance(raw_update, dict):
+            raise ApiError(code="validation_failed", message="Each infant update must be an object.", status=422)
+        try:
+            infant_id = UUID(str(raw_update.get("infant_id", "")))
+        except (TypeError, ValueError) as exc:
+            raise ApiError(code="validation_failed", message="infant_id must be a UUID.", status=422) from exc
+        if infant_id in seen_ids:
+            raise ApiError(code="validation_failed", message="Each infant may be updated only once.", status=422)
+        seen_ids.add(infant_id)
+
+        values: dict[str, Any] = {}
+        if "name" in raw_update:
+            name = raw_update["name"]
+            if not isinstance(name, str) or not name.strip():
+                raise ApiError(code="validation_failed", message="name must not be blank.", status=422)
+            values["name"] = name.strip()
+        if "sex_at_birth" in raw_update:
+            values["sex_at_birth"] = raw_update["sex_at_birth"]
+        if "birth_date" in raw_update:
+            birth_date = raw_update["birth_date"]
+            if birth_date is not None:
+                if not isinstance(birth_date, str):
+                    raise ApiError(code="validation_failed", message="birth_date must be a date.", status=422)
+                try:
+                    birth_date = date.fromisoformat(birth_date)
+                except ValueError as exc:
+                    raise ApiError(code="validation_failed", message="birth_date must be a date.", status=422) from exc
+            values["birth_date"] = birth_date
+        if not values:
+            raise ApiError(code="validation_failed", message="Each infant update requires at least one field.", status=422)
+        updates.append({"infant_id": infant_id, "values": values})
+    return updates
 
 
 def _support_ticket_draft(context: ToolHandlerContext) -> dict[str, Any]:

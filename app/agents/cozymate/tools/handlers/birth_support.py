@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from app.core.errors import ApiError
@@ -45,6 +45,7 @@ from .shared import (
     _optional_int,
     _pregnancy_plan_urgent_result,
     _pregnancy_plan_workflow_result,
+    _profile_infant_updates,
     _profile_payload,
     _profile_update_values,
     _proposal_result,
@@ -69,7 +70,7 @@ class ProfileReadToolHandler(_StandardToolHandler):
         profile = await self.service.get_user_profile(user_id=context.actor.user_id)
         infants = await self.service.list_infants(owner_user_id=context.actor.user_id)
         output = {
-            "profile": _profile_payload(profile=profile, actor_user_id=context.actor.user_id),
+            "user": _profile_payload(profile=profile, actor_user_id=context.actor.user_id),
             "infants": [_infant_payload(infant) for infant in infants],
         }
         return output
@@ -80,23 +81,50 @@ class ProfileUpdateToolHandler(_StandardToolHandler):
         self.runtime_service = runtime_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        values = _profile_update_values(context.args)
-        if not values:
+        raw_user_values = context.args.get("user")
+        if "user" in context.args and not isinstance(raw_user_values, dict):
+            raise ApiError(code="validation_failed", message="user must be an object.", status=422)
+        user_values = _profile_update_values(raw_user_values) if isinstance(raw_user_values, dict) else {}
+        if "user" in context.args and not user_values:
+            raise ApiError(code="validation_failed", message="user requires at least one field.", status=422)
+        infant_updates = _profile_infant_updates(context.args)
+        if not user_values and not infant_updates:
             raise ApiError(code="validation_failed", message="profile.update requires at least one field.", status=422)
-        apply_payload = {
-            key: value.isoformat() if isinstance(value, datetime) else value
-            for key, value in values.items()
+
+        apply_payload: dict[str, Any] = {}
+        if user_values:
+            apply_payload["user"] = {
+                key: value.isoformat() if isinstance(value, date) else value
+                for key, value in user_values.items()
+            }
+        if infant_updates:
+            apply_payload["infants"] = [
+                {
+                    "infant_id": str(update["infant_id"]),
+                    **{
+                        key: value.isoformat() if isinstance(value, date) else value
+                        for key, value in update["values"].items()
+                    },
+                }
+                for update in infant_updates
+            ]
+        updated = {
+            "user_fields": sorted(user_values),
+            "infants": [
+                {
+                    "infant_id": str(update["infant_id"]),
+                    "fields": sorted(update["values"]),
+                }
+                for update in infant_updates
+            ],
         }
-        preview_payload = {
-            "updated_fields": sorted(values),
-            **{key: value for key, value in context.args.items() if key in {"display_name", "age", "onboarding_skipped"}},
-        }
+        preview_payload = {key: value for key, value in updated.items() if value}
         action = await _propose_action_reusing_idempotency(
             self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PROFILE_UPDATE_ACTION,
-            target_type="user_profile",
+            target_type="profile",
             target_id=str(context.actor.user_id),
             side_effect_level="low",
             preview_payload=preview_payload,
@@ -108,7 +136,7 @@ class ProfileUpdateToolHandler(_StandardToolHandler):
         if output["write_succeeded"]:
             output.update({
                 "status": "profile_updated",
-                "updated_fields": sorted(values),
+                "updated": updated,
             })
         return output
 

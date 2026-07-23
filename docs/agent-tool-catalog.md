@@ -100,7 +100,8 @@ Canonical contract 中的 `.` 传给 Responses API 时会转换为 `_`，例如 
 
 ## 7. Profile 与孕期日记
 
-- `profile.update` 只做参数归一化和 Action 提交；`ProfileUpdateActionHandler` 是唯一业务写入入口。
+- `profile.read` 一次返回当前用户与全部宝宝的基础资料；宝宝使用稳定的 `infant_id`。
+- `profile.update` 以 `user` 和 `infants` 两个可选对象执行 PATCH，可在同一 Action 中原子更新用户与指定宝宝；`ProfileUpdateActionHandler` 是唯一业务写入入口。
 - 孕期日记拆成 `pregnancy_diary.query` / `pregnancy_diary.save` / `pregnancy_diary.delete`，不再使用一个混合读写工具。
 - `save` 只接受 `operation=create|update`；`update` 传完整重写正文。
 - `delete` 在 Tool Handler 中校验当前用户消息的 `confirmation_evidence`，证据成立后直接执行 Action，不再生成第二张确认卡。

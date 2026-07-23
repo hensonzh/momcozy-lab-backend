@@ -608,7 +608,7 @@ def normalize_pregnancy_plan_generation_context(values: dict[str, Any]) -> dict[
 
     for key in (
         "due_date_or_week",
-        "delivery_date",
+        "estimated_due_date",
         "birth_setting",
         "feeding_intention",
         "support_person",
@@ -709,7 +709,7 @@ def analyze_pregnancy_plan_intake(
     timing = _first_text(
         context.get("current_week"),
         values.get("due_date_or_week"),
-        values.get("delivery_date"),
+        values.get("estimated_due_date"),
     )
     week = _gestational_week(timing, as_of_date=as_of_date)
     stage = _pregnancy_stage(week)
@@ -919,7 +919,7 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
         _first_text(
             context.get("due_date_or_week"),
             context.get("current_week"),
-            context.get("delivery_date"),
+            context.get("estimated_due_date"),
         )
         or "待确认"
     )

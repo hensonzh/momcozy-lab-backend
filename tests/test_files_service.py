@@ -72,6 +72,25 @@ def test_file_service_get_for_owner_raises_not_found() -> None:
         asyncio.run(service.get_for_owner(file_id=uuid4(), owner_user_id=uuid4()))
 
 
+def test_file_service_reads_owner_scoped_content() -> None:
+    owner_user_id = uuid4()
+    file_object = _file(owner_user_id=owner_user_id)
+    repository = FakeFileRepository(file_to_return=file_object)
+    storage = FakeObjectStorage(get_body=b"image-bytes")
+    service = FileService(repository=repository, object_storage=storage)
+
+    content = asyncio.run(
+        service.read_content_for_owner(
+            file_id=file_object.id,
+            owner_user_id=owner_user_id,
+        )
+    )
+
+    assert content.file_object is file_object
+    assert content.body == b"image-bytes"
+    assert storage.get_calls == [file_object.object_key]
+
+
 def test_file_service_lists_files_for_owner() -> None:
     owner_user_id = uuid4()
     file_object = _file(owner_user_id=owner_user_id)
@@ -287,8 +306,10 @@ class FakeFileRepository:
 
 
 class FakeObjectStorage:
-    def __init__(self, *, delete_error: Exception | None = None) -> None:
+    def __init__(self, *, get_body: bytes = b"", delete_error: Exception | None = None) -> None:
         self.put_calls = []
+        self.get_calls = []
+        self.get_body = get_body
         self.delete_calls = []
         self.delete_error = delete_error
 
@@ -296,7 +317,8 @@ class FakeObjectStorage:
         self.put_calls.append(kwargs)
 
     async def get_bytes(self, *, key: str):
-        return b""
+        self.get_calls.append(key)
+        return self.get_body
 
     async def delete(self, *, key: str):
         if self.delete_error is not None:

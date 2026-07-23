@@ -36,12 +36,62 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     "profile.update": {
         "type": "object",
         "additionalProperties": False,
+        "minProperties": 1,
         "properties": {
-            "display_name": {"type": "string", "minLength": 1, "maxLength": 120},
-            "age": {"type": "integer", "minimum": 12, "maximum": 70},
-            "onboarding_skipped": {
-                "type": "boolean",
-                "description": "用户明确说先跳过名字或年龄时传 true。",
+            "user": {
+                "type": "object",
+                "additionalProperties": False,
+                "minProperties": 1,
+                "properties": {
+                    "preferred_name": {
+                        "anyOf": [
+                            {"type": "string", "minLength": 1, "maxLength": 120},
+                            {"type": "null"},
+                        ]
+                    },
+                    "age": {
+                        "anyOf": [
+                            {"type": "integer", "minimum": 12, "maximum": 70},
+                            {"type": "null"},
+                        ]
+                    },
+                    "estimated_due_date": {
+                        "anyOf": [
+                            {"type": "string", "format": "date"},
+                            {"type": "null"},
+                        ]
+                    },
+                },
+            },
+            "infants": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 10,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "minProperties": 2,
+                    "required": ["infant_id"],
+                    "properties": {
+                        "infant_id": {"type": "string", "format": "uuid"},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "sex_at_birth": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "enum": ["female", "male", "intersex", "unknown", "undisclosed"],
+                                },
+                                {"type": "null"},
+                            ]
+                        },
+                        "birth_date": {
+                            "anyOf": [
+                                {"type": "string", "format": "date"},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                },
             },
         },
     },

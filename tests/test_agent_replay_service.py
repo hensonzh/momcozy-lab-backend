@@ -214,7 +214,7 @@ class FakeReplayRepository:
                 item={
                     "type": "function_call_output",
                     "call_id": "call_1",
-                    "output": '{"profile":{"display_name":"Mai"}}',
+                    "output": '{"profile":{"preferred_name":"Mai"}}',
                 },
                 sequence=2,
             ),

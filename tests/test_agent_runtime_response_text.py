@@ -2,7 +2,7 @@ from app.agent_runtime.runs.response_text import AppendOnlyAgentResponseProjecto
 
 
 def test_sanitize_agent_response_text_removes_tool_output_json() -> None:
-    result = sanitize_agent_response_text('{"profile":{"display_name":"henson"}}')
+    result = sanitize_agent_response_text('{"profile":{"preferred_name":"henson"}}')
 
     assert result.text == ""
     assert result.quick_replies == []

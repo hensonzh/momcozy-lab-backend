@@ -1511,7 +1511,7 @@ def _birth_prep_form_default_values(facts: dict[str, Any]) -> dict[str, Any]:
             for value in (
                 _text(pregnancy, "due_date_or_week"),
                 _text(pregnancy, "current_week"),
-                _text(profile, "delivery_date"),
+                _text(profile, "estimated_due_date"),
             )
             if value
         ),
@@ -1594,7 +1594,7 @@ def _pregnancy_runtime_plan_context(
     )
     context: dict[str, Any] = {
         "has_active_plan": bool(active_plans),
-        "delivery_date": _text(profile, "delivery_date"),
+        "estimated_due_date": _text(profile, "estimated_due_date"),
     }
     if active_plans:
         context["active_plan_id"] = _text(active_plans[0], "id")

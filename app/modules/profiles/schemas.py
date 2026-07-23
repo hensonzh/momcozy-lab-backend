@@ -1,49 +1,77 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+SexAtBirth = Literal["female", "male", "intersex", "unknown", "undisclosed"]
 
 
 class UserProfileRead(BaseModel):
-    user_id: UUID
-    display_name: str = ""
+    preferred_name: str | None = None
     age: int | None = None
-    delivery_date: date | None = None
-    lactation_advice: str = ""
-    feeding_advice: str = ""
-    profile_onboarding_complete: bool = False
-    profile_onboarding_skipped: bool = False
+    estimated_due_date: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class UserProfileUpdate(BaseModel):
-    display_name: str | None = Field(default=None, max_length=120)
+    preferred_name: str | None = Field(default=None, max_length=120)
     age: int | None = Field(default=None, ge=12, le=70)
-    delivery_date: date | None = None
-    lactation_advice: str | None = None
-    feeding_advice: str | None = None
-    profile_onboarding_skipped_at: datetime | None = None
-    profile_onboarding_completed_at: datetime | None = None
+    estimated_due_date: date | None = None
+
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
+
+    @field_validator("preferred_name")
+    @classmethod
+    def normalize_preferred_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("preferred_name must not be blank")
+        return normalized
+
+    @model_validator(mode="after")
+    def require_at_least_one_field(self) -> UserProfileUpdate:
+        if not self.model_fields_set:
+            raise ValueError("at least one profile field is required")
+        return self
 
 
 class InfantProfileRead(BaseModel):
     id: UUID
-    owner_user_id: UUID
-    infant_name: str
-    sex: str
+    name: str
+    sex_at_birth: SexAtBirth | None = None
     birth_date: date | None = None
-    status: str
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class InfantProfileCreate(BaseModel):
-    infant_name: str = Field(min_length=1, max_length=120)
-    sex: str | None = Field(default=None, max_length=32)
+    name: str = Field(min_length=1, max_length=120)
+    sex_at_birth: SexAtBirth | None = None
     birth_date: date | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("name must not be blank")
+        return normalized
+
+    @field_validator("birth_date")
+    @classmethod
+    def reject_future_birth_date(cls, value: date | None) -> date | None:
+        if value is not None and value > date.today():
+            raise ValueError("birth_date must not be in the future")
+        return value
 
 
 class InfantProfileListResponse(BaseModel):

@@ -18,7 +18,6 @@ from .service import AuthSessionService, IssuedRefreshToken
 
 EMAIL_PROVIDER = "email"
 INVITE_PROVIDER = "invite"
-DEFAULT_INVITE_DISPLAY_NAME = "Momcozy 体验用户"
 
 
 @dataclass(frozen=True)
@@ -55,7 +54,6 @@ class AuthAccountService:
         *,
         email: str,
         password: str,
-        display_name: str = "",
         device_context: DeviceContext | None = None,
     ) -> IssuedTokenPair:
         normalized_email = normalize_email(email)
@@ -66,7 +64,6 @@ class AuthAccountService:
         user, _identity = await self.account_repository.create_email_user(
             email=normalized_email,
             password_hash=hash_password(password),
-            display_name=display_name.strip(),
         )
         return await self._issue_pair(user=user, device_context=device_context)
 
@@ -117,7 +114,6 @@ class AuthAccountService:
             user, _identity = await self.account_repository.create_invite_user(
                 invite_code=normalized_code,
                 device_id=device_id,
-                display_name=DEFAULT_INVITE_DISPLAY_NAME,
             )
             if managed_invite_code is not None and self.invite_code_repository is not None:
                 await self.invite_code_repository.bind(invite_code=managed_invite_code, device_id=device_id, user_id=user.id)

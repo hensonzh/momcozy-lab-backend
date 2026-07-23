@@ -57,6 +57,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/files/upload` | files | flutter | stable | Upload File |
 | DELETE | `/v1/files/{file_id}` | files | flutter | stable | Delete File |
 | GET | `/v1/files/{file_id}` | files | flutter | stable | Get File |
+| GET | `/v1/files/{file_id}/content` | files | flutter | stable | Get File Content |
 | GET | `/v1/notifications` | notifications | flutter | stable | List Notifications |
 | DELETE | `/v1/notifications/{notification_id}` | notifications | flutter | stable | Archive Notification |
 | PATCH | `/v1/notifications/{notification_id}/read` | notifications | flutter | stable | Set Notification Read State |
@@ -79,7 +80,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/profile/infants` | profiles | flutter | stable | List My Infants |
 | POST | `/v1/profile/infants` | profiles | flutter | stable | Create My Infant |
 | GET | `/v1/profile/me` | profiles | flutter | stable | Get My Profile |
-| PUT | `/v1/profile/me` | profiles | flutter | stable | Update My Profile |
+| PATCH | `/v1/profile/me` | profiles | flutter | stable | Update My Profile |
 | GET | `/v1/records/feeding` | records | flutter | stable | List Feedings |
 | POST | `/v1/records/feeding` | records | flutter | stable | Create Feeding |
 | DELETE | `/v1/records/feeding/{record_id}` | records | flutter | stable | Delete Feeding |

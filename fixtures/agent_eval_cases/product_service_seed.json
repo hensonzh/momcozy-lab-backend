@@ -506,7 +506,7 @@
         "fixtures": {
           "profile": {
             "gestational_week": 32,
-            "delivery_date": "2026-09-12"
+            "estimated_due_date": "2026-09-12"
           },
           "active_pregnancy_plan": false
         }
@@ -723,7 +723,7 @@
         "fixtures": {
           "profile": {
             "gestational_week": 32,
-            "delivery_date": "2026-09-12"
+            "estimated_due_date": "2026-09-12"
           },
           "active_pregnancy_plan": false,
           "latest_workflow_phase": "ready_to_generate"
@@ -2528,7 +2528,7 @@
             {
               "type": "function_call_output",
               "call_id": "call_profile_1",
-              "output": "{\"profile\":{\"display_name\":\"Mai\"}}"
+              "output": "{\"profile\":{\"preferred_name\":\"Mai\"}}"
             }
           ]
         }

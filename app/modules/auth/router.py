@@ -42,7 +42,6 @@ async def signup(
     issued = await service.signup(
         email=body.email,
         password=body.password,
-        display_name=body.display_name,
         device_context=_device_context(request=request, device_id=body.device_id),
     )
     return _token_response(issued)
@@ -113,5 +112,5 @@ def _token_response(issued: IssuedTokenPair) -> TokenResponse:
         access_token=issued.access_token,
         refresh_token=issued.refresh_token,
         expires_in=issued.expires_in,
-        user=TokenUser(id=str(issued.user.id), display_name=issued.user.display_name),
+        user=TokenUser(id=str(issued.user.id)),
     )

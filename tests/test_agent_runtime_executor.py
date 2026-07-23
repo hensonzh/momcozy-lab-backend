@@ -155,7 +155,7 @@ def test_agent_runtime_executor_uses_ordered_context_items_without_runtime_proje
         {
             "type": "function_call_output",
             "call_id": "call_1",
-            "output": '{"profile":{"display_name":"Mai"}}',
+            "output": '{"profile":{"preferred_name":"Mai"}}',
         },
         {"role": "assistant", "content": "Your name is Mai."},
         {"role": "user", "content": "What about now?"},
@@ -1135,7 +1135,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    tool_executor = FakeToolExecutor(safe_output={"profile": {"display_name": "Mai"}})
+    tool_executor = FakeToolExecutor(safe_output={"profile": {"preferred_name": "Mai"}})
     backend = InvokingSdkBackend()
 
     result = asyncio.run(
@@ -1242,7 +1242,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert "title" not in backend.tool_schemas["pregnancy_plan_propose"]["properties"]
     assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
     assert backend.tool_schemas["profile_read"]["properties"] == {}
-    assert backend.tool_schemas["profile_update"]["properties"]["age"]["maximum"] == 70
+    assert backend.tool_schemas["profile_update"]["properties"]["user"]["properties"]["age"]["anyOf"][0]["maximum"] == 70
+    assert backend.tool_schemas["profile_update"]["properties"]["infants"]["items"]["required"] == ["infant_id"]
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
     assert backend.tool_schemas["records_feeding_record_delete_propose"]["required"] == ["record_id"]
     assert backend.tool_schemas["records_growth_read"]["properties"]["limit"]["maximum"] == 20
@@ -1746,8 +1747,8 @@ def test_agent_runtime_executor_suppresses_streamed_structured_json_deltas() -> 
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
-                final_text='{"profile":{"display_name":"Mai"}}',
-                text_deltas=('{"profile":', '{"display_name":"Mai"}}'),
+                final_text='{"profile":{"preferred_name":"Mai"}}',
+                text_deltas=('{"profile":', '{"preferred_name":"Mai"}}'),
             )
         ]
     )
@@ -1841,7 +1842,7 @@ def test_agent_runtime_executor_advertises_tool_search_for_responses_runner() ->
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    tool_executor = FakeToolExecutor(safe_output={"profile": {"display_name": "Mai"}})
+    tool_executor = FakeToolExecutor(safe_output={"profile": {"preferred_name": "Mai"}})
     backend = InvokingSdkBackend()
 
     result = asyncio.run(
@@ -3217,7 +3218,7 @@ def test_agent_runtime_executor_prefills_form_from_runtime_business_facts_withou
         repository=repository,
         handlers={"hospital_bag_form_create": capture_handler},
     )
-    business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"delivery_date": "2026-09-18"}}})
+    business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}}})
     fact_service = FakeFactService(defaults={"due_date_or_week": "30周", "age": 34, "first_birth": "否", "feeding_intention": "混合喂养"})
     backend = ScriptedSdkBackend(
         [
@@ -3308,7 +3309,7 @@ def test_birth_prep_prefill_uses_verified_profile_then_active_plan_owner_without
     defaults = _birth_prep_form_default_values(
         {
             "pregnancy": {
-                "profile": {"delivery_date": "2026-09-18", "age": 33},
+                "profile": {"estimated_due_date": "2026-09-18", "age": 33},
                 "plans": [
                     {
                         "status": "active",
@@ -3348,7 +3349,7 @@ def test_pregnancy_runtime_plan_context_ignores_active_non_pregnancy_plans() -> 
     context = _pregnancy_runtime_plan_context(
         {
             "pregnancy": {
-                "profile": {"delivery_date": "2026-09-18"},
+                "profile": {"estimated_due_date": "2026-09-18"},
                 "plans": [
                     {"id": "milk-plan", "plan_type": "milk_management", "status": "active", "title": "追奶计划"},
                     {"id": "pregnancy-plan", "plan_type": "pregnancy", "status": "active", "title": "孕期计划"},
@@ -3359,7 +3360,7 @@ def test_pregnancy_runtime_plan_context_ignores_active_non_pregnancy_plans() -> 
 
     assert context == {
         "has_active_plan": True,
-        "delivery_date": "2026-09-18",
+        "estimated_due_date": "2026-09-18",
         "active_plan_id": "pregnancy-plan",
         "active_plan_title": "孕期计划",
     }
@@ -3407,7 +3408,7 @@ def test_expired_pregnancy_workflow_is_not_reused_as_trusted_intake_context() ->
 
 def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_state() -> None:
     context = _pregnancy_runtime_plan_context(
-        {"pregnancy": {"profile": {"delivery_date": "2026-09-18"}, "plans": []}},
+        {"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}, "plans": []}},
         workflow={
             "workflow_state_id": "workflow-1",
             "run_id": "analysis-run-1",
@@ -3429,7 +3430,7 @@ def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_s
 
     assert context == {
         "has_active_plan": False,
-        "delivery_date": "2026-09-18",
+        "estimated_due_date": "2026-09-18",
         "workflow_phase": "awaiting_additional_information",
         "analysis_run_id": "analysis-run-1",
         "source_form_artifact_id": "form-1",
@@ -3445,7 +3446,7 @@ def test_pregnancy_runtime_plan_context_recovers_analyzed_intake_from_workflow_s
 
 def test_pregnancy_runtime_plan_context_does_not_resurrect_consumed_intake_after_plan_deletion() -> None:
     context = _pregnancy_runtime_plan_context(
-        {"pregnancy": {"profile": {"delivery_date": "2026-09-18"}, "plans": []}},
+        {"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}, "plans": []}},
         workflow={
             "workflow_state_id": "consumed-1",
             "state": {
@@ -3460,7 +3461,7 @@ def test_pregnancy_runtime_plan_context_does_not_resurrect_consumed_intake_after
 
     assert context == {
         "has_active_plan": False,
-        "delivery_date": "2026-09-18",
+        "estimated_due_date": "2026-09-18",
     }
 
 

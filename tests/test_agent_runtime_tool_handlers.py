@@ -93,41 +93,39 @@ def test_profile_read_tool_handler_returns_safe_context_projection() -> None:
     actor = _user()
     profile = UserProfile(
         user_id=actor.user_id,
-        display_name="Mai",
+        preferred_name="Mai",
         age=31,
-        delivery_date=date(2026, 9, 20),
-        lactation_advice="Hydrate",
-        feeding_advice="Track feeds",
+        estimated_due_date=date(2026, 9, 20),
     )
     infant = InfantProfile(
         id=uuid4(),
         owner_user_id=actor.user_id,
-        infant_name="Nori",
-        sex="female",
+        name="Nori",
+        sex_at_birth="female",
         birth_date=date(2026, 1, 10),
-        status="active",
     )
     handler = ProfileReadToolHandler(service=FakeProfileService(profile=profile, infants=[infant]))
 
     result = asyncio.run(handler.execute(_context(actor=actor, args={})))
 
-    assert result["profile"]["user_id"] == str(actor.user_id)
-    assert result["profile"]["delivery_date"] == "2026-09-20"
-    assert result["profile"]["profile_onboarding_complete"] is True
+    assert result["user"] == {
+        "preferred_name": "Mai",
+        "age": 31,
+        "estimated_due_date": "2026-09-20",
+    }
     assert result["infants"] == [
         {
-            "id": str(infant.id),
-            "owner_user_id": str(actor.user_id),
-            "infant_name": "Nori",
-            "sex": "female",
+            "infant_id": str(infant.id),
+            "name": "Nori",
+            "sex_at_birth": "female",
             "birth_date": "2026-01-10",
-            "status": "active",
         }
     ]
 
 
-def test_profile_update_tool_handler_updates_explicit_profile_fields() -> None:
+def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> None:
     actor = _user()
+    infant_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
     handler = ProfileUpdateToolHandler(runtime_service=runtime_service)
 
@@ -135,19 +133,54 @@ def test_profile_update_tool_handler_updates_explicit_profile_fields() -> None:
         handler.execute(
             _context(
                 actor=actor,
-                args={"display_name": " Mai ", "age": 31, "onboarding_skipped": True},
+                args={
+                    "user": {
+                        "preferred_name": " Mai ",
+                        "age": 31,
+                        "estimated_due_date": "2026-09-20",
+                    },
+                    "infants": [
+                        {
+                            "infant_id": str(infant_id),
+                            "name": " Nori ",
+                            "sex_at_birth": "female",
+                            "birth_date": "2026-01-10",
+                        }
+                    ],
+                },
             )
         )
     )
 
     assert result["status"] == "profile_updated"
-    assert result["updated_fields"] == ["age", "display_name", "profile_onboarding_skipped_at"]
+    assert result["updated"] == {
+        "user_fields": ["age", "estimated_due_date", "preferred_name"],
+        "infants": [
+            {
+                "infant_id": str(infant_id),
+                "fields": ["birth_date", "name", "sex_at_birth"],
+            }
+        ],
+    }
     action_call = runtime_service.calls[0]
     assert action_call["owner_user_id"] == actor.user_id
     assert action_call["action_type"] == "profile.update"
-    assert action_call["apply_payload"]["display_name"] == "Mai"
-    assert action_call["apply_payload"]["age"] == 31
-    assert action_call["apply_payload"]["profile_onboarding_skipped_at"]
+    assert action_call["target_type"] == "profile"
+    assert action_call["apply_payload"] == {
+        "user": {
+            "preferred_name": "Mai",
+            "age": 31,
+            "estimated_due_date": "2026-09-20",
+        },
+        "infants": [
+            {
+                "infant_id": str(infant_id),
+                "name": "Nori",
+                "sex_at_birth": "female",
+                "birth_date": "2026-01-10",
+            }
+        ],
+    }
 
 
 def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
@@ -157,6 +190,34 @@ def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
         asyncio.run(handler.execute(_context(args={})))
 
     assert exc_info.value.code == "validation_failed"
+
+
+def test_profile_update_tool_handler_preserves_explicit_nulls() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    handler = ProfileUpdateToolHandler(runtime_service=runtime_service)
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                args={
+                    "user": {
+                        "preferred_name": None,
+                        "age": None,
+                        "estimated_due_date": None,
+                    }
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "profile_updated"
+    assert runtime_service.calls[0]["apply_payload"] == {
+        "user": {
+            "preferred_name": None,
+            "age": None,
+            "estimated_due_date": None,
+        }
+    }
 
 
 def test_support_ticket_propose_tool_handler_creates_editable_draft_artifact() -> None:
@@ -561,10 +622,9 @@ def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -
     infant = InfantProfile(
         id=uuid4(),
         owner_user_id=actor.user_id,
-        infant_name="Nori",
-        sex="female",
+        name="Nori",
+        sex_at_birth="female",
         birth_date=date(2026, 1, 10),
-        status="active",
     )
     profile_service = FakeProfileService(profile=None, infants=[infant])
     handler = MilkSummaryReadToolHandler(records_service=records_service, profile_service=profile_service)
@@ -576,12 +636,10 @@ def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -
     assert result["window"] == {"days": 3, "include_today": True}
     assert result["infants"] == [
         {
-            "id": str(infant.id),
-            "owner_user_id": str(actor.user_id),
-            "infant_name": "Nori",
-            "sex": "female",
+            "infant_id": str(infant.id),
+            "name": "Nori",
+            "sex_at_birth": "female",
             "birth_date": "2026-01-10",
-            "status": "active",
         }
     ]
     assert result["recent_feedings"][0]["volume_ml"] == 60
@@ -614,10 +672,9 @@ def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -
     infant = InfantProfile(
         id=uuid4(),
         owner_user_id=actor.user_id,
-        infant_name="Nori",
-        sex="female",
+        name="Nori",
+        sex_at_birth="female",
         birth_date=date(2026, 1, 10),
-        status="active",
     )
     profile_service = FakeProfileService(profile=None, infants=[infant])
     handler = MilkStatusReadToolHandler(records_service=records_service, profile_service=profile_service)
@@ -981,9 +1038,9 @@ def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_s
     actor = _user()
     profile = UserProfile(
         user_id=actor.user_id,
-        display_name="Mai",
+        preferred_name="Mai",
         age=31,
-        delivery_date=date(2026, 9, 20),
+        estimated_due_date=date(2026, 9, 20),
     )
     profile_service = FakeProfileService(profile=profile, infants=[])
     plans_service = FakePlansService(owner_user_id=actor.user_id)
@@ -998,7 +1055,7 @@ def test_pregnancy_plan_context_read_tool_handler_returns_bounded_owner_scoped_s
     assert plans_service.owner_user_id == actor.user_id
     assert plans_service.plan_status == "active"
     assert plans_service.plan_type == "pregnancy"
-    assert result["profile"]["delivery_date"] == "2026-09-20"
+    assert result["profile"]["estimated_due_date"] == "2026-09-20"
     assert result["plans"][0]["title"] == "Birth plan"
     assert result["plans"][0]["version"] == 1
     assert result["tasks"][0]["title"] == "Call clinic"
@@ -2061,7 +2118,7 @@ def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmat
             "additional_info": "模型臆造的补充不得覆盖耐久工作流事实",
             "runtime_plan_context": {
                 "has_active_plan": False,
-                "delivery_date": "2026-09-18",
+                "estimated_due_date": "2026-09-18",
                 "current_week": "32周",
                 "due_date_or_week": "32周",
                 "birth_path": "顺产",
@@ -2104,7 +2161,7 @@ def test_pregnancy_plan_propose_tool_handler_applies_without_duplicate_confirmat
     assert runtime_service.calls[0]["idempotency_key"].startswith("pregnancy-plan:")
     assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["due_date_or_week"] == "32周"
     assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["birth_path"] == "顺产"
-    assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["delivery_date"] == "2026-09-18"
+    assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["estimated_due_date"] == "2026-09-18"
     assert runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]["final_additional_info"] == "下周需要出差两天"
     sanitized_context = runtime_service.calls[0]["apply_payload"]["payload"]["plan_context"]
     assert len(sanitized_context["personalized_followup_records"]) == 3
@@ -3441,13 +3498,9 @@ class FakeProfileService:
         values = kwargs["values"]
         self.profile = UserProfile(
             user_id=kwargs["user_id"],
-            display_name=values.get("display_name", ""),
+            preferred_name=values.get("preferred_name", ""),
             age=values.get("age"),
-            delivery_date=values.get("delivery_date"),
-            lactation_advice=values.get("lactation_advice", ""),
-            feeding_advice=values.get("feeding_advice", ""),
-            profile_onboarding_skipped_at=values.get("profile_onboarding_skipped_at"),
-            profile_onboarding_completed_at=values.get("profile_onboarding_completed_at"),
+            estimated_due_date=values.get("estimated_due_date"),
         )
         return self.profile
 

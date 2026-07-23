@@ -8,6 +8,7 @@ from app.factory import create_app
 from app.modules.auth import CurrentUser
 from app.modules.files.models import FileObject
 from app.modules.files.router import get_file_service, get_file_vision_service
+from app.modules.files.service import FileContent
 from app.modules.files.vision_service import FileVisionEvent
 
 
@@ -87,6 +88,25 @@ def test_file_detail_uses_current_user_owner_scope() -> None:
     assert response.status_code == 200
     assert response.json()["id"] == str(fake_service.file_id)
     assert fake_service.get_kwargs["owner_user_id"] == user_id
+
+
+def test_file_content_uses_current_user_owner_scope_and_preserves_mime_type() -> None:
+    user_id = uuid4()
+    fake_service = FakeFileService()
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_file_service] = lambda: fake_service
+
+    response = TestClient(app).get(f"/v1/files/{fake_service.file_id}/content")
+
+    assert response.status_code == 200
+    assert response.content == b"image-bytes"
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert fake_service.read_content_kwargs == {
+        "file_id": fake_service.file_id,
+        "owner_user_id": user_id,
+    }
 
 
 def test_file_list_uses_current_user_owner_scope_and_limit() -> None:
@@ -201,6 +221,7 @@ class FakeFileService:
         self.get_kwargs = {}
         self.list_kwargs = {}
         self.delete_kwargs = {}
+        self.read_content_kwargs = {}
 
     async def upload(self, **kwargs):
         self.upload_kwargs = kwargs
@@ -213,6 +234,21 @@ class FakeFileService:
     async def list_for_owner(self, **kwargs):
         self.list_kwargs = kwargs
         return [self._file(owner_user_id=kwargs["owner_user_id"])]
+
+    async def read_content_for_owner(self, **kwargs):
+        self.read_content_kwargs = kwargs
+        return FileContent(
+            file_object=FileObject(
+                id=self.file_id,
+                owner_user_id=kwargs["owner_user_id"],
+                object_key=f"users/{kwargs['owner_user_id']}/files/{self.file_id}/image.png",
+                original_filename="image.png",
+                content_type="image/png",
+                size_bytes=11,
+                status="active",
+            ),
+            body=b"image-bytes",
+        )
 
     async def delete_for_owner(self, **kwargs):
         self.delete_kwargs = kwargs

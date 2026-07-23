@@ -1562,6 +1562,7 @@
         "type": "object"
       },
       "InfantProfileCreate": {
+        "additionalProperties": false,
         "properties": {
           "birth_date": {
             "anyOf": [
@@ -1575,27 +1576,33 @@
             ],
             "title": "Birth Date"
           },
-          "infant_name": {
+          "name": {
             "maxLength": 120,
             "minLength": 1,
-            "title": "Infant Name",
+            "title": "Name",
             "type": "string"
           },
-          "sex": {
+          "sex_at_birth": {
             "anyOf": [
               {
-                "maxLength": 32,
+                "enum": [
+                  "female",
+                  "male",
+                  "intersex",
+                  "unknown",
+                  "undisclosed"
+                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Sex"
+            "title": "Sex At Birth"
           }
         },
         "required": [
-          "infant_name"
+          "name"
         ],
         "title": "InfantProfileCreate",
         "type": "object"
@@ -1635,30 +1642,32 @@
             "title": "Id",
             "type": "string"
           },
-          "infant_name": {
-            "title": "Infant Name",
+          "name": {
+            "title": "Name",
             "type": "string"
           },
-          "owner_user_id": {
-            "format": "uuid",
-            "title": "Owner User Id",
-            "type": "string"
-          },
-          "sex": {
-            "title": "Sex",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
+          "sex_at_birth": {
+            "anyOf": [
+              {
+                "enum": [
+                  "female",
+                  "male",
+                  "intersex",
+                  "unknown",
+                  "undisclosed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sex At Birth"
           }
         },
         "required": [
           "id",
-          "owner_user_id",
-          "infant_name",
-          "sex",
-          "status"
+          "name"
         ],
         "title": "InfantProfileRead",
         "type": "object"
@@ -3711,17 +3720,12 @@
         "type": "object"
       },
       "SignupRequest": {
+        "additionalProperties": false,
         "properties": {
           "device_id": {
             "default": "",
             "maxLength": 120,
             "title": "Device Id",
-            "type": "string"
-          },
-          "display_name": {
-            "default": "",
-            "maxLength": 120,
-            "title": "Display Name",
             "type": "string"
           },
           "email": {
@@ -4064,18 +4068,13 @@
       },
       "TokenUser": {
         "properties": {
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
           "id": {
             "title": "Id",
             "type": "string"
           }
         },
         "required": [
-          "id",
-          "display_name"
+          "id"
         ],
         "title": "TokenUser",
         "type": "object"
@@ -4093,7 +4092,7 @@
             ],
             "title": "Age"
           },
-          "delivery_date": {
+          "estimated_due_date": {
             "anyOf": [
               {
                 "format": "date",
@@ -4103,46 +4102,26 @@
                 "type": "null"
               }
             ],
-            "title": "Delivery Date"
+            "title": "Estimated Due Date"
           },
-          "display_name": {
-            "default": "",
-            "title": "Display Name",
-            "type": "string"
-          },
-          "feeding_advice": {
-            "default": "",
-            "title": "Feeding Advice",
-            "type": "string"
-          },
-          "lactation_advice": {
-            "default": "",
-            "title": "Lactation Advice",
-            "type": "string"
-          },
-          "profile_onboarding_complete": {
-            "default": false,
-            "title": "Profile Onboarding Complete",
-            "type": "boolean"
-          },
-          "profile_onboarding_skipped": {
-            "default": false,
-            "title": "Profile Onboarding Skipped",
-            "type": "boolean"
-          },
-          "user_id": {
-            "format": "uuid",
-            "title": "User Id",
-            "type": "string"
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
           }
         },
-        "required": [
-          "user_id"
-        ],
         "title": "UserProfileRead",
         "type": "object"
       },
       "UserProfileUpdate": {
+        "additionalProperties": false,
+        "minProperties": 1,
         "properties": {
           "age": {
             "anyOf": [
@@ -4157,7 +4136,7 @@
             ],
             "title": "Age"
           },
-          "delivery_date": {
+          "estimated_due_date": {
             "anyOf": [
               {
                 "format": "date",
@@ -4167,9 +4146,9 @@
                 "type": "null"
               }
             ],
-            "title": "Delivery Date"
+            "title": "Estimated Due Date"
           },
-          "display_name": {
+          "preferred_name": {
             "anyOf": [
               {
                 "maxLength": 120,
@@ -4179,53 +4158,7 @@
                 "type": "null"
               }
             ],
-            "title": "Display Name"
-          },
-          "feeding_advice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Feeding Advice"
-          },
-          "lactation_advice": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lactation Advice"
-          },
-          "profile_onboarding_completed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Onboarding Completed At"
-          },
-          "profile_onboarding_skipped_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Profile Onboarding Skipped At"
+            "title": "Preferred Name"
           }
         },
         "title": "UserProfileUpdate",
@@ -7073,6 +7006,53 @@
         "x-momcozy-stability": "stable"
       }
     },
+    "/v1/files/{file_id}/content": {
+      "get": {
+        "operationId": "get_file_content_v1_files__file_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "File Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get File Content",
+        "tags": [
+          "files"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "files",
+        "x-momcozy-stability": "stable"
+      }
+    },
     "/v1/files/{file_id}/vision/events/stream": {
       "get": {
         "operationId": "stream_file_vision_events_v1_files__file_id__vision_events_stream_get",
@@ -8691,8 +8671,8 @@
         "x-momcozy-owner": "profiles",
         "x-momcozy-stability": "stable"
       },
-      "put": {
-        "operationId": "update_my_profile_v1_profile_me_put",
+      "patch": {
+        "operationId": "update_my_profile_v1_profile_me_patch",
         "requestBody": {
           "content": {
             "application/json": {

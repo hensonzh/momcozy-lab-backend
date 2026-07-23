@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SignupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=8, max_length=128)
-    display_name: str = Field(default="", max_length=120)
     device_id: str = Field(default="", max_length=120)
 
 
@@ -27,7 +28,6 @@ class RefreshRequest(BaseModel):
 
 class TokenUser(BaseModel):
     id: str
-    display_name: str
 
 
 class TokenResponse(BaseModel):

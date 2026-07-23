@@ -255,7 +255,7 @@ def _looks_like_tool_or_runtime_json(value: Any) -> bool:
         "tool_scope",
         "recommended_tools",
         "business_facts",
-        "display_name",
+        "preferred_name",
         "profile",
         "quick_replies",
         "quickReplies",

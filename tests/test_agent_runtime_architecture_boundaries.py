@@ -708,10 +708,19 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "properties": {},
     }
     assert profile_update_schema["additionalProperties"] is False
-    assert profile_update_schema["properties"]["display_name"]["maxLength"] == 120
-    assert profile_update_schema["properties"]["age"]["minimum"] == 12
-    assert profile_update_schema["properties"]["age"]["maximum"] == 70
-    assert profile_update_schema["properties"]["onboarding_skipped"]["type"] == "boolean"
+    assert profile_update_schema["minProperties"] == 1
+    user_update_schema = profile_update_schema["properties"]["user"]
+    infant_update_schema = profile_update_schema["properties"]["infants"]["items"]
+    assert user_update_schema["properties"]["preferred_name"]["anyOf"][0]["maxLength"] == 120
+    assert user_update_schema["properties"]["age"]["anyOf"][0]["minimum"] == 12
+    assert user_update_schema["properties"]["age"]["anyOf"][0]["maximum"] == 70
+    assert user_update_schema["properties"]["estimated_due_date"]["anyOf"][0]["format"] == "date"
+    assert "onboarding_skipped" not in user_update_schema["properties"]
+    assert infant_update_schema["required"] == ["infant_id"]
+    assert infant_update_schema["minProperties"] == 2
+    assert infant_update_schema["properties"]["infant_id"]["format"] == "uuid"
+    assert infant_update_schema["properties"]["name"]["maxLength"] == 120
+    assert infant_update_schema["properties"]["birth_date"]["anyOf"][0]["format"] == "date"
     assert support_schema["required"] == ["issue_summary", "user_confirmed"]
     assert support_schema["additionalProperties"] is False
     assert "issue_summary" in support_schema["properties"]
@@ -1609,7 +1618,7 @@ def test_responses_runner_persists_loop_items_in_provider_order(monkeypatch: pyt
         persisted_keys.extend(item.item_key for item in items)
 
     async def invoke(_args_json: str) -> ToolResult:
-        return ToolResult.json({"profile": {"display_name": "Mai"}})
+        return ToolResult.json({"profile": {"preferred_name": "Mai"}})
 
     request = SdkNodeRequest(
         run_id="run_1",
@@ -1643,7 +1652,7 @@ def test_responses_runner_persists_loop_items_in_provider_order(monkeypatch: pyt
     assert persisted[1] == {
         "type": "function_call_output",
         "call_id": "call_1",
-        "output": '{"profile":{"display_name":"Mai"}}',
+        "output": '{"profile":{"preferred_name":"Mai"}}',
     }
 
 
@@ -1665,7 +1674,7 @@ def test_responses_runner_preserves_reloaded_tool_items_in_api_input(monkeypatch
         {
             "type": "function_call_output",
             "call_id": "call_profile_1",
-            "output": '{"profile":{"display_name":"Mai"}}',
+            "output": '{"profile":{"preferred_name":"Mai"}}',
         },
         {
             "type": "function_call",
@@ -2181,7 +2190,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
                 "type": "function_call",
                 "name": "profile_update",
                 "call_id": "call_1",
-                "arguments": '{"display_name":"Mai"}',
+                "arguments": '{"preferred_name":"Mai"}',
             }
         ],
     )

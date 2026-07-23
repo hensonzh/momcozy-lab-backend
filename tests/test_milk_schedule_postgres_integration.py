@@ -55,8 +55,8 @@ async def _postgres_scenario() -> None:
         async with sessions.begin() as session:
             session.add_all(
                 [
-                    User(id=owner_user_id, display_name="owner"),
-                    User(id=other_user_id, display_name="other"),
+                    User(id=owner_user_id),
+                    User(id=other_user_id),
                 ]
             )
             await session.flush()
@@ -250,8 +250,8 @@ async def _postgres_task_write_lock_scenario() -> None:
         async with sessions.begin() as session:
             session.add_all(
                 [
-                    User(id=owner_user_id, display_name="owner"),
-                    User(id=other_user_id, display_name="other"),
+                    User(id=owner_user_id),
+                    User(id=other_user_id),
                 ]
             )
             await session.flush()

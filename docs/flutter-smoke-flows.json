@@ -29,7 +29,6 @@
           "body": {
             "email": "smoke+${run_id}@example.test",
             "password": "${strong_password}",
-            "display_name": "Smoke User",
             "device_id": "flutter-smoke"
           },
           "captures": {

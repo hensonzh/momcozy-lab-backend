@@ -34,7 +34,10 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="profile.read",
             domain="profiles",
-            description="读取当前用户及宝宝的基础资料投影。用户的问题或后续动作需要核对姓名、年龄、孕产状态或宝宝资料时调用。",
+            description=(
+                "一次读取当前用户及其全部宝宝的基础资料。需要核对用户称呼、年龄、预产期，"
+                "或宝宝姓名、出生日期、出生时性别时调用；返回的 infant_id 用于后续精确更新宝宝。"
+            ),
             loading_mode="eager",
             effect_scope="none",
             blocking_policy="must_wait",
@@ -46,7 +49,10 @@ def default_tool_registry() -> ToolContractRegistry:
         _tool_contract(
             name="profile.update",
             domain="global",
-            description="更新当前用户的基础资料。用户明确提供或更正姓名、年龄或 onboarding 状态时调用。",
+            description=(
+                "更新当前用户和指定宝宝的基础资料。用户明确提供、更正或要求清空用户称呼、年龄、预产期，"
+                "或宝宝姓名、出生日期、出生时性别时调用；更新宝宝必须使用 profile.read 返回的 infant_id。"
+            ),
             loading_mode="eager",
             effect_scope="user_resource",
             action_type="profile.update",

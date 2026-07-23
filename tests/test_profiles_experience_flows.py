@@ -33,52 +33,55 @@ async def _run_profile_onboarding_main_flow() -> None:
     profile = await service.update_user_profile(
         user_id=owner_user_id,
         values={
-            "display_name": "Mia",
+            "preferred_name": "Mia",
             "age": 31,
-            "delivery_date": date(2026, 8, 1),
+            "estimated_due_date": date(2026, 8, 1),
         },
         request_id="req_profile",
     )
     infant = await service.create_infant(
         owner_user_id=owner_user_id,
-        infant_name=" Baby ",
-        sex="female",
+        name=" Baby ",
+        sex_at_birth="female",
         birth_date=date(2026, 6, 1),
         request_id="req_infant",
         idempotency_key="idem-infant",
     )
     replayed_infant = await service.create_infant(
         owner_user_id=owner_user_id,
-        infant_name="Baby",
-        sex="female",
+        name="Baby",
+        sex_at_birth="female",
         birth_date=date(2026, 6, 1),
         idempotency_key="idem-infant",
     )
     await service.create_infant(
         owner_user_id=other_user_id,
-        infant_name="Other baby",
-        sex="male",
+        name="Other baby",
+        sex_at_birth="male",
         birth_date=date(2026, 5, 1),
     )
     with pytest.raises(ApiError) as idempotency_conflict:
         await service.create_infant(
             owner_user_id=owner_user_id,
-            infant_name="Baby",
-            sex="female",
+            name="Baby",
+            sex_at_birth="female",
             birth_date=date(2026, 6, 2),
             idempotency_key="idem-infant",
         )
 
     infants = await service.list_infants(owner_user_id=owner_user_id)
-    profile_response = _profile_read(profile, owner_user_id)
+    profile_response = _profile_read(profile)
 
-    assert profile.display_name == "Mia"
+    assert profile.preferred_name == "Mia"
     assert profile.age == 31
-    assert infant.infant_name == "Baby"
+    assert infant.name == "Baby"
     assert replayed_infant.id == infant.id
     assert [item.id for item in infants] == [infant.id]
-    assert profile_response.profile_onboarding_complete is True
-    assert profile_response.profile_onboarding_skipped is False
+    assert profile_response.model_dump() == {
+        "preferred_name": "Mia",
+        "age": 31,
+        "estimated_due_date": date(2026, 8, 1),
+    }
     assert idempotency_conflict.value.code == "idempotency_conflict"
     assert [entry["action"] for entry in audit_service.entries] == [
         "profiles.user.update",
@@ -107,7 +110,7 @@ class InMemoryProfileRepository:
         return [
             infant
             for infant in self.infants
-            if infant.owner_user_id == owner_user_id and infant.status == "active" and infant.deleted_at is None
+            if infant.owner_user_id == owner_user_id and infant.deleted_at is None
         ]
 
     async def get_infant_for_owner(self, *, infant_id: UUID, owner_user_id: UUID):
@@ -117,20 +120,25 @@ class InMemoryProfileRepository:
                 for infant in self.infants
                 if infant.id == infant_id
                 and infant.owner_user_id == owner_user_id
-                and infant.status == "active"
                 and infant.deleted_at is None
             ),
             None,
         )
 
-    async def create_infant(self, *, owner_user_id: UUID, infant_name: str, sex: str, birth_date: date | None):
+    async def create_infant(
+        self,
+        *,
+        owner_user_id: UUID,
+        name: str,
+        sex_at_birth: str | None,
+        birth_date: date | None,
+    ):
         infant = InfantProfile(
             id=uuid4(),
             owner_user_id=owner_user_id,
-            infant_name=infant_name,
-            sex=sex,
+            name=name,
+            sex_at_birth=sex_at_birth,
             birth_date=birth_date,
-            status="active",
             deleted_at=None,
         )
         self.infants.append(infant)

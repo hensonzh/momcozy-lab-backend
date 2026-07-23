@@ -35,8 +35,8 @@ class AuthAccountRepository:
     async def get_user(self, *, user_id: UUID) -> User | None:
         return await self.session.get(User, user_id)
 
-    async def create_email_user(self, *, email: str, password_hash: str, display_name: str) -> tuple[User, AuthIdentity]:
-        user = User(display_name=display_name)
+    async def create_email_user(self, *, email: str, password_hash: str) -> tuple[User, AuthIdentity]:
+        user = User()
         identity = AuthIdentity(
             user=user,
             provider="email",
@@ -49,8 +49,8 @@ class AuthAccountRepository:
         await self.session.flush()
         return user, identity
 
-    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str) -> tuple[User, AuthIdentity]:
-        user = User(display_name=display_name)
+    async def create_invite_user(self, *, invite_code: str, device_id: str) -> tuple[User, AuthIdentity]:
+        user = User()
         identity = AuthIdentity(
             user=user,
             provider="invite",

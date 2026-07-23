@@ -20,7 +20,7 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
 
     async def invoke_json(args_json: str) -> ToolResult:
         invoked_args.append(args_json)
-        return ToolResult.json({"profile": {"display_name": "Mai"}})
+        return ToolResult.json({"profile": {"preferred_name": "Mai"}})
 
     backend = ScriptedSdkBackend(
         [
@@ -58,7 +58,7 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
             "tool_name": "profile.read",
             "status": "completed",
             "args": {"limit": 1},
-            "safe_output": {"profile": {"display_name": "Mai"}},
+            "safe_output": {"profile": {"preferred_name": "Mai"}},
         }
     ]
     assert backend.requests[0].run_id == "run_1"

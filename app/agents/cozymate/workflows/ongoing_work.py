@@ -17,7 +17,7 @@ _PREGNANCY_FOLLOWUP_MAX_ROUNDS = 3
 _PREGNANCY_FACT_FIELDS = (
     "current_week",
     "due_date_or_week",
-    "delivery_date",
+    "estimated_due_date",
     "ivf",
     "fetus_count",
     "age",

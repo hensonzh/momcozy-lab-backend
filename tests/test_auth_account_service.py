@@ -27,7 +27,6 @@ def test_signup_creates_email_identity_hashes_password_and_issues_tokens() -> No
         service.signup(
             email=" Test@Example.COM ",
             password="super-secret",
-            display_name="Test User",
             device_context=DeviceContext(device_id="ios", user_agent="agent", ip_address="127.0.0.1"),
         )
     )
@@ -76,13 +75,12 @@ def test_invite_login_creates_invite_identity_and_issues_tokens() -> None:
     assert account_repository.created_identity.email == ""
     assert account_repository.created_identity.password_hash == ""
     assert session_service.created_user_id == account_repository.created_user.id
-    assert issued.user.display_name == "Momcozy 体验用户"
     assert issued.access_token
     assert issued.refresh_token == "refresh-token"
 
 
 def test_invite_login_reuses_existing_invite_identity() -> None:
-    user = User(id=uuid4(), display_name="Invite User", status="active")
+    user = User(id=uuid4(), status="active")
     identity = AuthIdentity(
         user_id=user.id,
         user=user,
@@ -111,7 +109,7 @@ def test_invite_login_reuses_existing_invite_identity() -> None:
 
 
 def test_invite_login_rejects_bound_code_from_different_device() -> None:
-    user = User(id=uuid4(), display_name="Invite User", status="active")
+    user = User(id=uuid4(), status="active")
     identity = AuthIdentity(
         user_id=user.id,
         user=user,
@@ -214,7 +212,7 @@ def test_invite_login_rejects_disabled_managed_invite_code() -> None:
 
 
 def test_login_rejects_invalid_password_without_creating_session() -> None:
-    user = User(id=uuid4(), display_name="Test", status="active")
+    user = User(id=uuid4(), status="active")
     identity = AuthIdentity(
         user_id=user.id,
         user=user,
@@ -236,7 +234,7 @@ def test_login_rejects_invalid_password_without_creating_session() -> None:
 
 
 def test_refresh_rotates_token_and_issues_access_for_session_user() -> None:
-    user = User(id=uuid4(), display_name="Test", status="active")
+    user = User(id=uuid4(), status="active")
     session_id = uuid4()
     session_service = FakeSessionService(device_session=DeviceSession(id=session_id, user_id=user.id, status="active"))
     service = AuthAccountService(
@@ -285,8 +283,8 @@ class FakeAccountRepository:
             return self.existing_user
         return None
 
-    async def create_email_user(self, *, email: str, password_hash: str, display_name: str):
-        self.created_user = User(id=uuid4(), display_name=display_name, status="active")
+    async def create_email_user(self, *, email: str, password_hash: str):
+        self.created_user = User(id=uuid4(), status="active")
         self.created_identity = AuthIdentity(
             user_id=self.created_user.id,
             user=self.created_user,
@@ -297,8 +295,8 @@ class FakeAccountRepository:
         )
         return self.created_user, self.created_identity
 
-    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str):
-        self.created_user = User(id=uuid4(), display_name=display_name, status="active")
+    async def create_invite_user(self, *, invite_code: str, device_id: str):
+        self.created_user = User(id=uuid4(), status="active")
         self.created_identity = AuthIdentity(
             user_id=self.created_user.id,
             user=self.created_user,

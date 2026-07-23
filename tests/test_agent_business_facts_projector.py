@@ -17,7 +17,7 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
 
     async def profile_handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
-        return ToolResult.json({"profile": {"display_name": "Mai"}, "assistant_hint": "do not project"})
+        return ToolResult.json({"profile": {"preferred_name": "Mai"}, "assistant_hint": "do not project"})
 
     async def milk_status_handler(context):
         calls.append({"tool_name": context.tool_name, "args": context.args})
@@ -50,7 +50,7 @@ def test_business_facts_projector_projects_lactation_sources() -> None:
             {"key": "profile", "tool_name": "profile.read"},
             {"key": "milk_status", "tool_name": "records.milk_status.read"},
         ],
-        "profile": {"profile": {"display_name": "Mai"}},
+        "profile": {"profile": {"preferred_name": "Mai"}},
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
     }
     assert "assistant_hint" not in facts["profile"]
@@ -62,7 +62,7 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
     async def profile_handler(context):
         await session_guard.enter("profile.read")
         try:
-            return ToolResult.json({"profile": {"display_name": "Mai"}})
+            return ToolResult.json({"profile": {"preferred_name": "Mai"}})
         finally:
             session_guard.exit("profile.read")
 
@@ -92,7 +92,7 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
         {"key": "profile", "tool_name": "profile.read"},
         {"key": "milk_status", "tool_name": "records.milk_status.read"},
     ]
-    assert facts["profile"] == {"profile": {"display_name": "Mai"}}
+    assert facts["profile"] == {"profile": {"preferred_name": "Mai"}}
     assert facts["milk_status"] == {"totals": {"trend_pumped_volume_ml": 420}}
 
 

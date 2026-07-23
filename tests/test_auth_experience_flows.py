@@ -45,7 +45,6 @@ async def _run_email_auth_main_flow() -> None:
     signup = await service.signup(
         email=" Mia@Example.COM ",
         password="right-password",
-        display_name="Mia",
         device_context=DeviceContext(device_id="ios-1", user_agent="MomCozy iOS", ip_address="127.0.0.1"),
     )
     signed_up_user = authenticate_access_token(signup.access_token, settings)
@@ -71,7 +70,6 @@ async def _run_email_auth_main_flow() -> None:
     first_session = session_repository.sessions[UUID(signed_up_user.session_id)]
     second_session = session_repository.sessions[UUID(logged_in_user.session_id)]
 
-    assert signup.user.display_name == "Mia"
     assert identity.subject == "mia@example.com"
     assert identity.password_hash != "right-password"
     assert verify_password("right-password", identity.password_hash)
@@ -184,8 +182,8 @@ class InMemoryAuthAccountRepository:
     async def get_user(self, *, user_id: UUID):
         return self.users.get(user_id)
 
-    async def create_email_user(self, *, email: str, password_hash: str, display_name: str):
-        user = User(id=uuid4(), display_name=display_name, status="active")
+    async def create_email_user(self, *, email: str, password_hash: str):
+        user = User(id=uuid4(), status="active")
         identity = AuthIdentity(
             id=uuid4(),
             user_id=user.id,
@@ -203,8 +201,8 @@ class InMemoryAuthAccountRepository:
         identity.device_id = device_id
         return identity
 
-    async def create_invite_user(self, *, invite_code: str, device_id: str, display_name: str):
-        user = User(id=uuid4(), display_name=display_name, status="active")
+    async def create_invite_user(self, *, invite_code: str, device_id: str):
+        user = User(id=uuid4(), status="active")
         identity = AuthIdentity(
             id=uuid4(),
             user_id=user.id,

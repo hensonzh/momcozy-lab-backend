@@ -34,7 +34,6 @@ class ProfileRepository:
             select(InfantProfile)
             .where(
                 InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.status == "active",
                 InfantProfile.deleted_at.is_(None),
             )
             .order_by(InfantProfile.created_at.asc(), InfantProfile.id.asc())
@@ -54,16 +53,22 @@ class ProfileRepository:
         self,
         *,
         owner_user_id: UUID,
-        infant_name: str,
-        sex: str,
+        name: str,
+        sex_at_birth: str | None,
         birth_date: date | None,
     ) -> InfantProfile:
         infant = InfantProfile(
             owner_user_id=owner_user_id,
-            infant_name=infant_name,
-            sex=sex,
+            name=name,
+            sex_at_birth=sex_at_birth,
             birth_date=birth_date,
         )
         self.session.add(infant)
+        await self.session.flush()
+        return infant
+
+    async def update_infant(self, *, infant: InfantProfile, values: dict[str, Any]) -> InfantProfile:
+        for field, value in values.items():
+            setattr(infant, field, value)
         await self.session.flush()
         return infant

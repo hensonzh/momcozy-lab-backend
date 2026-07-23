@@ -20,7 +20,7 @@ COZYMATE_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
     ),
     "profile.update": AgentActionPolicyRule(
         action_type="profile.update",
-        target_type="user_profile",
+        target_type="profile",
         side_effect_level="low",
         requires_confirmation=False,
     ),

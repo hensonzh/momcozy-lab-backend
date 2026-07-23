@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 from uuid import UUID, uuid4
@@ -16,6 +17,12 @@ FILE_UPLOAD_IDEMPOTENCY_SCOPE = "files.upload"
 FILE_DELETE_IDEMPOTENCY_SCOPE = "files.delete"
 IDEMPOTENCY_TTL = timedelta(hours=24)
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class FileContent:
+    file_object: FileObject
+    body: bytes
 
 
 class FileService:
@@ -108,6 +115,11 @@ class FileService:
         if file_object is None:
             raise ApiError(code="not_found", message="File not found.", status=404)
         return file_object
+
+    async def read_content_for_owner(self, *, file_id: UUID, owner_user_id: UUID) -> FileContent:
+        file_object = await self.get_for_owner(file_id=file_id, owner_user_id=owner_user_id)
+        body = await self.object_storage.get_bytes(key=file_object.object_key)
+        return FileContent(file_object=file_object, body=body)
 
     async def list_for_owner(self, *, owner_user_id: UUID, limit: int = 50) -> list[FileObject]:
         if limit < 1 or limit > 100:

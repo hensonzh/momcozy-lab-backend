@@ -18,15 +18,28 @@ def test_signup_returns_token_pair_and_user_contract() -> None:
 
     response = client.post(
         "/v1/auth/signup",
-        json={"email": "test@example.com", "password": "secret123", "display_name": "Test", "device_id": "ios"},
+        json={"email": "test@example.com", "password": "secret123", "device_id": "ios"},
     )
 
     assert response.status_code == 201
     assert response.json()["token_type"] == "bearer"
     assert response.json()["access_token"] == "access-token"
     assert response.json()["refresh_token"] == "refresh-token"
+    assert response.json()["user"] == {"id": str(fake_service.user.id)}
     assert fake_service.signup_kwargs["email"] == "test@example.com"
     assert fake_service.signup_kwargs["device_context"].device_id == "ios"
+
+
+def test_signup_rejects_legacy_display_name() -> None:
+    client = TestClient(_app(fake_service=FakeAuthAccountService()))
+
+    response = client.post(
+        "/v1/auth/signup",
+        json={"email": "test@example.com", "password": "secret123", "display_name": "Test"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_failed"
 
 
 def test_login_and_refresh_return_same_token_contract() -> None:
@@ -136,7 +149,7 @@ def _app(*, fake_service: "FakeAuthAccountService"):
 
 class FakeAuthAccountService:
     def __init__(self, *, login_error: ApiError | None = None) -> None:
-        self.user = User(id=uuid4(), display_name="Test", status="active")
+        self.user = User(id=uuid4(), status="active")
         self.login_error = login_error
         self.signup_kwargs = None
         self.invite_login_kwargs = None

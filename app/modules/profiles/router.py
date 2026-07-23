@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from uuid import UUID
-
 from fastapi import Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,10 +43,10 @@ async def get_my_profile(
     service: ProfileService = Depends(get_profile_service),
 ) -> UserProfileRead:
     profile = await service.get_user_profile(user_id=current_user.user_id)
-    return _profile_read(profile, current_user.user_id)
+    return _profile_read(profile)
 
 
-@router.put("/me", response_model=UserProfileRead)
+@router.patch("/me", response_model=UserProfileRead)
 async def update_my_profile(
     payload: UserProfileUpdate,
     request: Request,
@@ -61,7 +59,7 @@ async def update_my_profile(
         values=values,
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
-    return _profile_read(profile, current_user.user_id)
+    return _profile_read(profile)
 
 
 @router.get("/infants", response_model=InfantProfileListResponse)
@@ -83,8 +81,8 @@ async def create_my_infant(
 ) -> InfantProfileRead:
     infant = await service.create_infant(
         owner_user_id=current_user.user_id,
-        infant_name=payload.infant_name,
-        sex=payload.sex or "",
+        name=payload.name,
+        sex_at_birth=payload.sex_at_birth,
         birth_date=payload.birth_date,
         request_id=str(getattr(request.state, "request_id", "") or ""),
         idempotency_key=idempotency_key,
@@ -92,16 +90,11 @@ async def create_my_infant(
     return InfantProfileRead.model_validate(infant)
 
 
-def _profile_read(profile: UserProfile | None, user_id: UUID) -> UserProfileRead:
+def _profile_read(profile: UserProfile | None) -> UserProfileRead:
     if profile is None:
-        return UserProfileRead(user_id=user_id)
+        return UserProfileRead()
     return UserProfileRead(
-        user_id=user_id,
-        display_name=profile.display_name or "",
+        preferred_name=profile.preferred_name,
         age=profile.age,
-        delivery_date=profile.delivery_date,
-        lactation_advice=profile.lactation_advice or "",
-        feeding_advice=profile.feeding_advice or "",
-        profile_onboarding_complete=bool(profile.profile_onboarding_completed_at or (profile.display_name and profile.age)),
-        profile_onboarding_skipped=bool(profile.profile_onboarding_skipped_at),
+        estimated_due_date=profile.estimated_due_date,
     )
