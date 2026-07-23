@@ -1166,6 +1166,9 @@ class CozymateAgentExecutor:
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
+        if contract_name == "lactation_context_read":
+            local_date = self._turn_state(run.id).local_date
+            return {"runtime_local_date": local_date} if local_date else {}
         if contract_name == "plans_milk_plan_propose":
             return {
                 "runtime_local_date": self._turn_state(run.id).local_date,
@@ -1876,10 +1879,10 @@ SERVICE_SKILL_RECOMMENDED_TOOL_CONTRACTS: dict[ServiceSkillId, tuple[str, ...]] 
         "hospital_bag_pump_recommend",
     ),
     ServiceSkillId.MILK_MANAGEMENT: (
+        "lactation_context_read",
         "records_milk_status_read",
         "records_milk_summary_read",
         "records_milk_analysis_read",
-        "records_growth_read",
         "records_feeding_record_propose",
         "records_feeding_record_delete_propose",
         "records_pumping_record_propose",

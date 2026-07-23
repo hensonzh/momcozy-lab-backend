@@ -757,6 +757,82 @@ def test_tool_executor_rejects_invalid_boolean_tool_args_before_persisting_call(
     assert repository.events == []
 
 
+def test_tool_executor_rejects_output_outside_registered_schema_before_model_observation() -> None:
+    actor = _user()
+    repository = FakeToolRepository()
+
+    async def malformed_lactation_context(_context: ToolHandlerContext):
+        return ToolResult.json({"as_of_date": "2026-07-23"})
+
+    executor = CozymateToolExecutor(
+        registry=default_tool_registry(),
+        repository=repository,
+        handlers={"lactation_context_read": malformed_lactation_context},
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            executor.execute(
+                actor=actor,
+                run_id=uuid4(),
+                tool_name="lactation_context_read",
+                call_id="call-invalid-output",
+                args={},
+            )
+        )
+
+    assert exc_info.value.code == "tool_output_invalid"
+    assert exc_info.value.status == 500
+    assert exc_info.value.details == {"path": "$", "reason": "missing required field: mother"}
+    assert repository.tool_call.status == "failed"
+    assert repository.tool_call.error_code == "tool_output_invalid"
+    assert repository.output is None
+    assert [event.event_type for event in repository.events] == ["tool.started", "tool.failed"]
+
+
+def test_tool_executor_only_sends_validated_contract_output_to_model() -> None:
+    actor = _user()
+    repository = FakeToolRepository()
+    payload = {
+        "as_of_date": "2026-07-23",
+        "mother": {
+            "age": None,
+            "delivery_count": None,
+            "current_delivery_method": None,
+            "actual_delivery_date": None,
+            "has_cesarean_history": None,
+            "postpartum_days": None,
+            "current_feeding_mode": None,
+        },
+        "infants": [],
+        "missing_fields": [],
+        "data_quality_issues": [],
+    }
+
+    async def lactation_context_with_divergent_raw_text(_context: ToolHandlerContext):
+        return ToolResult(
+            output=(ToolTextOutput(text="unvalidated handler text"),),
+            audit_output=payload,
+        )
+
+    result = asyncio.run(
+        CozymateToolExecutor(
+            registry=default_tool_registry(),
+            repository=repository,
+            handlers={"lactation_context_read": lactation_context_with_divergent_raw_text},
+        ).execute(
+            actor=actor,
+            run_id=uuid4(),
+            tool_name="lactation_context_read",
+            call_id="call-valid-output",
+            args={},
+        )
+    )
+
+    assert json.loads(result.tool_result.to_function_call_output()) == payload
+    assert repository.tool_call.status == "completed"
+
+
 def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     actor = _user(permissions={"profile:read:self"})
     repository = FakeToolRepository()

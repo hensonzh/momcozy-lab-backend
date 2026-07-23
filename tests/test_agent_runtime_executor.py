@@ -984,13 +984,13 @@ def test_agent_runtime_executor_loads_birth_prep_without_implicit_business_facts
             },
         ),
         (
-            "milk-management",
-            {
-                "records_milk_status_read",
-                "records_milk_summary_read",
-                "records_milk_analysis_read",
-                "records_growth_read",
-                "records_feeding_record_propose",
+                "milk-management",
+                {
+                    "lactation_context_read",
+                    "records_milk_status_read",
+                    "records_milk_summary_read",
+                    "records_milk_analysis_read",
+                    "records_feeding_record_propose",
                 "records_feeding_record_delete_propose",
                 "records_pumping_record_propose",
                 "records_pumping_record_delete_propose",
@@ -1404,7 +1404,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["profile_update"]["properties"]["infants"]["items"]["required"] == ["infant_id"]
     assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
     assert backend.tool_schemas["records_feeding_record_delete_propose"]["required"] == ["record_id"]
-    assert backend.tool_schemas["records_growth_read"]["properties"]["limit"]["maximum"] == 20
+    assert backend.tool_schemas["lactation_context_read"]["properties"] == {}
     assert backend.tool_schemas["records_growth_record_propose"]["required"] == ["measured_at"]
     assert backend.tool_schemas["records_growth_record_update_propose"]["required"] == ["record_id"]
     assert backend.tool_schemas["records_milk_status_read"]["properties"]["days"]["maximum"] == 30
@@ -1417,12 +1417,12 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_search_enabled is True
     assert "milk_management" in backend.tool_namespaces
     assert backend.tool_namespaces["milk_management"]["tool_names"] == [
+        "lactation_context_read",
         "records_milk_status_read",
         "records_milk_summary_read",
         "records_milk_analysis_read",
         "records_milk_analysis_intake",
         "records_milk_analysis_evaluate",
-        "records_growth_read",
         "records_feeding_record_propose",
         "records_feeding_record_delete_propose",
         "records_pumping_record_propose",
@@ -1479,7 +1479,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_namespace_by_contract["pregnancy_diary_delete"] == "pregnancy_diary"
     assert backend.tool_deferred_by_contract["records_milk_status_read"] is False
     assert backend.tool_deferred_by_contract["records_milk_analysis_read"] is False
-    assert backend.tool_deferred_by_contract["records_growth_read"] is False
+    assert backend.tool_deferred_by_contract["lactation_context_read"] is False
     assert backend.tool_deferred_by_contract["records_feeding_record_propose"] is True
     assert backend.tool_deferred_by_contract["plans_task_update_propose"] is True
     assert backend.tool_deferred_by_contract["support_ticket_propose"] is True

@@ -59,6 +59,7 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
             "load_service_skill": "加载服务技能",
             "profile_read": "个人资料",
             "profile_update": "更新个人资料",
+            "lactation_context_read": "母婴泌乳基础信息",
             "records_milk_summary_read": "奶量摘要",
             "records_milk_status_read": "奶量状态",
             "records_feeding_record_propose": "喂养记录草稿",

@@ -12,7 +12,15 @@ from .repository import ProfileRepository
 
 INFANT_CREATE_IDEMPOTENCY_SCOPE = "profiles.infants.create"
 USER_PROFILE_UPDATE_FIELDS = frozenset({"preferred_name", "age", "estimated_due_date"})
-INFANT_PROFILE_UPDATE_FIELDS = frozenset({"name", "sex_at_birth", "birth_date"})
+INFANT_PROFILE_UPDATE_FIELDS = frozenset(
+    {
+        "name",
+        "sex_at_birth",
+        "birth_date",
+        "birth_weight_kg",
+        "gestational_age_at_birth_days",
+    }
+)
 SEX_AT_BIRTH_VALUES = frozenset({"female", "male", "intersex", "unknown", "undisclosed"})
 
 
@@ -78,25 +86,36 @@ class ProfileService:
             )
             if infant is None:
                 raise ApiError(code="not_found", message="Infant profile was not found.", status=404)
+            updated_birth_date = normalized_values.get("birth_date")
+            if updated_birth_date is not None:
+                maternal = await self.repository.get_maternal_profile(owner_user_id=user_id)
+                if (
+                    maternal is not None
+                    and await self.repository.is_current_delivery_infant(
+                        owner_user_id=user_id,
+                        infant_id=infant_id,
+                    )
+                    and maternal.latest_delivery_date is not None
+                    and maternal.latest_delivery_date != updated_birth_date
+                ):
+                    raise ApiError(
+                        code="validation_failed",
+                        message="birth_date must match the current actual_delivery_date.",
+                        status=422,
+                    )
             prepared_infant_updates.append((infant, normalized_values))
 
         profile = None
         if normalized_user_values:
             profile = await self.repository.upsert_user_profile(user_id=user_id, values=normalized_user_values)
-        updated_infants = [
-            await self.repository.update_infant(infant=infant, values=values)
-            for infant, values in prepared_infant_updates
-        ]
+        updated_infants = [await self.repository.update_infant(infant=infant, values=values) for infant, values in prepared_infant_updates]
 
         if self.audit_service is not None:
             details: dict[str, Any] = {}
             if normalized_user_values:
                 details["user_fields"] = sorted(normalized_user_values)
             if prepared_infant_updates:
-                details["infants"] = [
-                    {"infant_id": str(infant.id), "fields": sorted(values)}
-                    for infant, values in prepared_infant_updates
-                ]
+                details["infants"] = [{"infant_id": str(infant.id), "fields": sorted(values)} for infant, values in prepared_infant_updates]
             await self.audit_service.record(
                 actor_user_id=user_id,
                 action="profiles.update",
@@ -117,6 +136,8 @@ class ProfileService:
         name: str,
         sex_at_birth: str | None = None,
         birth_date: date | None = None,
+        birth_weight_kg: float | None = None,
+        gestational_age_at_birth_days: int | None = None,
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> InfantProfile:
@@ -130,6 +151,8 @@ class ProfileService:
             raise ApiError(code="validation_failed", message="sex_at_birth is invalid.", status=422)
         if birth_date is not None and birth_date > date.today():
             raise ApiError(code="validation_failed", message="birth_date must not be in the future.", status=422)
+        _validate_birth_weight(birth_weight_kg)
+        _validate_gestational_age(gestational_age_at_birth_days)
 
         if idempotency_key:
             if self.idempotency_service is None:
@@ -143,6 +166,8 @@ class ProfileService:
                         "name": normalized_name,
                         "sex_at_birth": sex_at_birth,
                         "birth_date": str(birth_date or ""),
+                        "birth_weight_kg": birth_weight_kg,
+                        "gestational_age_at_birth_days": gestational_age_at_birth_days,
                     }
                 ),
                 expires_at=_idempotency_expires_at(),
@@ -159,6 +184,8 @@ class ProfileService:
             name=normalized_name,
             sex_at_birth=sex_at_birth,
             birth_date=birth_date,
+            birth_weight_kg=birth_weight_kg,
+            gestational_age_at_birth_days=gestational_age_at_birth_days,
         )
         if idempotency_record is not None and self.idempotency_service is not None:
             await self.idempotency_service.mark_completed(record=idempotency_record, response_ref=str(infant.id))
@@ -232,9 +259,7 @@ def _normalize_infant_profile_update(values: dict[str, Any]) -> dict[str, Any]:
 
     if "sex_at_birth" in normalized:
         sex_at_birth = normalized["sex_at_birth"]
-        if sex_at_birth is not None and (
-            not isinstance(sex_at_birth, str) or sex_at_birth not in SEX_AT_BIRTH_VALUES
-        ):
+        if sex_at_birth is not None and (not isinstance(sex_at_birth, str) or sex_at_birth not in SEX_AT_BIRTH_VALUES):
             raise ApiError(code="validation_failed", message="sex_at_birth is invalid.", status=422)
 
     if "birth_date" in normalized:
@@ -244,4 +269,32 @@ def _normalize_infant_profile_update(values: dict[str, Any]) -> dict[str, Any]:
         if birth_date is not None and birth_date > date.today():
             raise ApiError(code="validation_failed", message="birth_date must not be in the future.", status=422)
 
+    if "birth_weight_kg" in normalized:
+        _validate_birth_weight(normalized["birth_weight_kg"])
+
+    if "gestational_age_at_birth_days" in normalized:
+        _validate_gestational_age(normalized["gestational_age_at_birth_days"])
+
     return normalized
+
+
+def _validate_birth_weight(value: Any) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.2 <= value <= 10:
+        raise ApiError(
+            code="validation_failed",
+            message="birth_weight_kg must be between 0.2 and 10.",
+            status=422,
+        )
+
+
+def _validate_gestational_age(value: Any) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int) or not 140 <= value <= 315:
+        raise ApiError(
+            code="validation_failed",
+            message="gestational_age_at_birth_days must be between 140 and 315.",
+            status=422,
+        )

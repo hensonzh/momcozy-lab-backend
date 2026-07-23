@@ -61,7 +61,21 @@ App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregn
 
 ### 泌乳服务智能体（19）
 
-`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`records_growth_read`、`plans_milk_plan_propose`、`plans_milk_schedule_propose`、`plans_milk_task_update_propose`、`plans_milk_task_delete_propose`、`notifications_milk_reminder_propose`、`records_feeding_record_propose`、`records_feeding_record_delete_propose`、`records_pumping_record_propose`、`records_pumping_record_delete_propose`、`records_growth_record_propose`、`records_growth_record_update_propose`、`records_growth_record_delete_propose`、`ibclc_consult_card_create`。
+`lactation_context_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`plans_milk_plan_propose`、`plans_milk_schedule_propose`、`plans_milk_task_update_propose`、`plans_milk_task_delete_propose`、`notifications_milk_reminder_propose`、`records_feeding_record_propose`、`records_feeding_record_delete_propose`、`records_pumping_record_propose`、`records_pumping_record_delete_propose`、`records_growth_record_propose`、`records_growth_record_update_propose`、`records_growth_record_delete_propose`、`ibclc_consult_card_create`。
+
+### 泌乳分析基础信息
+
+`lactation_context_read` 只读取影响当前奶量分析的紧凑母婴上下文，不返回历次分娩或完整生长记录历史。
+
+- 通用妈妈档案 `maternal_profiles` 持久化 `delivery_count`、`latest_delivery_method`、`latest_delivery_date`、`has_cesarean_history`；`age` 沿用通用 `user_profiles`。
+- 泌乳专用档案 `lactation_profiles` 只持久化 `current_feeding_mode` 等泌乳场景状态。
+- 每个宝宝的 `sex_at_birth`、`birth_weight_kg`、`gestational_age_at_birth_days` 沿用通用 `infant_profiles`；最近体重、身高、头围和测量时间来自该宝宝最新一条有效 `growth_records`。
+- 通用 `maternal_current_delivery_infants` 关联最近一次分娩的全部宝宝，并用 `birth_order` 提供稳定的非姓名区分；一个宝宝只能归属一个当前分娩摘要。
+- `postpartum_days`、`age_days`、`age_months` 以读取当天和实际分娩/出生日期派生，不在数据库重复持久化。
+- 当前分娩摘要仍是一人一行，不为每次分娩建立历史明细；奶量工具通过字段级投影读取必要列，并批量取得各宝宝最新一条生长记录。
+- Tool 输出使用 `infants[]` 返回全部当前宝宝，不包含妈妈称呼、宝宝姓名、预产期、内部宝宝 ID 等与奶量分析无关的信息。
+- Tool Contract 同时声明空对象 Input Schema 和嵌套 `output_schema`；输出的每个字段都描述单位、枚举、可空和派生语义，Tool Executor 在结果进入模型上下文前执行输出校验。
+- `missing_fields` 与 `data_quality_issues` 返回 `{code, birth_order}` 对象；`code` 是固定枚举，妈妈或集合级问题的 `birth_order` 为 `null`，宝宝级问题使用对应出生顺序，不再返回需要解析的动态路径字符串。
 
 ### 设备服务智能体（5）
 

@@ -24,7 +24,7 @@ from app.modules.auth import CurrentUser
 from .output_policy import strip_instructional_tool_output_keys
 from .policy import ToolExecutionPolicy
 from .registry import ToolContractRegistry
-from .validation import validate_tool_input
+from .validation import validate_tool_input, validate_tool_output
 
 
 @dataclass(frozen=True)
@@ -165,6 +165,12 @@ class ToolExecutor:
                 raise TypeError("Tool handlers must return ToolResult with audit_output.")
             output_payload = dict(raw_result.audit_output)
             deferred_events = _extract_deferred_agent_events(output_payload)
+            validate_tool_output(schema=contract.output_schema, value=output_payload)
+            model_output = (
+                ToolResult.json(output_payload).output
+                if contract.output_schema is not None
+                else raw_result.output
+            )
             safe_output = strip_instructional_tool_output_keys(
                 self.policy.safe_output(tool_name=tool_name, output=output_payload)
             )
@@ -177,7 +183,7 @@ class ToolExecutor:
                 max_inline_bytes=self.max_inline_output_bytes,
             )
             tool_result = ToolResult(
-                output=raw_result.output,
+                output=model_output,
                 audit_output=externalized_output.inline_payload,
             )
             completed = await self.repository.complete_tool_call(tool_call=tool_call, completed_at=_utcnow())

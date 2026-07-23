@@ -8,6 +8,7 @@ from app.modules.assets.service import ProductAssetService
 from app.modules.devices.service import DevicesService
 from app.modules.diary.service import DiaryService
 from app.modules.plans.service import PlansService
+from app.modules.profiles.lactation_context import LactationContextService
 from app.modules.profiles.service import ProfileService
 from app.modules.records.service import RecordsService
 from app.agents.cozymate.device_guidance import DeviceGuidanceReferenceService
@@ -29,7 +30,7 @@ from .milk import (
     MilkAnalysisReadToolHandler,
     MilkAnalysisIntakeToolHandler,
     MilkAnalysisEvaluateToolHandler,
-    GrowthRecordsReadToolHandler,
+    LactationContextReadToolHandler,
     FeedingRecordProposeToolHandler,
     PumpingRecordProposeToolHandler,
     FeedingRecordDeleteProposeToolHandler,
@@ -65,6 +66,7 @@ from .devices import (
 def build_default_tool_handlers(
     *,
     profile_service: ProfileService,
+    lactation_context_service: LactationContextService,
     records_service: RecordsService,
     plans_service: PlansService,
     diary_service: DiaryService,
@@ -78,6 +80,9 @@ def build_default_tool_handlers(
     handlers: dict[str, ToolHandler] = {
         "profile_read": ProfileReadToolHandler(service=profile_service),
         "profile_update": ProfileUpdateToolHandler(runtime_service=agent_runtime_service),
+        "lactation_context_read": LactationContextReadToolHandler(
+            service=lactation_context_service
+        ),
         "records_milk_summary_read": MilkSummaryReadToolHandler(
             records_service=records_service,
             profile_service=profile_service,
@@ -96,7 +101,6 @@ def build_default_tool_handlers(
             runtime_service=agent_runtime_service,
         ),
         "records_milk_analysis_evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
-        "records_growth_read": GrowthRecordsReadToolHandler(records_service=records_service),
         "plans_current_read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "plans_calendar_read": PlansCalendarReadToolHandler(plans_service=plans_service),
         "pregnancy_diary_query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),

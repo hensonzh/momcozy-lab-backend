@@ -601,13 +601,13 @@ def test_tool_contracts_are_exported_as_responses_namespaces() -> None:
     assert "records_milk_status_read" in namespaces["milk_management"].tool_contracts
     assert "records_milk_summary_read" in namespaces["milk_management"].tool_contracts
     assert "records_milk_analysis_read" in namespaces["milk_management"].tool_contracts
-    assert "records_growth_read" in namespaces["milk_management"].tool_contracts
+    assert "lactation_context_read" in namespaces["milk_management"].tool_contracts
     assert "records_feeding_record_propose" in namespaces["milk_management"].deferred_tool_contracts
     assert "records_pumping_record_propose" in namespaces["milk_management"].deferred_tool_contracts
     assert "records_growth_record_propose" in namespaces["milk_management"].deferred_tool_contracts
     assert "records_milk_status_read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "records_milk_analysis_read" not in namespaces["milk_management"].deferred_tool_contracts
-    assert "records_growth_read" not in namespaces["milk_management"].deferred_tool_contracts
+    assert "lactation_context_read" not in namespaces["milk_management"].deferred_tool_contracts
     assert "plans_milk_plan_propose" in namespaces["milk_management"].deferred_tool_contracts
     assert "pregnancy_plan_workflow" in namespaces["birth_prep"].deferred_tool_contracts
     assert {
@@ -672,7 +672,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     milk_schema = registry.get("records_milk_summary_read").input_schema
     milk_status_schema = registry.get("records_milk_status_read").input_schema
     milk_analysis_schema = registry.get("records_milk_analysis_read").input_schema
-    growth_read_schema = registry.get("records_growth_read").input_schema
+    lactation_context_schema = registry.get("lactation_context_read").input_schema
     plans_schema = registry.get("plans_current_read").input_schema
     calendar_schema = registry.get("plans_calendar_read").input_schema
     diary_query_schema = registry.get("pregnancy_diary_query").input_schema
@@ -722,6 +722,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert infant_update_schema["properties"]["infant_id"]["format"] == "uuid"
     assert infant_update_schema["properties"]["name"]["maxLength"] == 120
     assert infant_update_schema["properties"]["birth_date"]["anyOf"][0]["format"] == "date"
+    assert infant_update_schema["properties"]["birth_weight_kg"]["anyOf"][0]["minimum"] == 0.2
+    assert infant_update_schema["properties"]["gestational_age_at_birth_days"]["anyOf"][0]["maximum"] == 315
     assert support_schema["required"] == ["issue_summary", "user_confirmed"]
     assert support_schema["additionalProperties"] is False
     assert "issue_summary" in support_schema["properties"]
@@ -745,7 +747,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert milk_status_schema["properties"]["limit"]["maximum"] == 20
     assert milk_analysis_schema["additionalProperties"] is False
     assert milk_analysis_schema["properties"]["limit"]["default"] == 8
-    assert growth_read_schema["properties"]["infant_id"]["maxLength"] == 80
+    assert lactation_context_schema["properties"] == {}
     assert plans_schema["additionalProperties"] is False
     assert plans_schema["properties"]["limit"]["maximum"] == 20
     assert calendar_schema["properties"]["task_date"]["maxLength"] == 20

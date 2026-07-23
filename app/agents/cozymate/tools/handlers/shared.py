@@ -160,6 +160,32 @@ def _profile_infant_updates(args: dict[str, Any]) -> list[dict[str, Any]]:
                 except ValueError as exc:
                     raise ApiError(code="validation_failed", message="birth_date must be a date.", status=422) from exc
             values["birth_date"] = birth_date
+        if "birth_weight_kg" in raw_update:
+            birth_weight_kg = raw_update["birth_weight_kg"]
+            if birth_weight_kg is not None and (
+                isinstance(birth_weight_kg, bool)
+                or not isinstance(birth_weight_kg, (int, float))
+                or not 0.2 <= birth_weight_kg <= 10
+            ):
+                raise ApiError(
+                    code="validation_failed",
+                    message="birth_weight_kg must be between 0.2 and 10.",
+                    status=422,
+                )
+            values["birth_weight_kg"] = birth_weight_kg
+        if "gestational_age_at_birth_days" in raw_update:
+            gestational_age = raw_update["gestational_age_at_birth_days"]
+            if gestational_age is not None and (
+                isinstance(gestational_age, bool)
+                or not isinstance(gestational_age, int)
+                or not 140 <= gestational_age <= 315
+            ):
+                raise ApiError(
+                    code="validation_failed",
+                    message="gestational_age_at_birth_days must be between 140 and 315.",
+                    status=422,
+                )
+            values["gestational_age_at_birth_days"] = gestational_age
         if not values:
             raise ApiError(code="validation_failed", message="Each infant update requires at least one field.", status=422)
         updates.append({"infant_id": infant_id, "values": values})

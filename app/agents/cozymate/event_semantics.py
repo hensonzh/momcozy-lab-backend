@@ -293,10 +293,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我来综合评估一下奶量问题～",
         "completed": "我完成奶量分析啦",
     },
-    "records_growth_read": {
+    "lactation_context_read": {
         "phase": "reading",
-        "started": "我先看看宝宝的生长记录～",
-        "completed": "我把宝宝生长记录整理好啦",
+        "started": "我先看看奶量分析需要的母婴基础信息～",
+        "completed": "我把母婴基础信息整理好啦",
     },
     "plans_current_read": {
         "phase": "reading",

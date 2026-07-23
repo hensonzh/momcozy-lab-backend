@@ -17,7 +17,7 @@ from app.agents.cozymate.tools import (
     GrowthRecordDeleteProposeToolHandler,
     GrowthRecordProposeToolHandler,
     GrowthRecordUpdateProposeToolHandler,
-    GrowthRecordsReadToolHandler,
+    LactationContextReadToolHandler,
     HospitalBagCardCreateToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
@@ -141,6 +141,8 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                             "name": " Nori ",
                             "sex_at_birth": "female",
                             "birth_date": "2026-01-10",
+                            "birth_weight_kg": 3.2,
+                            "gestational_age_at_birth_days": 258,
                         }
                     ],
                 },
@@ -154,7 +156,13 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
         "infants": [
             {
                 "infant_id": str(infant_id),
-                "fields": ["birth_date", "name", "sex_at_birth"],
+                "fields": [
+                    "birth_date",
+                    "birth_weight_kg",
+                    "gestational_age_at_birth_days",
+                    "name",
+                    "sex_at_birth",
+                ],
             }
         ],
     }
@@ -174,6 +182,8 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                 "name": "Nori",
                 "sex_at_birth": "female",
                 "birth_date": "2026-01-10",
+                "birth_weight_kg": 3.2,
+                "gestational_age_at_birth_days": 258,
             }
         ],
     }
@@ -309,6 +319,7 @@ def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idem
     runtime_service = FakeAgentRuntimeService()
     handlers = build_default_tool_handlers(
         profile_service=FakeProfileService(profile=None, infants=[]),
+        lactation_context_service=FakeLactationContextService(),
         records_service=FakeRecordsService(owner_user_id=actor.user_id),
         plans_service=FakePlansService(owner_user_id=actor.user_id),
         diary_service=FakeDiaryService(owner_user_id=actor.user_id),
@@ -742,9 +753,7 @@ def test_milk_analysis_reader_summarizes_rhythm_from_full_window_not_display_sli
         profile_service=FakeProfileService(profile=None, infants=[]),
     )
 
-    result = asyncio.run(
-        handler.execute(_context(actor=actor, args={"days": 7, "limit": 8, "runtime_timezone": "UTC"}))
-    )
+    result = asyncio.run(handler.execute(_context(actor=actor, args={"days": 7, "limit": 8, "runtime_timezone": "UTC"})))
 
     assert len(result["recent_pumpings"]) == 8
     assert result["pumping_rhythm"] == {
@@ -807,7 +816,9 @@ def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card()
     assert evaluated["_deferred_agent_events"][0]["event_type"] == "artifact.created"
     artifact_count = len(runtime_service.artifacts)
     replayed = asyncio.run(
-        MilkAnalysisEvaluateToolHandler(runtime_service=runtime_service).execute(_context(actor=actor, thread_id=base_context.thread_id, args={}))
+        MilkAnalysisEvaluateToolHandler(runtime_service=runtime_service).execute(
+            _context(actor=actor, thread_id=base_context.thread_id, args={})
+        )
     )
     assert replayed["replayed"] is True
     assert replayed["artifact_id"] == evaluated["artifact_id"]
@@ -901,7 +912,7 @@ def test_milk_plan_proposal_rejects_missing_durable_analysis_even_with_valid_pla
                     args={
                         "direction": "increase",
                         "days": 1,
-                    }
+                    },
                 )
             )
         )
@@ -909,19 +920,26 @@ def test_milk_plan_proposal_rejects_missing_durable_analysis_even_with_valid_pla
     assert exc_info.value.code == "milk_analysis_required_before_plan"
 
 
-def test_growth_records_read_tool_handler_returns_bounded_owner_scoped_records() -> None:
+def test_lactation_context_read_tool_handler_returns_owner_scoped_context() -> None:
     actor = _user()
-    records_service = FakeRecordsService(owner_user_id=actor.user_id)
-    infant_id = uuid4()
-    handler = GrowthRecordsReadToolHandler(records_service=records_service)
+    service = FakeLactationContextService()
+    handler = LactationContextReadToolHandler(service=service)
 
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"infant_id": str(infant_id), "limit": 2})))
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={"runtime_local_date": "2026-07-23"},
+            )
+        )
+    )
 
-    assert records_service.owner_user_id == actor.user_id
-    assert records_service.growth_infant_id == infant_id
-    assert result["count"] == 1
-    assert result["infant_id"] == str(infant_id)
-    assert result["growth"][0]["height_cm"] == 62
+    assert service.query == {
+        "owner_user_id": actor.user_id,
+        "as_of_date": date(2026, 7, 23),
+    }
+    assert result["mother"]["postpartum_days"] == 74
+    assert result["infants"][0]["latest_measurement"]["height_cm"] == 62
 
 
 def test_plans_current_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
@@ -1357,7 +1375,9 @@ def test_record_delete_and_growth_propose_tool_handlers_create_actions() -> None
         )
     )
     growth_delete = asyncio.run(
-        GrowthRecordDeleteProposeToolHandler(runtime_service=runtime_service).execute(_context(actor=actor, args={"record_id": str(growth_id)}))
+        GrowthRecordDeleteProposeToolHandler(runtime_service=runtime_service).execute(
+            _context(actor=actor, args={"record_id": str(growth_id)})
+        )
     )
 
     assert feeding_delete["action_type"] == FEEDING_RECORD_DELETE_ACTION
@@ -1421,9 +1441,7 @@ def test_milk_plan_propose_tool_handler_creates_confirmation_action() -> None:
         active_step="assessment_complete",
     )
 
-    result = asyncio.run(
-        MilkPlanProposeToolHandler(runtime_service=runtime_service, plans_service=plans_service).execute(context)
-    )
+    result = asyncio.run(MilkPlanProposeToolHandler(runtime_service=runtime_service, plans_service=plans_service).execute(context))
 
     assert result["action_type"] == MILK_PLAN_CREATE_ACTION
     assert result["action_status"] == "confirmation_required"
@@ -1550,9 +1568,7 @@ def test_milk_plan_proposal_requires_an_explicit_append_or_replace_choice_when_f
         )
     )
     assert confirmed["action_status"] == "confirmation_required"
-    assert runtime_service.action.apply_payload["expected_replaced_task_ids"] == [
-        str(plans_service.future_milk_tasks[0].id)
-    ]
+    assert runtime_service.action.apply_payload["expected_replaced_task_ids"] == [str(plans_service.future_milk_tasks[0].id)]
 
 
 def test_milk_plan_proposal_rejects_a_tampered_analysis_fingerprint() -> None:
@@ -3084,9 +3100,7 @@ def test_pregnancy_diary_save_update_replaces_with_complete_content() -> None:
 
     assert result["status"] == "entry_saved"
     assert runtime_service.calls[0]["apply_payload"]["operation"] == "update"
-    assert runtime_service.calls[0]["apply_payload"]["content"] == (
-        "Earlier facts and the new fact rewritten as one complete entry."
-    )
+    assert runtime_service.calls[0]["apply_payload"]["content"] == ("Earlier facts and the new fact rewritten as one complete entry.")
 
 
 def test_support_ticket_propose_tool_handler_requires_summary() -> None:
@@ -3273,6 +3287,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     actor_id = uuid4()
     handlers = build_default_tool_handlers(
         profile_service=FakeProfileService(profile=None, infants=[]),
+        lactation_context_service=FakeLactationContextService(),
         records_service=FakeRecordsService(owner_user_id=actor_id),
         plans_service=FakePlansService(owner_user_id=actor_id),
         diary_service=FakeDiaryService(owner_user_id=actor_id),
@@ -3289,7 +3304,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "profile_read",
         "profile_update",
         "ibclc_consult_card_create",
-        "records_growth_read",
+        "lactation_context_read",
         "records_growth_record_propose",
         "records_growth_record_delete_propose",
         "records_growth_record_update_propose",
@@ -3390,6 +3405,27 @@ class FakeProfileService:
             estimated_due_date=values.get("estimated_due_date"),
         )
         return self.profile
+
+
+class FakeLactationContextService:
+    def __init__(self) -> None:
+        self.query = {}
+
+    async def read(self, **kwargs):
+        self.query = kwargs
+        return {
+            "as_of_date": (kwargs["as_of_date"].isoformat() if kwargs.get("as_of_date") else "2026-07-23"),
+            "mother": {"postpartum_days": 74},
+            "infants": [
+                {
+                    "birth_order": 1,
+                    "sex_at_birth": "female",
+                    "latest_measurement": {"height_cm": 62},
+                }
+            ],
+            "missing_fields": [],
+            "data_quality_issues": [],
+        }
 
 
 class FakeRecordsService:

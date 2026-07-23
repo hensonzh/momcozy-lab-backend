@@ -132,6 +132,8 @@ class InMemoryProfileRepository:
         name: str,
         sex_at_birth: str | None,
         birth_date: date | None,
+        birth_weight_kg: float | None,
+        gestational_age_at_birth_days: int | None,
     ):
         infant = InfantProfile(
             id=uuid4(),
@@ -139,6 +141,8 @@ class InMemoryProfileRepository:
             name=name,
             sex_at_birth=sex_at_birth,
             birth_date=birth_date,
+            birth_weight_kg=birth_weight_kg,
+            gestational_age_at_birth_days=gestational_age_at_birth_days,
             deleted_at=None,
         )
         self.infants.append(infant)

@@ -28,6 +28,7 @@ from app.modules.notifications import NotificationsService
 from app.modules.notifications.repository import NotificationsRepository
 from app.modules.plans.repository import PlansRepository
 from app.modules.plans.service import PlansService
+from app.modules.profiles.lactation_context import LactationContextService
 from app.modules.profiles.repository import ProfileRepository
 from app.modules.profiles.service import ProfileService
 from app.modules.records.repository import RecordsRepository
@@ -76,8 +77,9 @@ def build_cozymate_runtime(
         memory_consent_reader=memory_service,
         extraction_enabled=False,
     )
+    profile_repository = ProfileRepository(session)
     profile_service = ProfileService(
-        repository=ProfileRepository(session),
+        repository=profile_repository,
         audit_service=AuditService(repository=audit_repository),
         idempotency_service=IdempotencyService(repository=audit_repository),
     )
@@ -85,6 +87,11 @@ def build_cozymate_runtime(
         repository=RecordsRepository(session),
         audit_service=AuditService(repository=audit_repository),
         idempotency_service=IdempotencyService(repository=audit_repository),
+    )
+    lactation_context_service = LactationContextService(
+        profile_repository=profile_repository,
+        records_service=records_service,
+        audit_service=AuditService(repository=audit_repository),
     )
     plans_service = PlansService(
         repository=PlansRepository(session),
@@ -150,6 +157,7 @@ def build_cozymate_runtime(
     )
     tool_handlers = build_default_tool_handlers(
         profile_service=profile_service,
+        lactation_context_service=lactation_context_service,
         records_service=records_service,
         plans_service=plans_service,
         diary_service=diary_service,
