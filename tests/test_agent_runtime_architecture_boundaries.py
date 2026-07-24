@@ -443,8 +443,9 @@ def test_service_skills_capture_legacy_domain_flow_semantics() -> None:
     assert "plans_plan_delete_propose" in pregnancy
     assert "pregnancy_plan_todo_propose" not in pregnancy
     assert "version_conflict" not in pregnancy
-    assert "hospital_bag_form_create" in pregnancy
-    assert "hospital_bag_card_create" in pregnancy
+    assert "hospital_bag_workflow" in pregnancy
+    assert "hospital_bag_form_create" not in pregnancy
+    assert "hospital_bag_card_create" not in pregnancy
     assert "birth_plan_form_create" not in pregnancy
     assert "labor_communication_card_create" not in pregnancy
 
@@ -483,11 +484,14 @@ def test_tool_contract_registry_contains_only_model_visible_tools() -> None:
     )
     assert "plans_milk_plan_propose" in registered_names
     assert "pregnancy_plan_workflow" in registered_names
+    assert "hospital_bag_workflow" in registered_names
     assert {
         "pregnancy_plan_propose",
         "pregnancy_plan_intake_start",
         "pregnancy_plan_intake_analyze",
         "pregnancy_plan_intake_advance",
+        "hospital_bag_form_create",
+        "hospital_bag_card_create",
     }.isdisjoint(registered_names)
     assert "load_service_skill" not in registered_names
     assert "loading_mode" not in ToolContract.model_fields
@@ -531,7 +535,7 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
         ("pregnancy_plan_workflow", "user_resource", "pregnancy.plan.create"),
         ("pregnancy_diary_save", "user_resource", "pregnancy_diary.entry.save"),
         ("devices_guidance", "agent_internal", None),
-        ("hospital_bag_card_create", "agent_internal", None),
+        ("hospital_bag_workflow", "agent_internal", None),
         ("support_ticket_propose", "agent_internal", None),
     ],
 )
@@ -554,7 +558,7 @@ def test_all_tool_contracts_are_available_for_direct_responses_exposure() -> Non
         "support_ticket_propose",
     }
 
-    assert len(registry.names_for_sdk()) == 39
+    assert len(registry.names_for_sdk()) == 38
     assert device_tool_names <= set(registry.names_for_sdk())
     assert {
         "load_service_skill",
@@ -635,8 +639,7 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     record_delete_schema = registry.get("records_feeding_record_delete_propose").input_schema
     growth_schema = registry.get("records_growth_record_propose").input_schema
     growth_update_schema = registry.get("records_growth_record_update_propose").input_schema
-    hospital_bag_form_schema = registry.get("hospital_bag_form_create").input_schema
-    hospital_bag_card_schema = registry.get("hospital_bag_card_create").input_schema
+    hospital_bag_workflow_schema = registry.get("hospital_bag_workflow").input_schema
     hospital_bag_cart_schema = registry.get("hospital_bag_cart_update").input_schema
     pump_recommend_schema = registry.get("hospital_bag_pump_recommend").input_schema
     ibclc_schema = registry.get("ibclc_consult_card_create").input_schema
@@ -797,10 +800,14 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert growth_schema["required"] == ["measured_at"]
     assert growth_schema["properties"]["weight_kg"]["type"] == "number"
     assert growth_update_schema["required"] == ["record_id"]
-    assert hospital_bag_form_schema["additionalProperties"] is False
-    assert hospital_bag_form_schema["properties"] == {}
-    assert hospital_bag_card_schema["additionalProperties"] is False
-    assert hospital_bag_card_schema["properties"]["generation_mode"]["enum"] == ["standard", "quick", "immediate"]
+    assert hospital_bag_workflow_schema["additionalProperties"] is False
+    assert hospital_bag_workflow_schema["properties"]["generation_mode"]["enum"] == [
+        "standard",
+        "quick",
+        "immediate",
+    ]
+    assert hospital_bag_workflow_schema["properties"]["restart"]["type"] == "boolean"
+    assert "confirmed_form_data" not in hospital_bag_workflow_schema["properties"]
     assert hospital_bag_cart_schema["additionalProperties"] is False
     assert hospital_bag_cart_schema["required"] == ["action"]
     assert "groups" not in hospital_bag_cart_schema["properties"]

@@ -24,16 +24,16 @@
 
 | 项目 | 数量 |
 | --- | ---: |
-| 模型可见 Tool Contract | 39 |
-| 顶层工具 | 39 |
+| 模型可见 Tool Contract | 38 |
+| 顶层工具 | 38 |
 | `none` | 9 |
-| `agent_internal` | 8 |
+| `agent_internal` | 7 |
 | `user_resource` | 22 |
 | Action-backed Tool 对应的唯一 Action Type | 20 |
 
 ## 3. 工具暴露方式
 
-全部 39 个 Tool Contract 都以顶层函数工具直接暴露给对应智能体。每个智能体只接收其静态 Tool Allowlist，不使用 Namespace、deferred loading 或 `tool_search`。
+全部 38 个 Tool Contract 都以顶层函数工具直接暴露给对应智能体。每个智能体只接收其静态 Tool Allowlist，不使用 Namespace、deferred loading 或 `tool_search`。
 
 Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 名称；Action Type 使用独立字段表达。
 
@@ -45,7 +45,7 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 ### `agent_internal`
 
-`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_guidance`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
+`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_guidance`、`hospital_bag_workflow`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
 
 `agent_internal` 仍可以写 Agent Runtime 自身的 Workflow 或 Artifact，但不允许从 Tool Handler 直接修改 Profile、Diary、Plan、Record、Notification 等用户业务资源。
 

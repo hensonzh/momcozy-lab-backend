@@ -17,7 +17,42 @@ def cozymate_tool_result_from_payload(*, tool_name: str, output: dict[str, Any])
     model_payload.pop(DEFERRED_AGENT_EVENTS_KEY, None)
     if tool_name in _PREGNANCY_DIARY_TOOLS:
         model_payload = _diary_model_output(model_payload)
+    elif tool_name == "hospital_bag_workflow":
+        model_payload = _hospital_bag_workflow_model_output(model_payload)
     return ToolResult(output=ToolResult.json(model_payload).output, audit_output=audit_output)
+
+
+def _hospital_bag_workflow_model_output(
+    output: dict[str, Any],
+) -> dict[str, Any]:
+    projected = {
+        key: output[key]
+        for key in (
+            "tool_name",
+            "status",
+            "artifact_id",
+            "artifact_type",
+            "schema_version",
+            "summary",
+            "missing_fields",
+            "signal_ids",
+            "blocks_hospital_bag_flow",
+            "required_response",
+            "workflow_context",
+        )
+        if key in output
+    }
+    form = output.get("form")
+    if isinstance(form, dict) and form.get("id"):
+        projected["form_id"] = str(form["id"])
+    followup = output.get("assistant_followup")
+    if isinstance(followup, dict):
+        projected["assistant_followup"] = {
+            key: followup[key]
+            for key in ("kind", "message")
+            if key in followup
+        }
+    return projected
 
 
 def _diary_model_output(output: dict[str, Any]) -> dict[str, Any]:

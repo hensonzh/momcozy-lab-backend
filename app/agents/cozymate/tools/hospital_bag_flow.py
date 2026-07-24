@@ -7,9 +7,13 @@ from typing import Any
 
 HOSPITAL_BAG_FORM_ID = "hospital_bag_intake"
 HOSPITAL_BAG_WORKFLOW_TYPE = "hospital_bag"
-HOSPITAL_BAG_WORKFLOW_SCHEMA_VERSION = "v1"
+HOSPITAL_BAG_WORKFLOW_SCHEMA_VERSION = "v2"
 HOSPITAL_BAG_DISCLAIMER = "请优先遵循医院要求和医生/助产士的具体指导。"
 HOSPITAL_BAG_CART_LINK = "[打开待产包购物车](/hospital-bag-cart)"
+HOSPITAL_BAG_URGENT_RESPONSE = (
+    "你填写的信息里出现了需要优先线下确认的急症信号。请先停止整理待产包，立即联系产科医生、医院产房或急诊；"
+    "如果症状严重、正在加重或无法及时联系，请呼叫当地急救服务。"
+)
 
 _REQUIRED_FIELDS = {
     "due_date_or_week": "预产期或当前孕周",

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from app.agents.cozymate.tools import (
     HospitalBagCardCreateToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
+    HospitalBagWorkflowToolHandler,
     IbclcConsultCardCreateToolHandler,
     BirthPreparationArtifactToolHandler,
     MilkAnalysisEvaluateToolHandler,
@@ -378,6 +380,7 @@ def test_hospital_bag_form_and_card_use_one_durable_workflow_state() -> None:
         "phase": "collecting_intake",
         "form_id": "hospital_bag_intake",
         "source_form_artifact_id": str(form_artifact.id),
+        "generation_mode": "standard",
     }
 
     card_result = asyncio.run(
@@ -417,6 +420,8 @@ def test_hospital_bag_form_and_card_use_one_durable_workflow_state() -> None:
         "source_form_artifact_id": str(form_artifact.id),
         "source_form_submission_id": "submission-1",
         "result_artifact_id": str(card_artifact.id),
+        "generation_mode": "standard",
+        "data_source": "verified_form_submission",
     }
     artifact_count = len(runtime_service.artifacts)
     duplicate_args = dict(runtime_service.workflow_state.state)
@@ -441,24 +446,39 @@ def test_hospital_bag_form_and_card_use_one_durable_workflow_state() -> None:
     assert len(runtime_service.artifacts) == artifact_count
 
 
-def test_hospital_bag_form_does_not_restart_active_intake() -> None:
+def test_hospital_bag_form_replays_active_intake_without_restarting() -> None:
+    actor = _user()
+    thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
+    created = asyncio.run(
+        HospitalBagFormCreateToolHandler(runtime_service=runtime_service).execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={"runtime_workflow_context": {}},
+            )
+        )
+    )
     artifact_count = len(runtime_service.artifacts)
 
     result = asyncio.run(
         HospitalBagFormCreateToolHandler(runtime_service=runtime_service).execute(
             _context(
+                actor=actor,
+                thread_id=thread_id,
                 args={
-                    "runtime_workflow_context": {
-                        "phase": "collecting_intake",
-                        "source_form_artifact_id": "form-1",
-                    }
+                    "runtime_workflow_context": dict(
+                        runtime_service.workflow_state.state
+                    )
                 }
             )
         )
     )
 
-    assert result == {"status": "hospital_bag_intake_already_started", "form_artifact_id": "form-1"}
+    assert result["status"] == "hospital_bag_intake_already_started"
+    assert result["artifact_id"] == created["artifact_id"]
+    assert result["form"]["id"] == "hospital_bag_intake"
+    assert result["_deferred_agent_events"][0]["event_type"] == "artifact.created"
     assert len(runtime_service.artifacts) == artifact_count
 
 
@@ -481,6 +501,360 @@ def test_hospital_bag_card_rejects_stale_form_submission() -> None:
         )
 
     assert exc_info.value.code == "stale_hospital_bag_intake"
+
+
+def test_hospital_bag_workflow_creates_form_when_verified_information_is_incomplete() -> None:
+    runtime_service = FakeAgentRuntimeService()
+
+    result = asyncio.run(
+        HospitalBagWorkflowToolHandler(runtime_service=runtime_service).execute(
+            _context(
+                args={
+                    "default_values": {
+                        "due_date_or_week": "36 周",
+                        "feeding_intention": "混合喂养",
+                    },
+                    "runtime_verified_form_data": {
+                        "due_date_or_week": "36 周",
+                    },
+                    "runtime_workflow_context": {},
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "form_created"
+    assert result["tool_name"] == "hospital_bag_workflow"
+    assert result["form"]["default_values"] == {
+        "due_date_or_week": "36 周",
+        "feeding_intention": "混合喂养",
+    }
+    assert result["workflow_context"]["information_complete"] is False
+    assert "first_birth" in result["workflow_context"]["missing_fields"]
+    assert runtime_service.workflow_state.state["phase"] == "collecting_intake"
+
+
+def test_hospital_bag_workflow_generates_directly_from_complete_verified_facts() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    verified_values = _complete_hospital_bag_values()
+
+    result = asyncio.run(
+        HospitalBagWorkflowToolHandler(runtime_service=runtime_service).execute(
+            _context(
+                args={
+                    "generation_mode": "quick",
+                    "runtime_verified_form_data": verified_values,
+                    "runtime_workflow_context": {},
+                }
+            )
+        )
+    )
+
+    assert result["status"] == "card_created"
+    assert result["tool_name"] == "hospital_bag_workflow"
+    assert result["workflow_context"]["information_complete"] is True
+    assert runtime_service.artifact.artifact_type == "hospital_bag_card"
+    assert runtime_service.workflow_state.status == "completed"
+    assert runtime_service.workflow_state.state["data_source"] == "verified_facts"
+    assert runtime_service.workflow_state.state["generation_mode"] == "quick"
+
+
+def test_hospital_bag_workflow_keeps_form_and_card_json_out_of_model_output() -> None:
+    form_result = asyncio.run(
+        HospitalBagWorkflowToolHandler(
+            runtime_service=FakeAgentRuntimeService()
+        )(
+            _context(
+                tool_name="hospital_bag_workflow",
+                args={"runtime_workflow_context": {}},
+            )
+        )
+    )
+    form_model_output = json.loads(
+        form_result.to_function_call_output()
+    )
+    assert form_model_output["status"] == "form_created"
+    assert form_model_output["tool_name"] == "hospital_bag_workflow"
+    assert form_model_output["form_id"] == "hospital_bag_intake"
+    assert "form" not in form_model_output
+
+    runtime_service = FakeAgentRuntimeService()
+    result = asyncio.run(
+        HospitalBagWorkflowToolHandler(runtime_service=runtime_service)(
+            _context(
+                tool_name="hospital_bag_workflow",
+                args={
+                    "runtime_verified_form_data": _complete_hospital_bag_values(),
+                    "runtime_workflow_context": {},
+                }
+            )
+        )
+    )
+
+    model_output = json.loads(result.to_function_call_output())
+    assert model_output["status"] == "card_created"
+    assert model_output["workflow_context"]["information_complete"] is True
+    assert "card" not in model_output
+    assert "form" not in model_output
+    assert model_output["assistant_followup"]["kind"] == "hospital_bag_cart"
+    assert result.audit_output["card"]["card_json"]["title"] == "待产包"
+
+
+def test_hospital_bag_workflow_resumes_active_form_instead_of_using_older_verified_facts() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    handler = HospitalBagWorkflowToolHandler(runtime_service=runtime_service)
+    created = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={"runtime_workflow_context": {}},
+            )
+        )
+    )
+    artifact_count = len(runtime_service.artifacts)
+
+    resumed = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={
+                    "runtime_verified_form_data": _complete_hospital_bag_values(),
+                    "runtime_workflow_context": dict(runtime_service.workflow_state.state),
+                },
+            )
+        )
+    )
+
+    assert resumed["status"] == "hospital_bag_intake_already_started"
+    assert resumed["artifact_id"] == created["artifact_id"]
+    assert resumed["form"]["id"] == "hospital_bag_intake"
+    assert len(runtime_service.artifacts) == artifact_count
+    assert runtime_service.workflow_state.status == "collecting"
+
+
+def test_hospital_bag_workflow_generates_from_complete_current_submission() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    handler = HospitalBagWorkflowToolHandler(runtime_service=runtime_service)
+    created = asyncio.run(
+        handler.execute(
+            _context(actor=actor, thread_id=thread_id, args={"runtime_workflow_context": {}})
+        )
+    )
+
+    generated = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={
+                    "confirmed_form_data": _complete_hospital_bag_values(),
+                    "form_artifact_id": created["artifact_id"],
+                    "form_submission_id": "submission-1",
+                    "runtime_workflow_context": dict(runtime_service.workflow_state.state),
+                },
+            )
+        )
+    )
+
+    assert generated["status"] == "card_created"
+    assert generated["tool_name"] == "hospital_bag_workflow"
+    assert runtime_service.workflow_state.state["data_source"] == "verified_form_submission"
+    assert runtime_service.workflow_state.state["source_form_submission_id"] == "submission-1"
+
+
+def test_hospital_bag_workflow_reopens_form_for_invalid_current_submission() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    handler = HospitalBagWorkflowToolHandler(runtime_service=runtime_service)
+    created = asyncio.run(
+        handler.execute(
+            _context(actor=actor, thread_id=thread_id, args={"runtime_workflow_context": {}})
+        )
+    )
+    invalid_values = {
+        **_complete_hospital_bag_values(),
+        "first_birth": "模型替我决定",
+    }
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={
+                    "confirmed_form_data": invalid_values,
+                    "form_artifact_id": created["artifact_id"],
+                    "form_submission_id": "submission-invalid",
+                    "runtime_workflow_context": dict(
+                        runtime_service.workflow_state.state
+                    ),
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "form_created"
+    assert result["workflow_context"]["invalid_fields"] == ["first_birth"]
+    assert "first_birth" not in result["form"]["default_values"]
+    assert runtime_service.workflow_state.status == "collecting"
+
+
+@pytest.mark.parametrize(
+    "submitted_values",
+    [
+        {"due_date_or_week": "36 周"},
+        {"pregnancy_history_or_notes": ["其它：我现在大量出血"]},
+    ],
+    ids=["incomplete", "urgent"],
+)
+def test_hospital_bag_workflow_rejects_stale_submission_before_processing_values(
+    submitted_values: dict,
+) -> None:
+    runtime_service = FakeAgentRuntimeService()
+    initial_artifact_count = len(runtime_service.artifacts)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            HospitalBagWorkflowToolHandler(
+                runtime_service=runtime_service
+            ).execute(
+                _context(
+                    args={
+                        "confirmed_form_data": submitted_values,
+                        "form_artifact_id": "old-form",
+                        "form_submission_id": "stale-submission",
+                        "runtime_workflow_context": {
+                            "phase": "collecting_intake",
+                            "source_form_artifact_id": "current-form",
+                        },
+                    }
+                )
+            )
+        )
+
+    assert exc_info.value.code == "stale_hospital_bag_intake"
+    assert runtime_service.workflow_calls == []
+    assert len(runtime_service.artifacts) == initial_artifact_count
+
+
+def test_hospital_bag_workflow_interrupts_current_submission_for_urgent_signal() -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    initial_card_count = len(
+        [
+            artifact
+            for artifact in runtime_service.artifacts
+            if artifact.artifact_type == "hospital_bag_card"
+        ]
+    )
+    handler = HospitalBagWorkflowToolHandler(runtime_service=runtime_service)
+    created = asyncio.run(
+        handler.execute(
+            _context(actor=actor, thread_id=thread_id, args={"runtime_workflow_context": {}})
+        )
+    )
+    urgent_values = {
+        **_complete_hospital_bag_values(),
+        "top_worries": ["其它：我现在大量出血"],
+    }
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={
+                    "confirmed_form_data": urgent_values,
+                    "form_artifact_id": created["artifact_id"],
+                    "form_submission_id": "submission-urgent",
+                    "runtime_workflow_context": dict(
+                        runtime_service.workflow_state.state
+                    ),
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "urgent_care_required"
+    assert "立即联系产科医生" in result["required_response"]
+    assert runtime_service.workflow_state.status == "paused"
+    assert runtime_service.workflow_state.state["interrupted_by_safety_signal"] is True
+    assert runtime_service.workflow_state.state["safety_signal_ids"] == [
+        "heavy_bleeding"
+    ]
+    assert len(
+        [
+            artifact
+            for artifact in runtime_service.artifacts
+            if artifact.artifact_type == "hospital_bag_card"
+        ]
+    ) == initial_card_count
+
+
+@pytest.mark.parametrize(
+    ("field_id", "field_value"),
+    [
+        ("top_worries", ["其它：怕生产时大出血"]),
+        (
+            "pregnancy_history_or_notes",
+            ["其它：有产后大出血风险"],
+        ),
+        (
+            "pregnancy_history_or_notes",
+            ["其它：我现在担心生产时大出血"],
+        ),
+    ],
+    ids=["future-worry", "medical-risk", "current-worry-about-future"],
+)
+def test_hospital_bag_workflow_does_not_treat_worry_or_risk_as_current_emergency(
+    field_id: str,
+    field_value: list[str],
+) -> None:
+    actor = _user()
+    thread_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    handler = HospitalBagWorkflowToolHandler(runtime_service=runtime_service)
+    created = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={"runtime_workflow_context": {}},
+            )
+        )
+    )
+    submitted_values = {
+        **_complete_hospital_bag_values(),
+        field_id: field_value,
+    }
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                thread_id=thread_id,
+                args={
+                    "confirmed_form_data": submitted_values,
+                    "form_artifact_id": created["artifact_id"],
+                    "form_submission_id": "submission-risk-context",
+                    "runtime_workflow_context": dict(
+                        runtime_service.workflow_state.state
+                    ),
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "card_created"
+    assert runtime_service.workflow_state.status == "completed"
 
 
 def test_birth_preparation_artifact_handler_returns_form_card_and_cart_envelopes() -> None:
@@ -528,6 +902,7 @@ def test_birth_preparation_artifact_handler_returns_form_card_and_cart_envelopes
     assert runtime_service.artifact.payload["source_form_submission_id"] == "submission-1"
     assert runtime_service.calls[-1]["emit_event"] is False
 
+
     cart_result = asyncio.run(
         BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update").execute(
             _context(actor=actor, args={"action": "reset_cart"})
@@ -540,6 +915,20 @@ def test_birth_preparation_artifact_handler_returns_form_card_and_cart_envelopes
     assert cart_result["cart_update"]["totals"]["itemCount"] == 18
     assert cart_result["cart_update"]["totals"]["exchange_rate_usd_cny"] == 6.8
     assert cart_result["cart_update"]["totals"]["total"] > 0
+
+
+def _complete_hospital_bag_values() -> dict:
+    return {
+        "due_date_or_week": "36 周",
+        "first_birth": "是",
+        "fetus_count": "单胎",
+        "pregnancy_history_or_notes": ["没有"],
+        "birth_path": "顺产",
+        "feeding_intention": "亲喂母乳",
+        "return_to_work_timing": "3 个月后",
+        "support_person": "有人全天帮忙",
+        "top_worries": ["怕漏买"],
+    }
 
 
 def test_birth_preparation_artifact_handler_matches_cart_and_pump_actions() -> None:
@@ -3421,8 +3810,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     )
 
     assert set(handlers) == {
-        "hospital_bag_form_create",
-        "hospital_bag_card_create",
+        "hospital_bag_workflow",
         "hospital_bag_cart_update",
         "hospital_bag_pump_recommend",
         "profile_read",
@@ -3464,11 +3852,17 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     assert all(callable(handler) for handler in handlers.values())
 
 
-def _context(*, actor: CurrentUser | None = None, args: dict | None = None, thread_id=None) -> ToolHandlerContext:
+def _context(
+    *,
+    actor: CurrentUser | None = None,
+    args: dict | None = None,
+    thread_id=None,
+    tool_name: str = "tool",
+) -> ToolHandlerContext:
     return ToolHandlerContext(
         actor=actor or _user(),
         run_id=uuid4(),
-        tool_name="tool",
+        tool_name=tool_name,
         call_id="call-1",
         args=args or {},
         thread_id=thread_id or uuid4(),

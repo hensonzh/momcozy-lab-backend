@@ -456,20 +456,13 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="hospital_bag_form_create",
+            name="hospital_bag_workflow",
             domain="hospital_bag",
-            description="创建待产包信息采集表单，并由 runtime 合并可信资料和当前孕期计划。用户确认开始整理待产包时调用。",
-            effect_scope="agent_internal",
-            blocking_policy="must_wait",
-            result_dependency="final_response",
-            timeout_seconds=15,
-        )
-    )
-    registry.register(
-        _tool_contract(
-            name="hospital_bag_card_create",
-            domain="hospital_bag",
-            description="根据应用侧可信的 hospital_bag_intake 表单提交生成可渲染的待产包清单。用户完成信息采集并要求生成待产包清单时调用。",
+            description=(
+                "启动或恢复标准化待产包流程。runtime 会判断可信信息是否完整："
+                "不完整时创建或恢复信息采集表单，完整时直接生成可渲染的待产包清单。"
+                "用户确认开始整理待产包时调用；不要在调用前用自然对话逐项采集表单字段。"
+            ),
             effect_scope="agent_internal",
             blocking_policy="must_wait",
             result_dependency="final_response",

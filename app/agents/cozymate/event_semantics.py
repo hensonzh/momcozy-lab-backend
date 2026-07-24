@@ -222,6 +222,14 @@ def _dynamic_tool_completed_label(
             "card_created": "孕期计划已生成",
             "blocked_by_symptoms": "我先帮你确认当前情况",
         }.get(status, "我整理好这一步信息啦")
+    if tool_name == "hospital_bag_workflow":
+        return {
+            "form_created": "待产包信息表已经准备好啦",
+            "hospital_bag_intake_already_started": "待产包信息表已经恢复啦",
+            "card_created": "我整理好待产包清单啦",
+            "hospital_bag_card_already_created": "待产包清单已经生成啦",
+            "urgent_care_required": "我先帮你处理需要立即确认的情况",
+        }.get(status, "我整理好待产包这一步啦")
     if tool_name == "hospital_bag_cart_update" and status in {"needs_clarification", "cart_unchanged"}:
         return "这次购物车先不改"
     return ""
@@ -417,15 +425,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你确认要删除的成长记录～",
         "completed": "我已经准备好成长记录删除预览，等你确认～",
     },
-    "hospital_bag_form_create": {
+    "hospital_bag_workflow": {
         "phase": "planning",
-        "started": "我先帮你准备确认内容～",
-        "completed": "我已经准备好确认内容啦",
-    },
-    "hospital_bag_card_create": {
-        "phase": "planning",
-        "started": "我先帮你整理待产包清单～",
-        "completed": "我整理好待产包清单啦",
+        "started": "我先帮你核对待产包信息～",
+        "completed": "我整理好待产包这一步啦",
     },
     "hospital_bag_cart_update": {
         "phase": "saving",

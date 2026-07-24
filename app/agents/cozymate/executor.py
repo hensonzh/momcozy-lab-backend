@@ -62,6 +62,7 @@ from .tools import (
     default_tool_registry,
 )
 from .tools.hospital_bag_flow import (
+    HOSPITAL_BAG_FORM_ID,
     HOSPITAL_BAG_WORKFLOW_TYPE,
     ensure_hospital_bag_completion_followup,
 )
@@ -77,13 +78,7 @@ from .workflows.reply import guarded_workflow_type, workflow_accepts_reply
 CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history_image_load"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
-FORM_TOOL_IDS = {
-    "hospital_bag_card_create": "hospital_bag_intake",
-}
-FORM_CREATION_TOOL_NAMES = {"hospital_bag_form_create"}
-FORM_CREATION_IDS = {
-    "hospital_bag_form_create": "hospital_bag_intake",
-}
+HOSPITAL_BAG_WORKFLOW_TOOL_NAME = "hospital_bag_workflow"
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 MODEL_IMAGE_CONTENT_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
@@ -226,6 +221,13 @@ class CozymateAgentExecutor:
                 run=run,
                 turn_context=turn_context,
             )
+            if deterministic_result is None:
+                deterministic_result = (
+                    await self._run_verified_hospital_bag_submission(
+                        run=run,
+                        turn_context=turn_context,
+                    )
+                )
             if deterministic_result is not None:
                 return await self._finalize_turn_result(
                     run=run,
@@ -533,6 +535,85 @@ class CozymateAgentExecutor:
             if required_response:
                 self._turn_state(run.id).authoritative_final_text = required_response
         return safe_output
+
+    async def _run_verified_hospital_bag_submission(
+        self,
+        *,
+        run: AgentRun,
+        turn_context: _AgentTurnContext,
+    ) -> SdkNodeResult | None:
+        submission = turn_context.trusted_form_submissions.get(
+            HOSPITAL_BAG_FORM_ID
+        )
+        if submission is None:
+            return None
+        workflow = await self._latest_workflow_state(
+            run=run,
+            workflow_type=HOSPITAL_BAG_WORKFLOW_TYPE,
+        )
+        workflow_state = (
+            dict(workflow.state)
+            if workflow is not None and isinstance(workflow.state, dict)
+            else {}
+        )
+        if (
+            workflow is None
+            or workflow.status not in {"collecting", "ready", "waiting"}
+            or _text(workflow_state, "phase") != "collecting_intake"
+            or _text(workflow_state, "source_form_artifact_id")
+            != _text(submission, "artifact_id")
+        ):
+            return None
+
+        args: dict[str, Any] = {}
+        generation_mode = _text(workflow_state, "generation_mode")
+        if generation_mode in {"standard", "quick", "immediate"}:
+            args["generation_mode"] = generation_mode
+        trusted_args = await self._trusted_tool_args(
+            run=run,
+            contract_name=HOSPITAL_BAG_WORKFLOW_TOOL_NAME,
+            args=args,
+        )
+        execution = await self.tool_executor.execute(
+            actor=_run_actor(run),
+            run_id=run.id,
+            tool_name=HOSPITAL_BAG_WORKFLOW_TOOL_NAME,
+            call_id=f"ui-hospital-bag-{uuid4().hex}",
+            args=args,
+            trusted_args=trusted_args,
+        )
+        safe_output = dict(execution.safe_output or {})
+        resolved_output = _hospital_bag_tool_output(
+            {"safe_output": safe_output}
+        )
+        status = _text(resolved_output, "status")
+        required_response = _text(resolved_output, "required_response")
+        if required_response:
+            final_text = required_response
+        elif status in {"card_created", "hospital_bag_card_already_created"}:
+            final_text = ensure_hospital_bag_completion_followup(
+                "待产包清单已生成。",
+                card=_dict(_dict(resolved_output, "card"), "card_json"),
+            )
+        elif status in {
+            "form_created",
+            "hospital_bag_intake_already_started",
+        }:
+            final_text = "待产包信息还需要补充，请完成下方表单。"
+        else:
+            final_text = "待产包流程已更新，请按下方当前步骤继续。"
+        self._turn_state(run.id).authoritative_final_text = final_text
+        return SdkNodeResult(
+            final_text=final_text,
+            tool_calls=[
+                {
+                    "tool_name": HOSPITAL_BAG_WORKFLOW_TOOL_NAME,
+                    "status": "completed",
+                    "args": args,
+                    "safe_output": safe_output,
+                }
+            ],
+        )
 
     async def _active_workflows_for_context(
         self,
@@ -1129,43 +1210,57 @@ class CozymateAgentExecutor:
                 if default_values:
                     trusted_args["default_values"] = default_values
             return trusted_args
-        expected_form_id = FORM_TOOL_IDS.get(contract_name)
-        if expected_form_id is not None:
-            submission = self._turn_state(run.id).trusted_form_submissions.get(expected_form_id)
-            if submission is None:
-                return {}
-            form_trusted_args: dict[str, Any] = {
-                "confirmed_form_data": _dict(submission, "values"),
-                "form_submission_id": _text(submission, "submission_id"),
-            }
-            if contract_name == "hospital_bag_card_create":
-                workflow = await self._latest_hospital_bag_workflow(run=run)
-                form_trusted_args["form_artifact_id"] = _text(submission, "artifact_id")
-                workflow_state = _dict(workflow, "state")
-                if workflow_state:
-                    form_trusted_args["runtime_workflow_context"] = workflow_state
-            return form_trusted_args
-        if contract_name in FORM_CREATION_TOOL_NAMES:
+        if contract_name == HOSPITAL_BAG_WORKFLOW_TOOL_NAME:
+            hospital_bag_trusted_args: dict[str, Any] = {}
+            workflow = await self._latest_hospital_bag_workflow(run=run)
+            workflow_state = _dict(workflow, "state")
+            if workflow_state:
+                hospital_bag_trusted_args["runtime_workflow_context"] = (
+                    workflow_state
+                )
+
+            submission = self._turn_state(run.id).trusted_form_submissions.get(
+                HOSPITAL_BAG_FORM_ID
+            )
+            if submission is not None:
+                hospital_bag_trusted_args.update(
+                    {
+                        "confirmed_form_data": _dict(submission, "values"),
+                        "form_submission_id": _text(
+                            submission,
+                            "submission_id",
+                        ),
+                        "form_artifact_id": _text(submission, "artifact_id"),
+                    }
+                )
+
             form_default_values: dict[str, Any] = {}
+            verified_form_data: dict[str, Any] = {}
             if self.fact_service is not None:
                 stored_defaults = await self.fact_service.form_defaults(
                     owner_user_id=run.actor_user_id,
-                    form_id=FORM_CREATION_IDS[contract_name],
+                    form_id=HOSPITAL_BAG_FORM_ID,
                 )
                 for key, value in stored_defaults.items():
                     form_default_values.setdefault(key, value)
+                verified_form_data = (
+                    await self.fact_service.verified_form_defaults(
+                        owner_user_id=run.actor_user_id,
+                        form_id=HOSPITAL_BAG_FORM_ID,
+                    )
+                )
             same_turn_defaults = _birth_prep_same_turn_form_default_values(self._turn_state(run.id).current_user_text)
             for key, value in same_turn_defaults.items():
                 form_default_values.setdefault(key, value)
-            creation_trusted_args: dict[str, Any] = (
-                {"default_values": form_default_values} if form_default_values else {}
-            )
-            if contract_name == "hospital_bag_form_create":
-                workflow = await self._latest_hospital_bag_workflow(run=run)
-                workflow_state = _dict(workflow, "state")
-                if workflow_state:
-                    creation_trusted_args["runtime_workflow_context"] = workflow_state
-            return creation_trusted_args
+            if form_default_values:
+                hospital_bag_trusted_args["default_values"] = (
+                    form_default_values
+                )
+            if verified_form_data:
+                hospital_bag_trusted_args["runtime_verified_form_data"] = (
+                    verified_form_data
+                )
+            return hospital_bag_trusted_args
         if contract_name == "hospital_bag_cart_update":
             client_groups = self._turn_state(run.id).hospital_bag_cart_groups
             if client_groups is not None:
@@ -1321,12 +1416,8 @@ class CozymateAgentExecutor:
         return [dict(group) for group in groups if isinstance(group, dict)] if isinstance(groups, list) else None
 
     async def _latest_hospital_bag_workflow(self, *, run: AgentRun) -> dict[str, Any]:
-        loader = getattr(self.repository, "get_latest_workflow_state_for_thread", None)
-        if not callable(loader):
-            return {}
-        workflow = await loader(
-            thread_id=run.thread_id,
-            owner_user_id=run.actor_user_id,
+        workflow = await self._latest_workflow_state(
+            run=run,
             workflow_type=HOSPITAL_BAG_WORKFLOW_TYPE,
         )
         if workflow is None:
@@ -1671,7 +1762,7 @@ def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> 
 def _has_completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> bool:
     completed_statuses = {"card_created", "hospital_bag_card_already_created"}
     return any(
-        _text(tool_call, "tool_name") == "hospital_bag_card_create"
+        _text(tool_call, "tool_name") == HOSPITAL_BAG_WORKFLOW_TOOL_NAME
         and _text(_hospital_bag_tool_output(tool_call), "status") in completed_statuses
         for tool_call in tool_calls
     )
@@ -1680,7 +1771,7 @@ def _has_completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> bool:
 def _completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | None:
     completed_statuses = {"card_created", "hospital_bag_card_already_created"}
     for tool_call in reversed(tool_calls):
-        if _text(tool_call, "tool_name") != "hospital_bag_card_create":
+        if _text(tool_call, "tool_name") != HOSPITAL_BAG_WORKFLOW_TOOL_NAME:
             continue
         safe_output = _hospital_bag_tool_output(tool_call)
         if _text(safe_output, "status") not in completed_statuses:

@@ -837,18 +837,15 @@ for _tool_name in ("records_pumping_record_delete_propose", "records_growth_reco
 _TOOL_INPUT_SCHEMAS["plans_milk_task_update_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_update_propose"]
 _TOOL_INPUT_SCHEMAS["plans_milk_task_delete_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_delete_propose"]
 
-for _tool_name in ("hospital_bag_form_create", "hospital_bag_card_create"):
-    _TOOL_INPUT_SCHEMAS[_tool_name] = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
-    }
-
-_TOOL_INPUT_SCHEMAS["hospital_bag_card_create"] = {
+_TOOL_INPUT_SCHEMAS["hospital_bag_workflow"] = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
         "generation_mode": {"type": "string", "enum": ["standard", "quick", "immediate"]},
+        "restart": {
+            "type": "boolean",
+            "description": "仅当用户明确要求重新采集待产包信息时传 true。",
+        },
     },
 }
 
