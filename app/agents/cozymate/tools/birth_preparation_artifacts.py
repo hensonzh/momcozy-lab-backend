@@ -192,7 +192,7 @@ def create_birth_preparation_artifact_result(
         return hospital_bag_form_result(args)
     if tool_name == "hospital_bag_card_create":
         return hospital_bag_card_result(args)
-    if tool_name == "hospital_bag_cart_update":
+    if tool_name == "hospital_bag_cart_write":
         return hospital_bag_cart_update_result(args, pump_products=pump_products)
     raise ValueError(f"Unsupported birth-preparation artifact tool: {tool_name}")
 
@@ -416,7 +416,7 @@ def build_birth_journey_plan_result(plan_context: dict[str, Any]) -> dict[str, A
     if isinstance(owner, dict):
         card_json["owner"] = {key: value for key, value in owner.items() if _has_value(value)}
     return {
-        "tool_name": "pregnancy_plan_workflow",
+        "tool_name": "pregnancy_plan_manage",
         "status": "card_created",
         "card": {"card_type": "birth_journey_plan_card", "schema_version": "1.0", "card_json": card_json},
         "plan": {"payload": card_json, "status": "active"},
@@ -429,7 +429,7 @@ def hospital_bag_cart_update_result(
     pump_products: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     available_pump_products = pump_products or []
-    action = _text(args.get("action"))
+    action = _text(args.get("operation"))
     assistant_message = _text(args.get("assistant_message")) or _text(args.get("message")) or _text(args.get("summary"))
     item_ids = _string_list(args.get("item_ids"))
     preserve_item_ids = _string_list(args.get("preserve_item_ids"))
@@ -776,12 +776,12 @@ def _hospital_bag_cart_update_envelope(
         cart_update["target_budget"] = target_budget
     if budget_met is not None:
         cart_update["budget_met"] = budget_met
-    return {"tool_name": "hospital_bag_cart_update", "status": "cart_updated", "summary": message, "cart_update": cart_update}
+    return {"tool_name": "hospital_bag_cart_write", "status": "cart_updated", "summary": message, "cart_update": cart_update}
 
 
 def _cart_needs_clarification(message: str) -> dict[str, Any]:
     return {
-        "tool_name": "hospital_bag_cart_update",
+        "tool_name": "hospital_bag_cart_write",
         "status": "needs_clarification",
         "summary": message,
         "cart_update": {"action": "clarify", "message": message},
@@ -790,7 +790,7 @@ def _cart_needs_clarification(message: str) -> dict[str, Any]:
 
 def _cart_unchanged(message: str) -> dict[str, Any]:
     return {
-        "tool_name": "hospital_bag_cart_update",
+        "tool_name": "hospital_bag_cart_write",
         "status": "cart_unchanged",
         "summary": message,
         "cart_update": {"action": "clarify", "message": message},

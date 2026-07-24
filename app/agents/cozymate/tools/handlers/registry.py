@@ -37,12 +37,8 @@ from .plans_diary import (
     PlansCurrentReadToolHandler,
     PlansCalendarReadToolHandler,
     PregnancyDiaryQueryToolHandler,
-    PregnancyDiarySaveToolHandler,
-    PregnancyDiaryDeleteToolHandler,
-    PlanTaskCreateProposeToolHandler,
-    PlanTaskCompleteProposeToolHandler,
-    PlanTaskUpdateProposeToolHandler,
-    PlanTaskDeleteProposeToolHandler,
+    PregnancyDiaryWriteToolHandler,
+    PlanTaskWriteToolHandler,
     PlanDeleteProposeToolHandler,
     MilkReminderProposeToolHandler,
 )
@@ -69,7 +65,13 @@ def build_default_tool_handlers(
     guidance_reference_service = device_guidance_reference_service or DeviceGuidanceReferenceService()
     pump_models_service = PumpModelsReferenceService(object_storage=object_storage)
     handlers: dict[str, ToolHandler] = {
-        "lactation_timeline_manage": LactationTimelineManageToolHandler(
+        "profile_read": MaternalInfantProfileReadToolHandler(
+            service=lactation_context_service
+        ),
+        "profile_write": MaternalInfantProfileUpdateToolHandler(
+            runtime_service=agent_runtime_service
+        ),
+        "lactation_timeline_write": LactationTimelineManageToolHandler(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
         ),
@@ -79,7 +81,7 @@ def build_default_tool_handlers(
                 plans_service=plans_service,
             )
         ),
-        "milk_analysis": MilkAnalysisToolHandler(
+        "milk_analysis_manage": MilkAnalysisToolHandler(
             summary_handler=MilkStatusReadToolHandler(
                 records_service=records_service,
                 profile_service=profile_service,
@@ -95,46 +97,36 @@ def build_default_tool_handlers(
             ),
             evaluate_handler=MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
         ),
-        "maternal_infant_profile_read": MaternalInfantProfileReadToolHandler(
-            service=lactation_context_service
-        ),
-        "maternal_infant_profile_update": MaternalInfantProfileUpdateToolHandler(
-            runtime_service=agent_runtime_service
-        ),
         "plans_current_read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "plans_calendar_read": PlansCalendarReadToolHandler(plans_service=plans_service),
-        "pregnancy_diary_query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
-        "pregnancy_diary_save": PregnancyDiarySaveToolHandler(runtime_service=agent_runtime_service),
-        "pregnancy_diary_delete": PregnancyDiaryDeleteToolHandler(runtime_service=agent_runtime_service),
-        "devices_guidance": DeviceGuidanceToolHandler(
+        "pregnancy_diary_read": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
+        "pregnancy_diary_write": PregnancyDiaryWriteToolHandler(runtime_service=agent_runtime_service),
+        "devices_guidance_manage": DeviceGuidanceToolHandler(
             runtime_service=agent_runtime_service,
             asset_service=asset_service,
             reference_service=guidance_reference_service,
         ),
         "pump_models_read": PumpModelsReadToolHandler(service=pump_models_service),
-        "conversation_history_image_load": ConversationHistoryImageLoadToolHandler(
+        "conversation_history_image_read": ConversationHistoryImageLoadToolHandler(
             asset_service=asset_service,
             object_storage=object_storage,
         ),
-        "plans_milk_plan_propose": MilkPlanProposeToolHandler(
+        "plans_milk_plan_write": MilkPlanProposeToolHandler(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
         ),
-        "pregnancy_plan_workflow": PregnancyPlanWorkflowToolHandler(runtime_service=agent_runtime_service),
-        "plans_task_create_propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans_task_complete_propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans_task_delete_propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans_plan_delete_propose": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "notifications_milk_reminder_propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
-        "hospital_bag_workflow": HospitalBagWorkflowToolHandler(
+        "pregnancy_plan_manage": PregnancyPlanWorkflowToolHandler(runtime_service=agent_runtime_service),
+        "plans_task_write": PlanTaskWriteToolHandler(runtime_service=agent_runtime_service),
+        "plans_plan_write": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
+        "notifications_milk_reminder_write": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
+        "hospital_bag_manage": HospitalBagWorkflowToolHandler(
             runtime_service=agent_runtime_service
         ),
-        "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(
+        "hospital_bag_cart_write": HospitalBagCartUpdateProposeToolHandler(
             runtime_service=agent_runtime_service,
             pump_models_service=pump_models_service,
         ),
-        "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
-        "support_ticket_propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
+        "ibclc_consult_card_write": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
+        "support_ticket_write": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
     return handlers

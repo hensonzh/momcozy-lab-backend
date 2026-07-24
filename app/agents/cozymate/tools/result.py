@@ -7,7 +7,7 @@ from app.agent_runtime.tools.result import ToolResult
 
 
 _PREGNANCY_DIARY_TOOLS = frozenset(
-    {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}
+    {"pregnancy_diary_read", "pregnancy_diary_write"}
 )
 
 
@@ -17,7 +17,7 @@ def cozymate_tool_result_from_payload(*, tool_name: str, output: dict[str, Any])
     model_payload.pop(DEFERRED_AGENT_EVENTS_KEY, None)
     if tool_name in _PREGNANCY_DIARY_TOOLS:
         model_payload = _diary_model_output(model_payload)
-    elif tool_name == "hospital_bag_workflow":
+    elif tool_name == "hospital_bag_manage":
         model_payload = _hospital_bag_workflow_model_output(model_payload)
     return ToolResult(output=ToolResult.json(model_payload).output, audit_output=audit_output)
 

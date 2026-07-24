@@ -31,7 +31,7 @@ from app.modules.auth import CurrentUser
 
 
 def test_lactation_timeline_manage_contract_is_one_described_write_entry() -> None:
-    contract = default_tool_registry().get("lactation_timeline_manage")
+    contract = default_tool_registry().get("lactation_timeline_write")
 
     assert contract.domain == "lactation_timeline"
     assert contract.effect_scope == "user_resource"
@@ -101,7 +101,7 @@ def test_lactation_timeline_manage_creates_linked_feeding_record() -> None:
     assert result["status"] == "timeline_change_applied"
     assert result["write_succeeded"] is True
     validate_tool_output(
-        schema=default_tool_registry().get("lactation_timeline_manage").output_schema,
+        schema=default_tool_registry().get("lactation_timeline_write").output_schema,
         value=result,
     )
 
@@ -380,7 +380,7 @@ def _context(*, actor=None, args=None) -> ToolHandlerContext:
     return ToolHandlerContext(
         actor=actor or _user(),
         run_id=uuid4(),
-        tool_name="lactation_timeline_manage",
+        tool_name="lactation_timeline_write",
         call_id="timeline-manage-call",
         args=args or {},
         thread_id=uuid4(),

@@ -8,7 +8,7 @@ from ..event_semantics import with_tool_event_semantic
 
 
 _PREGNANCY_DIARY_TOOLS = frozenset(
-    {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}
+    {"pregnancy_diary_read", "pregnancy_diary_write"}
 )
 _PREGNANCY_DIARY_PRIVATE_FIELDS = frozenset(
     {
@@ -30,9 +30,9 @@ _PREGNANCY_DIARY_PRIVATE_FIELDS = frozenset(
 
 class CozymateToolExecutionPolicy(ToolExecutionPolicy):
     def effective_effect_scope(self, *, tool_name: str, args: dict[str, Any], default: str) -> str:
-        if tool_name == "pregnancy_plan_workflow" and args.get("command") != "generate_plan":
+        if tool_name == "pregnancy_plan_manage" and args.get("command") != "generate_plan":
             return "agent_internal"
-        if tool_name == "milk_analysis" and args.get("operation") == "review":
+        if tool_name == "milk_analysis_manage" and args.get("operation") == "review":
             return "none"
         return super().effective_effect_scope(tool_name=tool_name, args=args, default=default)
 
@@ -40,7 +40,7 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
         safe = super().safe_args(tool_name=tool_name, args=args)
         if tool_name not in _PREGNANCY_DIARY_TOOLS:
             return safe
-        if tool_name == "pregnancy_diary_query":
+        if tool_name == "pregnancy_diary_read":
             return _without_private_diary_fields(safe)
         selected = {key: safe[key] for key in ("operation", "entry_date") if key in safe}
         selected["provided_field_count"] = sum(1 for key in args if key in _PREGNANCY_DIARY_PRIVATE_FIELDS)
@@ -52,29 +52,28 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
 
     def event_label(self, *, tool_name: str, payload: dict[str, Any] | None = None) -> str:
         if tool_name in _PREGNANCY_DIARY_TOOLS:
-            return {
-                "pregnancy_diary_query": "孕期日记",
-                "pregnancy_diary_save": "保存孕期日记",
-                "pregnancy_diary_delete": "删除孕期日记",
-            }[tool_name]
+            if tool_name == "pregnancy_diary_read":
+                return "孕期日记"
+            return "删除孕期日记" if (payload or {}).get("operation") == "delete" else "保存孕期日记"
         return {
-            "maternal_infant_profile_read": "妈妈和宝宝基础信息",
-            "maternal_infant_profile_update": "更新妈妈和宝宝基础信息",
-            "lactation_timeline_manage": "管理奶量日程和记录",
+            "profile_read": "妈妈和宝宝基础信息",
+            "profile_write": "更新妈妈和宝宝基础信息",
+            "lactation_timeline_write": "管理奶量日程和记录",
             "lactation_timeline_read": "奶量日程和记录",
-            "milk_analysis": "奶量分析",
+            "milk_analysis_manage": "奶量分析",
             "plans_current_read": "计划信息",
-            "plans_milk_plan_propose": "泌乳计划草稿",
-            "plans_task_create_propose": "任务草稿",
-            "plans_task_complete_propose": "任务状态",
-            "pregnancy_plan_workflow": "孕期计划流程",
-            "devices_guidance": "设备指导",
-            "conversation_history_image_load": "历史图片",
-            "hospital_bag_workflow": "待产包流程",
-            "hospital_bag_cart_update": "我先帮你调整待产包购物车～",
+            "plans_milk_plan_write": "泌乳计划草稿",
+            "plans_task_write": "计划任务",
+            "plans_plan_write": "计划",
+            "pregnancy_plan_manage": "孕期计划流程",
+            "devices_guidance_manage": "设备指导",
+            "conversation_history_image_read": "历史图片",
+            "hospital_bag_manage": "待产包流程",
+            "hospital_bag_cart_write": "我先帮你调整待产包购物车～",
             "pump_models_read": "吸奶器型号信息",
-            "notifications_milk_reminder_propose": "奶量提醒草稿",
-            "support_ticket_propose": "售后工单草稿",
+            "notifications_milk_reminder_write": "奶量提醒草稿",
+            "ibclc_consult_card_write": "IBCLC 咨询卡",
+            "support_ticket_write": "售后工单草稿",
         }.get(tool_name, "相关信息")
 
     def enrich_event(

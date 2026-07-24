@@ -15,7 +15,7 @@ from app.modules.records.lactation_timeline_schema import (
 def test_lactation_timeline_read_contract_is_described_and_read_only() -> None:
     contract = default_tool_registry().get("lactation_timeline_read")
 
-    assert contract.domain == "records"
+    assert contract.domain == "lactation_timeline"
     assert contract.effect_scope == "none"
     assert "action_type" not in type(contract).model_fields
     assert "计划日程" in contract.description

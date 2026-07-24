@@ -23,8 +23,8 @@ def test_business_facts_projector_projects_maternal_infant_profile_source() -> N
     facts = asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "maternal_infant_profile_read": lactation_context_handler,
-                "milk_analysis": milk_status_handler,
+                "profile_read": lactation_context_handler,
+                "milk_analysis_manage": milk_status_handler,
             },
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
         ).project(
@@ -36,11 +36,11 @@ def test_business_facts_projector_projects_maternal_infant_profile_source() -> N
 
     assert calls == [
         {
-            "tool_name": "maternal_infant_profile_read",
+            "tool_name": "profile_read",
             "args": {"runtime_local_date": "2026-07-08"},
         },
         {
-            "tool_name": "milk_analysis",
+            "tool_name": "milk_analysis_manage",
             "args": {
                 "operation": "review",
                 "detail_level": "summary",
@@ -54,8 +54,8 @@ def test_business_facts_projector_projects_maternal_infant_profile_source() -> N
         "loaded_at": "2026-07-08T08:00:00+00:00",
         "service_skill_id": "milk-management",
         "sources": [
-            {"key": "lactation_context", "tool_name": "maternal_infant_profile_read"},
-            {"key": "milk_status", "tool_name": "milk_analysis"},
+            {"key": "lactation_context", "tool_name": "profile_read"},
+            {"key": "milk_status", "tool_name": "milk_analysis_manage"},
         ],
         "lactation_context": {"mother": {"age": 31}},
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
@@ -67,24 +67,24 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
     session_guard = FakeSharedSessionGuard()
 
     async def lactation_context_handler(context):
-        await session_guard.enter("maternal_infant_profile_read")
+        await session_guard.enter("profile_read")
         try:
             return ToolResult.json({"mother": {"age": 31}})
         finally:
-            session_guard.exit("maternal_infant_profile_read")
+            session_guard.exit("profile_read")
 
     async def milk_status_handler(context):
-        await session_guard.enter("milk_analysis")
+        await session_guard.enter("milk_analysis_manage")
         try:
             return ToolResult.json({"totals": {"trend_pumped_volume_ml": 420}})
         finally:
-            session_guard.exit("milk_analysis")
+            session_guard.exit("milk_analysis_manage")
 
     facts = asyncio.run(
         BusinessFactsProjector(
             handlers={
-                "maternal_infant_profile_read": lactation_context_handler,
-                "milk_analysis": milk_status_handler,
+                "profile_read": lactation_context_handler,
+                "milk_analysis_manage": milk_status_handler,
             },
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
         ).project(
@@ -94,10 +94,10 @@ def test_business_facts_projector_reads_sources_without_parallel_shared_session_
         )
     )
 
-    assert session_guard.calls == ["maternal_infant_profile_read", "milk_analysis"]
+    assert session_guard.calls == ["profile_read", "milk_analysis_manage"]
     assert facts["sources"] == [
-        {"key": "lactation_context", "tool_name": "maternal_infant_profile_read"},
-        {"key": "milk_status", "tool_name": "milk_analysis"},
+        {"key": "lactation_context", "tool_name": "profile_read"},
+        {"key": "milk_status", "tool_name": "milk_analysis_manage"},
     ]
     assert facts["lactation_context"] == {"mother": {"age": 31}}
     assert facts["milk_status"] == {"totals": {"trend_pumped_volume_ml": 420}}
@@ -112,7 +112,7 @@ def test_device_guidance_uses_unified_profile_read_with_all_babies_scope() -> No
 
     facts = asyncio.run(
         BusinessFactsProjector(
-            handlers={"maternal_infant_profile_read": profile_handler},
+            handlers={"profile_read": profile_handler},
             clock=lambda: datetime(2026, 7, 8, 8, 0, tzinfo=timezone.utc),
         ).project(
             actor=_actor(),
@@ -123,7 +123,7 @@ def test_device_guidance_uses_unified_profile_read_with_all_babies_scope() -> No
 
     assert calls == [
         {
-            "tool_name": "maternal_infant_profile_read",
+            "tool_name": "profile_read",
             "args": {
                 "infant_scope": "all",
                 "runtime_local_date": "2026-07-08",

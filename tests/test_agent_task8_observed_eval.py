@@ -25,7 +25,7 @@ from app.agents.cozymate.tools import (
     MilkAnalysisIntakeToolHandler,
     MilkStatusReadToolHandler,
     MilkPlanProposeToolHandler,
-    PregnancyDiarySaveToolHandler,
+    PregnancyDiaryWriteToolHandler,
     PregnancyPlanWorkflowToolHandler,
     SupportTicketProposeToolHandler,
     CozymateToolExecutor,
@@ -97,12 +97,12 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         text="我现在32周，想制定孕期计划。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("pregnancy_plan_workflow", {"command": "start_or_resume"}),
+            scripted_tool_invocation("pregnancy_plan_manage", {"command": "start_or_resume"}),
         ),
         final_text="请先填写孕期基本信息表。",
     )
 
-    _assert_tools(started.trace, "pregnancy_plan_workflow")
+    _assert_tools(started.trace, "pregnancy_plan_manage")
     _assert_artifact_events(started.trace, "form")
     workflow = scenario.workflow("pregnancy_plan")
     assert workflow.status == "collecting"
@@ -132,7 +132,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         ],
         client_context=scenario.pregnancy_command_context(command="submit_form"),
     )
-    _assert_tools(analyzed.trace, "pregnancy_plan_workflow")
+    _assert_tools(analyzed.trace, "pregnancy_plan_manage")
     assert scenario.workflow("pregnancy_plan").state["source_form_submission_id"] == "pregnancy-submission-1"
 
     skipped = scenario.run_turn(
@@ -143,7 +143,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
             choice_id="skip_checkup_records",
         ),
     )
-    _assert_tools(skipped.trace, "pregnancy_plan_workflow")
+    _assert_tools(skipped.trace, "pregnancy_plan_manage")
     assert scenario.workflow("pregnancy_plan").state["phase"] == "final_plan_confirmation"
 
     created = scenario.run_turn(
@@ -155,7 +155,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         ),
     )
 
-    _assert_tools(created.trace, "pregnancy_plan_workflow", "pregnancy_plan_workflow")
+    _assert_tools(created.trace, "pregnancy_plan_manage", "pregnancy_plan_manage")
     _assert_actions(created.trace, ("pregnancy.plan.create", "applied", "plan"))
     _assert_event_types(created.trace, required={"action.applied", "pregnancy_plan.changed", "artifact.created"})
     _assert_event_types(created.trace, forbidden={"action.confirmation_required"})
@@ -177,7 +177,7 @@ def test_observed_pregnancy_plan_urgent_turn_enters_model_before_tool_safety_res
         handlers=scenario.pregnancy_handlers(),
         tool_invocations=(
             scripted_tool_invocation(
-                "pregnancy_plan_workflow",
+                "pregnancy_plan_manage",
                 {"command": "generate_plan"},
             ),
         ),
@@ -185,7 +185,7 @@ def test_observed_pregnancy_plan_urgent_turn_enters_model_before_tool_safety_res
     )
 
     assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
-    _assert_tools(result.trace, "pregnancy_plan_workflow")
+    _assert_tools(result.trace, "pregnancy_plan_manage")
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
     assert scenario.workflow("pregnancy_plan").status == "paused"
@@ -216,7 +216,7 @@ def test_observed_pregnancy_plan_urgent_historical_edit_interrupts_before_revisi
     )
 
     assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
-    _assert_tools(result.trace, "pregnancy_plan_workflow")
+    _assert_tools(result.trace, "pregnancy_plan_manage")
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
     workflow = scenario.workflow("pregnancy_plan")
@@ -233,11 +233,11 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
         text="帮我准备待产包。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("hospital_bag_workflow", {}),
+            scripted_tool_invocation("hospital_bag_manage", {}),
         ),
         final_text="请填写待产包信息。",
     )
-    _assert_tools(form.trace, "hospital_bag_workflow")
+    _assert_tools(form.trace, "hospital_bag_manage")
     _assert_artifact_events(form.trace, "form")
     workflow = scenario.workflow("hospital_bag")
     form_artifact_id = workflow.state["source_form_artifact_id"]
@@ -267,7 +267,7 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
         ],
         final_text="待产包清单已生成。",
     )
-    _assert_tools(card.trace, "hospital_bag_workflow")
+    _assert_tools(card.trace, "hospital_bag_manage")
     _assert_artifact_events(card.trace, "hospital_bag_card")
     assert scenario.workflow("hospital_bag").status == "completed"
     assert card.trace.actions == []
@@ -277,13 +277,13 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "hospital_bag_cart_update",
-                {"action": "reset_cart"},
+                "hospital_bag_cart_write",
+                {"operation": "reset_cart"},
             ),
         ),
         final_text="已更新待产包。",
     )
-    _assert_tools(cart.trace, "hospital_bag_cart_update")
+    _assert_tools(cart.trace, "hospital_bag_cart_write")
     _assert_actions(cart.trace, ("hospital_bag.cart.update", "applied", "hospital_bag_cart"))
     _assert_event_types(cart.trace, required={"action.applied", "hospital_bag.cart.changed"})
     _assert_event_types(cart.trace, forbidden={"action.confirmation_required"})
@@ -296,7 +296,7 @@ def test_observed_hospital_bag_verified_submission_stops_for_urgent_signal() -> 
         text="帮我准备待产包。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("hospital_bag_workflow", {}),
+            scripted_tool_invocation("hospital_bag_manage", {}),
         ),
         final_text="请填写待产包信息。",
     )
@@ -329,7 +329,7 @@ def test_observed_hospital_bag_verified_submission_stops_for_urgent_signal() -> 
     )
 
     assert result.execution_result.final_text == HOSPITAL_BAG_URGENT_RESPONSE
-    _assert_tools(result.trace, "hospital_bag_workflow")
+    _assert_tools(result.trace, "hospital_bag_manage")
     _assert_event_types(result.trace, forbidden={"artifact.created"})
     assert not [
         artifact
@@ -346,7 +346,7 @@ def test_observed_hospital_bag_worry_and_history_do_not_trigger_current_emergenc
         text="帮我准备待产包。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("hospital_bag_workflow", {}),
+            scripted_tool_invocation("hospital_bag_manage", {}),
         ),
         final_text="请填写待产包信息。",
     )
@@ -381,7 +381,7 @@ def test_observed_hospital_bag_worry_and_history_do_not_trigger_current_emergenc
     )
 
     assert result.execution_result.final_text != HOSPITAL_BAG_URGENT_RESPONSE
-    _assert_tools(result.trace, "hospital_bag_workflow")
+    _assert_tools(result.trace, "hospital_bag_manage")
     _assert_artifact_events(result.trace, "hospital_bag_card")
     assert scenario.workflow("hospital_bag").status == "completed"
 
@@ -393,11 +393,11 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         text="帮我完整分析奶量。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("milk_analysis", {"operation": "start_or_resume"}),
+            scripted_tool_invocation("milk_analysis_manage", {"operation": "start_or_resume"}),
         ),
         final_text="先确认宝宝近 24 小时的湿尿布。",
     )
-    _assert_tools(started.trace, "milk_analysis")
+    _assert_tools(started.trace, "milk_analysis_manage")
     assert scenario.workflow("milk_analysis").active_step == "infant_wet_diapers"
 
     answers = (
@@ -411,20 +411,20 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         turn = scenario.run_turn(
             text=answer,
             handlers=handlers,
-            tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "answer"}),),
+            tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "answer"}),),
             final_text="继续下一项。",
         )
-        _assert_tools(turn.trace, "milk_analysis")
+        _assert_tools(turn.trace, "milk_analysis_manage")
         assert turn.trace.tool_calls[0]["safe_args"] == {"operation": "answer"}
 
     assert scenario.workflow("milk_analysis").active_step == "ready_to_evaluate"
     evaluated = scenario.run_turn(
         text="请给我分析结果。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "evaluate"}),),
+        tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "evaluate"}),),
         final_text="分析完成，可以制定温和的稳奶计划。",
     )
-    _assert_tools(evaluated.trace, "milk_analysis")
+    _assert_tools(evaluated.trace, "milk_analysis_manage")
     _assert_artifact_events(evaluated.trace, "milk_analysis_card")
     milk_workflow = scenario.workflow("milk_analysis")
     assert milk_workflow.state["phase"] == "assessment_complete"
@@ -436,8 +436,9 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "plans_milk_plan_propose",
+                "plans_milk_plan_write",
                 {
+                    "operation": "create",
                     "direction": "maintain",
                     "days": 1,
                     "preferred_pumping_times": ["08:00", "11:00", "14:00"],
@@ -446,7 +447,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         ),
         final_text="请确认后创建计划。",
     )
-    _assert_tools(plan_turn.trace, "plans_milk_plan_propose")
+    _assert_tools(plan_turn.trace, "plans_milk_plan_write")
     _assert_actions(plan_turn.trace, ("plans.milk_plan.create", "confirmation_required", "plan"))
     _assert_event_types(
         plan_turn.trace,
@@ -471,7 +472,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "lactation_timeline_manage",
+                "lactation_timeline_write",
                 {
                     "operation": "reschedule",
                     "item_type": "schedule",
@@ -489,7 +490,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         ),
         final_text="请确认日程调整。",
     )
-    _assert_tools(schedule_turn.trace, "lactation_timeline_manage")
+    _assert_tools(schedule_turn.trace, "lactation_timeline_write")
     _assert_actions(schedule_turn.trace, ("plans.milk_schedule.reschedule", "confirmation_required", "plan"))
     _assert_artifact_events(schedule_turn.trace, "milk_schedule_reschedule_preview")
     _assert_event_types(schedule_turn.trace, required={"action.confirmation_required"})
@@ -510,7 +511,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
     scenario.run_turn(
         text="分析奶量。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "start_or_resume"}),),
+        tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "start_or_resume"}),),
         final_text="开始分析。",
     )
     for answer in (
@@ -523,13 +524,13 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
         scenario.run_turn(
             text=answer,
             handlers=handlers,
-            tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "answer"}),),
+            tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "answer"}),),
             final_text="继续。",
         )
     scenario.run_turn(
         text="给我结论。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "evaluate"}),),
+        tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "evaluate"}),),
         final_text="请先联系专业人员。",
     )
     assert scenario.workflow("milk_analysis").state["assessment"]["plan_decision"] == {
@@ -545,8 +546,8 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
             handlers=handlers,
             tool_invocations=(
                 scripted_tool_invocation(
-                    "plans_milk_plan_propose",
-                    {"direction": "increase"},
+                    "plans_milk_plan_write",
+                    {"operation": "create", "direction": "increase"},
                 ),
             ),
             final_text="不应成功。",
@@ -554,7 +555,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
 
     failed_run = scenario.repository.runs[-1]
     assert [(call.tool_name, call.status) for call in scenario.repository.tool_calls_for(failed_run.id)] == [
-        ("plans_milk_plan_propose", "failed")
+        ("plans_milk_plan_write", "failed")
     ]
     assert scenario.repository.actions_for(failed_run.id) == []
     assert len(scenario.repository.artifacts) == artifact_count
@@ -569,13 +570,13 @@ def test_observed_device_unboxing_complete_current_advances_exactly_one_persiste
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "devices_guidance",
+                "devices_guidance_manage",
                 {"model": "Air1", "operation": "start_or_resume"},
             ),
         ),
         final_text="请完成当前主步骤的全部部件核对。",
     )
-    _assert_tools(started.trace, "devices_guidance")
+    _assert_tools(started.trace, "devices_guidance_manage")
     assert scenario.workflow("device_unboxing").active_step == "guide.parts"
 
     advanced = scenario.run_turn(
@@ -583,13 +584,13 @@ def test_observed_device_unboxing_complete_current_advances_exactly_one_persiste
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "devices_guidance",
+                "devices_guidance_manage",
                 {"model": "Air1", "operation": "complete_current"},
             ),
         ),
         final_text="下一步熟悉主机按键。",
     )
-    _assert_tools(advanced.trace, "devices_guidance")
+    _assert_tools(advanced.trace, "devices_guidance_manage")
     assert advanced.trace.tool_calls[0]["safe_args"] == {
         "model": "Air1",
         "operation": "complete_current",
@@ -605,14 +606,14 @@ def test_observed_known_device_guidance_reads_official_manual_without_write() ->
         handlers=scenario.device_handlers(),
         tool_invocations=(
             scripted_tool_invocation(
-                "devices_guidance",
+                "devices_guidance_manage",
                 {"model": "Air1", "operation": "read", "topic": "bluetooth"},
             ),
         ),
         final_text="请先让主机进入蓝牙配对模式。",
     )
 
-    _assert_tools(result.trace, "devices_guidance")
+    _assert_tools(result.trace, "devices_guidance_manage")
     assert result.trace.actions == []
     assert result.trace.final_text
 
@@ -625,8 +626,9 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "support_ticket_propose",
+                "support_ticket_write",
                 {
+                    "operation": "create",
                     "issue_type": "missing_parts",
                     "issue_summary": "Air1 开箱后缺少配件",
                     "product_model": "Air1",
@@ -638,7 +640,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         final_text="这件事确实很影响使用体验，我可以帮你创建一个售后工单。需要我现在帮你创建吗？",
     )
 
-    _assert_tools(offered.trace, "support_ticket_propose")
+    _assert_tools(offered.trace, "support_ticket_write")
     _assert_event_types(offered.trace, forbidden={"artifact.created", "action.confirmation_required"})
     assert scenario.repository.artifacts == []
 
@@ -647,8 +649,9 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "support_ticket_propose",
+                "support_ticket_write",
                 {
+                    "operation": "create",
                     "issue_type": "missing_parts",
                     "issue_summary": "Air1 开箱后缺少配件",
                     "product_model": "Air1",
@@ -660,7 +663,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         final_text="我已经把售后信息整理好了，你可以检查并提交。",
     )
 
-    _assert_tools(confirmed.trace, "support_ticket_propose")
+    _assert_tools(confirmed.trace, "support_ticket_write")
     _assert_artifact_events(confirmed.trace, "support_ticket_draft")
     assert confirmed.trace.actions == []
     assert scenario.repository.artifacts[-1].payload["submit_label"] == "确认并提交"
@@ -673,7 +676,7 @@ def test_observed_health_response_can_write_user_facts_then_continue_replying() 
         handlers=scenario.diary_handlers(),
         tool_invocations=(
             scripted_tool_invocation(
-                "pregnancy_diary_save",
+                "pregnancy_diary_write",
                 {
                     "operation": "create",
                     "content": "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。",
@@ -683,7 +686,7 @@ def test_observed_health_response_can_write_user_facts_then_continue_replying() 
         final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
     )
 
-    _assert_tools(result.trace, "pregnancy_diary_save")
+    _assert_tools(result.trace, "pregnancy_diary_write")
     _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
     assert result.trace.final_text.startswith("我已经记下来了")
     assert scenario.diary.entries[0].content == (
@@ -776,10 +779,12 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     blocked = scenario.run_turn(
         text="IBCLC 是什么？",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),),
+        tool_invocations=(
+            scripted_tool_invocation("ibclc_consult_card_write", {"operation": "create", "reason": "衔乳疼痛"}),
+        ),
         final_text="IBCLC 是国际认证哺乳顾问。",
     )
-    _assert_tools(blocked.trace, "ibclc_consult_card_create")
+    _assert_tools(blocked.trace, "ibclc_consult_card_write")
     assert blocked.trace.actions == []
     assert scenario.repository.artifacts == []
     _assert_event_types(blocked.trace, forbidden={"artifact.created", "action.confirmation_required"})
@@ -792,10 +797,12 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     negated_offer = scenario.run_turn(
         text="好的",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),),
+        tool_invocations=(
+            scripted_tool_invocation("ibclc_consult_card_write", {"operation": "create", "reason": "衔乳疼痛"}),
+        ),
         final_text="当前不创建咨询入口。",
     )
-    _assert_tools(negated_offer.trace, "ibclc_consult_card_create")
+    _assert_tools(negated_offer.trace, "ibclc_consult_card_write")
     assert scenario.repository.artifacts == []
     _assert_event_types(negated_offer.trace, forbidden={"artifact.created", "action.confirmation_required"})
 
@@ -804,16 +811,21 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "ibclc_consult_card_create",
-                {"reason": "衔乳疼痛", "feeding_context": "左侧喂奶后疼", "urgency": "soon"},
+                "ibclc_consult_card_write",
+                {
+                    "operation": "create",
+                    "reason": "衔乳疼痛",
+                    "feeding_context": "左侧喂奶后疼",
+                    "urgency": "soon",
+                },
             ),
         ),
         final_text="咨询入口已准备好。",
     )
-    _assert_tools(opened.trace, "ibclc_consult_card_create")
+    _assert_tools(opened.trace, "ibclc_consult_card_write")
     _assert_artifact_events(opened.trace, "ibclc_consult_card")
     assert opened.trace.actions == []
-    assert all(call["tool_name"] != "support_ticket_propose" for call in opened.trace.tool_calls)
+    assert all(call["tool_name"] != "support_ticket_write" for call in opened.trace.tool_calls)
     _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
 
 
@@ -831,14 +843,14 @@ def test_observed_ibclc_canonical_offer_opens_on_first_short_confirmation() -> N
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "ibclc_consult_card_create",
-                {"reason": "衔乳疼痛", "feeding_context": "宝宝吸不住"},
+                "ibclc_consult_card_write",
+                {"operation": "create", "reason": "衔乳疼痛", "feeding_context": "宝宝吸不住"},
             ),
         ),
         final_text="IBCLC 咨询入口已经准备好。",
     )
 
-    _assert_tools(opened.trace, "ibclc_consult_card_create")
+    _assert_tools(opened.trace, "ibclc_consult_card_write")
     _assert_artifact_events(opened.trace, "ibclc_consult_card")
     assert opened.trace.actions == []
     _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
@@ -981,37 +993,37 @@ class ObservedScenario:
 
     def pregnancy_handlers(self) -> dict[str, Any]:
         return {
-            "pregnancy_plan_workflow": PregnancyPlanWorkflowToolHandler(runtime_service=self.runtime_service),
+            "pregnancy_plan_manage": PregnancyPlanWorkflowToolHandler(runtime_service=self.runtime_service),
         }
 
     def hospital_bag_handlers(self) -> dict[str, Any]:
         return {
-            "hospital_bag_workflow": HospitalBagWorkflowToolHandler(
+            "hospital_bag_manage": HospitalBagWorkflowToolHandler(
                 runtime_service=self.runtime_service
             ),
-            "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(runtime_service=self.runtime_service),
+            "hospital_bag_cart_write": HospitalBagCartUpdateProposeToolHandler(runtime_service=self.runtime_service),
         }
 
     def device_handlers(self) -> dict[str, Any]:
         return {
-            "devices_guidance": DeviceGuidanceToolHandler(
+            "devices_guidance_manage": DeviceGuidanceToolHandler(
                 runtime_service=self.runtime_service,
                 asset_service=self.assets,
             ),
         }
 
     def ibclc_handlers(self) -> dict[str, Any]:
-        return {"ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
+        return {"ibclc_consult_card_write": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
 
     def support_handlers(self) -> dict[str, Any]:
-        return {"support_ticket_propose": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
+        return {"support_ticket_write": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
 
     def diary_handlers(self) -> dict[str, Any]:
-        return {"pregnancy_diary_save": PregnancyDiarySaveToolHandler(runtime_service=self.runtime_service)}
+        return {"pregnancy_diary_write": PregnancyDiaryWriteToolHandler(runtime_service=self.runtime_service)}
 
     def milk_handlers(self) -> dict[str, Any]:
         return {
-            "milk_analysis": MilkAnalysisToolHandler(
+            "milk_analysis_manage": MilkAnalysisToolHandler(
                 summary_handler=MilkStatusReadToolHandler(
                     records_service=self.records,
                     profile_service=self.profiles,
@@ -1027,11 +1039,11 @@ class ObservedScenario:
                 ),
                 evaluate_handler=MilkAnalysisEvaluateToolHandler(runtime_service=self.runtime_service),
             ),
-            "plans_milk_plan_propose": MilkPlanProposeToolHandler(
+            "plans_milk_plan_write": MilkPlanProposeToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),
-            "lactation_timeline_manage": LactationTimelineManageToolHandler(
+            "lactation_timeline_write": LactationTimelineManageToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),

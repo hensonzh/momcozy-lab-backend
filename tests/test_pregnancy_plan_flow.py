@@ -159,7 +159,7 @@ def test_revising_a_historical_followup_keeps_unaffected_answers_and_invalidates
     }
 
 
-def test_pregnancy_plan_workflow_asks_zero_followups_when_the_form_has_no_material_gap() -> None:
+def test_pregnancy_plan_manage_asks_zero_followups_when_the_form_has_no_material_gap() -> None:
     workflow = initialize_pregnancy_plan_workflow(
         {
             "current_week": "20周",
@@ -182,7 +182,7 @@ def test_pregnancy_plan_workflow_asks_zero_followups_when_the_form_has_no_materi
     assert workflow["visible_question"] == PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION
 
 
-def test_pregnancy_plan_workflow_asks_at_most_three_non_repeating_risk_followups() -> None:
+def test_pregnancy_plan_manage_asks_at_most_three_non_repeating_risk_followups() -> None:
     workflow = initialize_pregnancy_plan_workflow(
         {
             "current_week": "20周",
@@ -282,7 +282,7 @@ def test_pregnancy_plan_followups_keep_one_material_point_in_plain_language(
     assert followup["question"].count("？") == 1
 
 
-def test_pregnancy_plan_workflow_early_stage_asks_checkup_done_then_upload_or_skip() -> None:
+def test_pregnancy_plan_manage_early_stage_asks_checkup_done_then_upload_or_skip() -> None:
     workflow = initialize_pregnancy_plan_workflow(
         {
             "current_week": "8周",
@@ -310,7 +310,7 @@ def test_pregnancy_plan_workflow_early_stage_asks_checkup_done_then_upload_or_sk
     assert skipped["visible_question"] == PREGNANCY_PLAN_FINAL_QUESTION
 
 
-def test_pregnancy_plan_workflow_upload_or_skip_reaches_one_final_confirmation_then_ready() -> None:
+def test_pregnancy_plan_manage_upload_or_skip_reaches_one_final_confirmation_then_ready() -> None:
     workflow = initialize_pregnancy_plan_workflow(
         {
             "current_week": "28周",
@@ -623,7 +623,7 @@ def test_pregnancy_plan_result_keeps_legacy_envelope_and_injected_timestamp() ->
         now=datetime(2026, 7, 12, 8, 30, tzinfo=timezone.utc),
     )
 
-    assert result["tool_name"] == "pregnancy_plan_workflow"
+    assert result["tool_name"] == "pregnancy_plan_manage"
     assert result["status"] == "card_created"
     card_json = result["card"]["card_json"]
     assert card_json["owner"]["due_date_or_week"] == "32周"

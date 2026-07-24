@@ -64,7 +64,6 @@ from .shared import (
     _upsert_pregnancy_plan_workflow,
 )
 
-
 class SupportTicketProposeToolHandler(_StandardToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -130,17 +129,19 @@ class HospitalBagCartUpdateProposeToolHandler(_StandardToolHandler):
         self.pump_models_service = pump_models_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        operation = _text(context.args, "operation")
+        handler_args = dict(context.args)
         artifact_result: dict[str, Any] = {}
-        cart_update = context.args.get("cart_update")
+        cart_update = handler_args.get("cart_update")
         if not isinstance(cart_update, dict) or not cart_update:
-            if not _text(context.args, "action"):
-                raise ApiError(code="validation_failed", message="action is required.", status=422)
+            if not operation:
+                raise ApiError(code="validation_failed", message="operation is required.", status=422)
             pump_products = await _pump_products_for_cart_action(
-                args=context.args,
+                args=handler_args,
                 service=self.pump_models_service,
             )
             artifact_result = hospital_bag_cart_update_result(
-                context.args,
+                handler_args,
                 pump_products=pump_products,
             )
             if _text(artifact_result, "status") not in {"cart_updated"}:
@@ -150,9 +151,9 @@ class HospitalBagCartUpdateProposeToolHandler(_StandardToolHandler):
                 return artifact_result
         apply_payload = _hospital_bag_cart_apply_payload(
             {
-                **context.args,
+                **handler_args,
                 "cart_update": cart_update,
-                "summary": _text(context.args, "summary") or _text(artifact_result, "summary"),
+                "summary": _text(handler_args, "summary") or _text(artifact_result, "summary"),
             }
         )
         cart_update = apply_payload.get("cart_update")
@@ -168,7 +169,7 @@ class HospitalBagCartUpdateProposeToolHandler(_StandardToolHandler):
             "side_effect_level": "low",
             "preview_payload": preview_payload,
             "apply_payload": apply_payload,
-            "idempotency_key": _text(context.args, "idempotency_key")
+            "idempotency_key": _text(handler_args, "idempotency_key")
             or _hospital_bag_cart_idempotency_key(run_id=context.run_id, cart_update=cart_update),
         }
         propose_once = getattr(self.runtime_service, "propose_action_once", None)
@@ -240,7 +241,7 @@ class BirthPreparationArtifactToolHandler(_StandardToolHandler):
                 args=context.args,
                 service=self.pump_models_service,
             )
-            if self.tool_name == "hospital_bag_cart_update"
+            if self.tool_name == "hospital_bag_cart_write"
             else []
         )
         result = create_birth_preparation_artifact_result(
@@ -283,7 +284,7 @@ async def _pump_products_for_cart_action(
 
 
 def _cart_action_requires_pump_models(args: dict[str, Any]) -> bool:
-    action = _text(args, "action")
+    action = _text(args, "operation")
     if action in {"replace_pump_model", "add_pump_model"}:
         return bool(_text(args, "product_sku_id"))
     if action != "restore_items":
@@ -487,7 +488,7 @@ class HospitalBagWorkflowToolHandler(_StandardToolHandler):
 
         if phase == "completed" and not restart:
             return {
-                "tool_name": "hospital_bag_workflow",
+                "tool_name": "hospital_bag_manage",
                 "status": "hospital_bag_card_already_created",
                 "artifact_id": _text(workflow, "result_artifact_id"),
                 "artifact_type": "hospital_bag_card",
@@ -625,7 +626,7 @@ class HospitalBagWorkflowToolHandler(_StandardToolHandler):
             active_step="safety_interruption",
         )
         return {
-            "tool_name": "hospital_bag_workflow",
+            "tool_name": "hospital_bag_manage",
             "status": "urgent_care_required",
             "signal_ids": list(dict.fromkeys(signal_ids)),
             "blocks_hospital_bag_flow": True,
@@ -663,7 +664,7 @@ class HospitalBagWorkflowToolHandler(_StandardToolHandler):
         )
         return {
             **result,
-            "tool_name": "hospital_bag_workflow",
+            "tool_name": "hospital_bag_manage",
             "workflow_context": _hospital_bag_public_workflow_context(
                 phase="collecting_intake",
                 generation_mode=generation_mode,
@@ -688,7 +689,7 @@ class HospitalBagWorkflowToolHandler(_StandardToolHandler):
                     **context.args,
                     "confirmed_form_data": form_data,
                     "generation_mode": generation_mode,
-                    "runtime_result_tool_name": "hospital_bag_workflow",
+                    "runtime_result_tool_name": "hospital_bag_manage",
                     "runtime_verified_fact_generation": verified_fact_generation,
                 },
             )
@@ -891,7 +892,7 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
                 form_artifact is not None
                 and form_artifact.status != "deleted"
                 and form_artifact.artifact_type == "form"
-                and artifact_payload.get("tool_name") == "pregnancy_plan_workflow"
+                and artifact_payload.get("tool_name") == "pregnancy_plan_manage"
                 and isinstance(form, dict)
                 and form.get("id") == PREGNANCY_PLAN_INTAKE_FORM_ID
             ):
@@ -927,7 +928,7 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
             artifact_type="form",
             schema_version="1.0",
             status="created",
-            payload={"tool_name": "pregnancy_plan_workflow", "form": form},
+            payload={"tool_name": "pregnancy_plan_manage", "form": form},
             emit_event=False,
         )
         snapshot: dict[str, Any] = collecting_intake_snapshot(form_artifact_id=str(form_artifact.id))

@@ -179,7 +179,7 @@ def _decision_request(
     model_input = [
         *_historical_tool_result(
             call_id="start-device-unboxing",
-            tool_name="devices_guidance",
+            tool_name="devices_guidance_manage",
             args={"operation": "start_or_resume", "model": "Air1"},
             output={
                 "schema_version": "device-guidance.result.v1",
@@ -198,7 +198,7 @@ def _decision_request(
         {"role": "user", "content": case.user_text},
     ]
     tool_registry = default_tool_registry()
-    tool_contract = tool_registry.get("devices_guidance")
+    tool_contract = tool_registry.get("devices_guidance_manage")
     return SdkNodeRequest(
         run_id=str(run_id),
         thread_id=str(thread_id),

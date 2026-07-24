@@ -11,7 +11,7 @@ from app.agents.cozymate.tools.policy import CozymateToolExecutionPolicy
 from app.modules.auth import CurrentUser
 
 
-PREGNANCY_PLAN_WORKFLOW_TOOL = "pregnancy_plan_workflow"
+PREGNANCY_PLAN_WORKFLOW_TOOL = "pregnancy_plan_manage"
 LEGACY_PREGNANCY_PLAN_TOOLS = {
     "pregnancy_plan_intake_start",
     "pregnancy_plan_intake_analyze",
@@ -30,12 +30,12 @@ def test_pregnancy_plan_uses_one_model_visible_workflow_contract() -> None:
     contract = registry.get(PREGNANCY_PLAN_WORKFLOW_TOOL)
     assert contract.domain == "birth_prep"
     assert contract.effect_scope == "user_resource"
-    assert "action_type" not in type(contract).model_fields
-    assert "blocking_policy" not in type(contract).model_fields
-    assert "result_dependency" not in type(contract).model_fields
+    assert contract.action_types == ("pregnancy.plan.create",)
+    assert contract.blocking_policy == "must_wait"
+    assert contract.result_dependency == "final_response"
 
 
-def test_pregnancy_plan_workflow_contract_exposes_state_machine_commands() -> None:
+def test_pregnancy_plan_manage_contract_exposes_state_machine_commands() -> None:
     schema = default_tool_registry().get(PREGNANCY_PLAN_WORKFLOW_TOOL).input_schema
     command = schema["properties"]["command"]
 
@@ -53,7 +53,7 @@ def test_pregnancy_plan_workflow_contract_exposes_state_machine_commands() -> No
     assert {"choice_id", "answer", "step_id", "restart"} <= set(schema["properties"])
 
 
-def test_pregnancy_plan_workflow_is_the_only_model_visible_intake_contract() -> None:
+def test_pregnancy_plan_manage_is_the_only_model_visible_intake_contract() -> None:
     names = set(default_tool_registry().names_for_sdk())
 
     assert PREGNANCY_PLAN_WORKFLOW_TOOL in names
@@ -61,7 +61,7 @@ def test_pregnancy_plan_workflow_is_the_only_model_visible_intake_contract() -> 
     assert "pregnancy_plan_todo_propose" not in names
 
 
-def test_pregnancy_plan_workflow_effect_is_dynamic_but_action_binding_remains_static() -> None:
+def test_pregnancy_plan_manage_effect_is_dynamic_but_action_binding_remains_static() -> None:
     policy = CozymateToolExecutionPolicy()
 
     for command in {
@@ -102,7 +102,7 @@ def test_pregnancy_plan_workflow_effect_is_dynamic_but_action_binding_remains_st
         ("generate_plan", "generate"),
     ],
 )
-def test_pregnancy_plan_workflow_facade_dispatches_to_internal_operations(
+def test_pregnancy_plan_manage_facade_dispatches_to_internal_operations(
     command: str,
     expected_delegate: str,
 ) -> None:
@@ -135,7 +135,7 @@ def test_pregnancy_plan_workflow_facade_dispatches_to_internal_operations(
         assert delegated_args["action"] == "abandon"
 
 
-def test_pregnancy_plan_workflow_facade_rejects_a_choice_not_valid_for_current_phase() -> None:
+def test_pregnancy_plan_manage_facade_rejects_a_choice_not_valid_for_current_phase() -> None:
     handler = PregnancyPlanWorkflowToolHandler(
         runtime_service=object(),
         start_handler=_SpyDelegate("start", []),
@@ -160,7 +160,7 @@ def test_pregnancy_plan_workflow_facade_rejects_a_choice_not_valid_for_current_p
     assert exc_info.value.code == "invalid_pregnancy_plan_choice"
 
 
-def test_pregnancy_plan_workflow_facade_pauses_and_resumes_without_advancing() -> None:
+def test_pregnancy_plan_manage_facade_pauses_and_resumes_without_advancing() -> None:
     runtime = _WorkflowRuntime()
     handler = PregnancyPlanWorkflowToolHandler(
         runtime_service=runtime,
@@ -190,7 +190,7 @@ def test_pregnancy_plan_workflow_facade_pauses_and_resumes_without_advancing() -
     assert "paused" not in runtime.persisted[-1]
 
 
-def test_pregnancy_plan_workflow_facade_resumes_a_safety_pause_without_restarting() -> None:
+def test_pregnancy_plan_manage_facade_resumes_a_safety_pause_without_restarting() -> None:
     runtime = _WorkflowRuntime()
     start_calls: list[tuple[str, dict]] = []
     handler = PregnancyPlanWorkflowToolHandler(
@@ -228,7 +228,7 @@ def test_pregnancy_plan_workflow_facade_resumes_a_safety_pause_without_restartin
     assert runtime.persisted[-1]["safety_signal_ids"] == ["heavy_bleeding"]
 
 
-def test_pregnancy_plan_workflow_facade_honors_an_explicit_restart() -> None:
+def test_pregnancy_plan_manage_facade_honors_an_explicit_restart() -> None:
     start_calls: list[tuple[str, dict]] = []
     handler = PregnancyPlanWorkflowToolHandler(
         runtime_service=object(),
@@ -257,7 +257,7 @@ def test_pregnancy_plan_workflow_facade_honors_an_explicit_restart() -> None:
     assert start_calls[0][1]["restart"] is True
 
 
-def test_pregnancy_plan_workflow_facade_delegates_collecting_intake_resume_to_form_handler() -> None:
+def test_pregnancy_plan_manage_facade_delegates_collecting_intake_resume_to_form_handler() -> None:
     start_calls: list[tuple[str, dict]] = []
     handler = PregnancyPlanWorkflowToolHandler(
         runtime_service=_WorkflowRuntime(),
@@ -286,7 +286,7 @@ def test_pregnancy_plan_workflow_facade_delegates_collecting_intake_resume_to_fo
     assert start_calls[0][1]["runtime_workflow_context"] == workflow
 
 
-def test_pregnancy_plan_workflow_facade_reopens_the_form_for_basic_info_edit() -> None:
+def test_pregnancy_plan_manage_facade_reopens_the_form_for_basic_info_edit() -> None:
     calls: list[tuple[str, dict]] = []
     handler = PregnancyPlanWorkflowToolHandler(
         runtime_service=object(),
@@ -319,7 +319,7 @@ def test_pregnancy_plan_workflow_facade_reopens_the_form_for_basic_info_edit() -
     assert calls[0][1]["prior_workflow_context"] == prior
 
 
-def test_pregnancy_plan_workflow_facade_interrupts_an_urgent_historical_text_edit() -> None:
+def test_pregnancy_plan_manage_facade_interrupts_an_urgent_historical_text_edit() -> None:
     runtime = _WorkflowRuntime()
     handler = PregnancyPlanWorkflowToolHandler(
         runtime_service=runtime,

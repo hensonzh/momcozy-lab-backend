@@ -29,6 +29,7 @@ from app.agents.cozymate.tools.pregnancy_plan_flow import (
 
 
 from .base import (
+    _OperationDispatchToolHandler,
     _StandardToolHandler,
     _ToolOperationOutput,
 )
@@ -251,6 +252,23 @@ class PregnancyDiaryDeleteToolHandler(_StandardToolHandler):
         return output
 
 
+class PregnancyDiaryWriteToolHandler(_OperationDispatchToolHandler):
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        save_handler = PregnancyDiarySaveToolHandler(runtime_service=runtime_service)
+        super().__init__(
+            operations={
+                "create": save_handler,
+                "update": save_handler,
+                "delete": PregnancyDiaryDeleteToolHandler(runtime_service=runtime_service),
+            }
+        )
+
+    async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
+        if _text(context.args, "operation") == "delete" and not _text(context.args, "entry_date"):
+            raise ApiError(code="validation_failed", message="entry_date is required for delete.", status=422)
+        return await super().execute(context)
+
+
 class PregnancyPlanProposeToolHandler(_StandardToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
@@ -448,6 +466,36 @@ class PlanTaskDeleteProposeToolHandler(_StandardToolHandler):
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-delete",
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PlanTaskWriteToolHandler(_StandardToolHandler):
+    _FIELD_UPDATES = frozenset({"plan_id", "task_date", "task_time", "title", "description", "payload"})
+
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.create_handler = PlanTaskCreateProposeToolHandler(runtime_service=runtime_service)
+        self.complete_handler = PlanTaskCompleteProposeToolHandler(runtime_service=runtime_service)
+        self.update_handler = PlanTaskUpdateProposeToolHandler(runtime_service=runtime_service)
+        self.delete_handler = PlanTaskDeleteProposeToolHandler(runtime_service=runtime_service)
+
+    async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
+        operation = _text(context.args, "operation")
+        if operation == "create":
+            return await self.create_handler.execute(context)
+        if operation == "delete":
+            return await self.delete_handler.execute(context)
+        if operation != "update":
+            raise ApiError(code="unsupported_operation", message="Plan task operation is not supported.", status=422)
+
+        changes_completion = "completed" in context.args
+        changes_fields = any(field in context.args for field in self._FIELD_UPDATES)
+        if changes_completion and changes_fields:
+            raise ApiError(
+                code="validation_failed",
+                message="Task completion and task field updates must be submitted separately.",
+                status=422,
+            )
+        handler = self.complete_handler if changes_completion else self.update_handler
+        return await handler.execute(context)
 
 
 class PlanDeleteProposeToolHandler(_StandardToolHandler):

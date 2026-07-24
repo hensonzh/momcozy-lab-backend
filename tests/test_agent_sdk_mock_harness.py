@@ -75,8 +75,8 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         [
             scripted_sdk_response(
                 final_text="I found the entry.",
-                tool_invocations=(scripted_tool_invocation("pregnancy_diary_query", {}),),
-                expected_available_tools=("pregnancy_diary_query",),
+                tool_invocations=(scripted_tool_invocation("pregnancy_diary_read", {}),),
+                expected_available_tools=("pregnancy_diary_read",),
             )
         ]
     )
@@ -86,10 +86,10 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "read my diary"}],
-        tool_names=("pregnancy_diary_query",),
+        tool_names=("pregnancy_diary_read",),
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_diary_query",
+                contract_name="pregnancy_diary_read",
                 description="Read diary.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,

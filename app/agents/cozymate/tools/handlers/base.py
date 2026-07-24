@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, Mapping
 
+from app.core.errors import ApiError
 from app.agent_runtime.tools.result import ToolResult
 from app.agent_runtime.tools.executor import ToolHandlerContext
 
@@ -21,7 +22,23 @@ class _StandardToolHandler:
             if resolved.audit_output is None:
                 raise TypeError("ToolResult returned by a tool handler requires audit_output.")
             return resolved
+        if context.tool_name.endswith("_write"):
+            operation = str(context.args.get("operation") or "").strip()
+            if operation:
+                resolved = {"operation": operation, **resolved}
         return cozymate_tool_result_from_payload(tool_name=context.tool_name, output=resolved)
 
     async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
         raise NotImplementedError
+
+
+class _OperationDispatchToolHandler(_StandardToolHandler):
+    def __init__(self, *, operations: Mapping[str, _StandardToolHandler]) -> None:
+        self.operations = dict(operations)
+
+    async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
+        operation = str(context.args.get("operation") or "").strip()
+        handler = self.operations.get(operation)
+        if handler is None:
+            raise ApiError(code="unsupported_operation", message="Tool operation is not supported.", status=422)
+        return await handler.execute(context)

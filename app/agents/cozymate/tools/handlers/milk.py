@@ -883,7 +883,7 @@ class MaternalInfantProfileUpdateToolHandler(_StandardToolHandler):
         if not mother_values and not infant_updates and not current_infants_supplied:
             raise ApiError(
                 code="validation_failed",
-                message="maternal_infant_profile_update requires at least one field.",
+                message="profile_write requires at least one field.",
                 status=422,
             )
 

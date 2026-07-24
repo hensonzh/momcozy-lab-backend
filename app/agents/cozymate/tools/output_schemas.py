@@ -18,11 +18,11 @@ JsonSchema = dict[str, Any]
 
 
 _TOOL_OUTPUT_SCHEMAS: dict[str, JsonSchema] = {
-    "lactation_timeline_manage": LactationTimelineManageOutput.model_json_schema(),
+    "lactation_timeline_write": LactationTimelineManageOutput.model_json_schema(),
     "lactation_timeline_read": LactationTimelineReadOutput.model_json_schema(),
-    "milk_analysis": MilkAnalysisOutput.model_json_schema(),
-    "maternal_infant_profile_read": MaternalInfantProfileReadOutput.model_json_schema(),
-    "maternal_infant_profile_update": MaternalInfantProfileUpdateOutput.model_json_schema(),
+    "milk_analysis_manage": MilkAnalysisOutput.model_json_schema(),
+    "profile_read": MaternalInfantProfileReadOutput.model_json_schema(),
+    "profile_write": MaternalInfantProfileUpdateOutput.model_json_schema(),
     "pump_models_read": {
         "type": "object",
         "additionalProperties": False,

@@ -1658,7 +1658,7 @@ def build_pregnancy_plan_result(
     generation_context["created_at"] = generated_at.astimezone(timezone.utc).isoformat(timespec="seconds")
     card_json["generation_context"] = generation_context
     return {
-        "tool_name": "pregnancy_plan_workflow",
+        "tool_name": "pregnancy_plan_manage",
         "status": "card_created",
         "summary": "孕期计划已生成",
         "card": {

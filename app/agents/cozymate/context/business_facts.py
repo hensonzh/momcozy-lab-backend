@@ -64,7 +64,7 @@ class BusinessFactsProjector:
         for source in sources:
             if source.tool_name not in self.handlers:
                 continue
-            if source.tool_name == "maternal_infant_profile_read":
+            if source.tool_name == "profile_read":
                 source = BusinessFactSource(
                     tool_name=source.tool_name,
                     context_key=source.context_key,
@@ -113,9 +113,9 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
     default_limit = config.default_limit
     if skill_id == ServiceSkillId.MILK_MANAGEMENT:
         return (
-            BusinessFactSource("maternal_infant_profile_read", "lactation_context"),
+            BusinessFactSource("profile_read", "lactation_context"),
             BusinessFactSource(
-                "milk_analysis",
+                "milk_analysis_manage",
                 "milk_status",
                 {
                     "operation": "review",
@@ -128,7 +128,7 @@ def _sources_for_skill(*, skill_id: ServiceSkillId, config: BusinessFactsProject
     if skill_id == ServiceSkillId.DEVICE_GUIDANCE:
         return (
             BusinessFactSource(
-                "maternal_infant_profile_read",
+                "profile_read",
                 "profile",
                 {"infant_scope": "all"},
             ),

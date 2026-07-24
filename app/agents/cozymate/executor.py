@@ -75,10 +75,10 @@ from .workflows.ongoing_work import project_workflow_context
 from .workflows.reply import guarded_workflow_type, workflow_accepts_reply
 
 
-CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME = "conversation_history_image_load"
+CONVERSATION_HISTORY_IMAGE_READ_TOOL_NAME = "conversation_history_image_read"
 COZYMATE_AGENT_ID = "cozymate_service_agent"
 LOGGER = logging.getLogger("production_backend.agent_runtime.executor")
-HOSPITAL_BAG_WORKFLOW_TOOL_NAME = "hospital_bag_workflow"
+HOSPITAL_BAG_MANAGE_TOOL_NAME = "hospital_bag_manage"
 MARKDOWN_IMAGE_URL_PATTERN = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))")
 MODEL_IMAGE_CONTENT_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 
@@ -463,7 +463,7 @@ class CozymateAgentExecutor:
         )
         tool_calls.append(
             {
-                "tool_name": "pregnancy_plan_workflow",
+                "tool_name": "pregnancy_plan_manage",
                 "status": "completed",
                 "args": args,
                 "safe_output": safe_output,
@@ -492,7 +492,7 @@ class CozymateAgentExecutor:
             )
             tool_calls.append(
                 {
-                    "tool_name": "pregnancy_plan_workflow",
+                    "tool_name": "pregnancy_plan_manage",
                     "status": "completed",
                     "args": generation_args,
                     "safe_output": safe_output,
@@ -514,7 +514,7 @@ class CozymateAgentExecutor:
             guarded_types.append(PREGNANCY_PLAN_WORKFLOW_TYPE)
         trusted_args = await self._trusted_tool_args(
             run=run,
-            contract_name="pregnancy_plan_workflow",
+            contract_name="pregnancy_plan_manage",
             args=args,
         )
         trusted_args = {
@@ -524,7 +524,7 @@ class CozymateAgentExecutor:
         execution = await self.tool_executor.execute(
             actor=_run_actor(run),
             run_id=run.id,
-            tool_name="pregnancy_plan_workflow",
+            tool_name="pregnancy_plan_manage",
             call_id=f"ui-pregnancy-plan-{uuid4().hex}",
             args=args,
             trusted_args=trusted_args,
@@ -571,13 +571,13 @@ class CozymateAgentExecutor:
             args["generation_mode"] = generation_mode
         trusted_args = await self._trusted_tool_args(
             run=run,
-            contract_name=HOSPITAL_BAG_WORKFLOW_TOOL_NAME,
+            contract_name=HOSPITAL_BAG_MANAGE_TOOL_NAME,
             args=args,
         )
         execution = await self.tool_executor.execute(
             actor=_run_actor(run),
             run_id=run.id,
-            tool_name=HOSPITAL_BAG_WORKFLOW_TOOL_NAME,
+            tool_name=HOSPITAL_BAG_MANAGE_TOOL_NAME,
             call_id=f"ui-hospital-bag-{uuid4().hex}",
             args=args,
             trusted_args=trusted_args,
@@ -607,7 +607,7 @@ class CozymateAgentExecutor:
             final_text=final_text,
             tool_calls=[
                 {
-                    "tool_name": HOSPITAL_BAG_WORKFLOW_TOOL_NAME,
+                    "tool_name": HOSPITAL_BAG_MANAGE_TOOL_NAME,
                     "status": "completed",
                     "args": args,
                     "safe_output": safe_output,
@@ -1149,7 +1149,7 @@ class CozymateAgentExecutor:
                     if exc.code in {"missing_workflow_reply_context", "stale_workflow_step"}:
                         self._turn_state(run.id).workflow_reply_recovery_type = guarded_type
                     raise
-        if contract_name in {"pregnancy_diary_query", "pregnancy_diary_save", "pregnancy_diary_delete"}:
+        if contract_name in {"pregnancy_diary_read", "pregnancy_diary_write"}:
             local_date = self._turn_state(run.id).local_date
             diary_trusted_args: dict[str, Any] = {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text
@@ -1157,25 +1157,25 @@ class CozymateAgentExecutor:
             if local_date:
                 diary_trusted_args["runtime_local_date"] = local_date
             return diary_trusted_args
-        if contract_name == "milk_analysis":
+        if contract_name == "milk_analysis_manage":
             return {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name in {"maternal_infant_profile_read", "lactation_timeline_read"}:
+        if contract_name in {"profile_read", "lactation_timeline_read"}:
             local_date = self._turn_state(run.id).local_date
             read_context_args = {"runtime_timezone": self._turn_state(run.id).timezone}
             if local_date:
                 read_context_args["runtime_local_date"] = local_date
             return read_context_args
-        if contract_name == "plans_milk_plan_propose":
+        if contract_name == "plans_milk_plan_write":
             return {
                 "runtime_local_date": self._turn_state(run.id).local_date,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name == "support_ticket_propose":
+        if contract_name == "support_ticket_write":
             return {"trusted_current_user_text": self._turn_state(run.id).current_user_text}
-        if contract_name == "pregnancy_plan_workflow":
+        if contract_name == "pregnancy_plan_manage":
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             trusted_args: dict[str, Any] = {
                 "runtime_plan_context": _pregnancy_workflow_runtime_context(workflow=workflow),
@@ -1213,7 +1213,7 @@ class CozymateAgentExecutor:
                 if default_values:
                     trusted_args["default_values"] = default_values
             return trusted_args
-        if contract_name == HOSPITAL_BAG_WORKFLOW_TOOL_NAME:
+        if contract_name == HOSPITAL_BAG_MANAGE_TOOL_NAME:
             hospital_bag_trusted_args: dict[str, Any] = {}
             workflow = await self._latest_hospital_bag_workflow(run=run)
             workflow_state = _dict(workflow, "state")
@@ -1264,18 +1264,18 @@ class CozymateAgentExecutor:
                     verified_form_data
                 )
             return hospital_bag_trusted_args
-        if contract_name == "hospital_bag_cart_update":
+        if contract_name == "hospital_bag_cart_write":
             client_groups = self._turn_state(run.id).hospital_bag_cart_groups
             if client_groups is not None:
                 return {"groups": client_groups}
             groups = await self._latest_hospital_bag_cart_groups(run=run)
             return {"groups": groups} if groups is not None else {}
-        if contract_name == "ibclc_consult_card_create":
+        if contract_name == "ibclc_consult_card_write":
             return {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "trusted_previous_assistant_text": self._turn_state(run.id).previous_assistant_text,
             }
-        if contract_name == CONVERSATION_HISTORY_IMAGE_LOAD_TOOL_NAME:
+        if contract_name == CONVERSATION_HISTORY_IMAGE_READ_TOOL_NAME:
             return {"visible_image_urls": list(self._turn_state(run.id).visible_image_urls)}
         return {}
 
@@ -1755,7 +1755,7 @@ def _elapsed_ms(started_at: float) -> float:
 
 def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> bool:
     return any(
-        _text(tool_call, "tool_name") == "pregnancy_plan_workflow"
+        _text(tool_call, "tool_name") == "pregnancy_plan_manage"
         and _text(_dict(tool_call, "safe_args"), "command") == "submit_form"
         and _text(_dict(tool_call, "safe_output"), "status") in {"intake_analyzed", "intake_in_progress"}
         for tool_call in tool_calls
@@ -1765,7 +1765,7 @@ def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> 
 def _has_completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> bool:
     completed_statuses = {"card_created", "hospital_bag_card_already_created"}
     return any(
-        _text(tool_call, "tool_name") == HOSPITAL_BAG_WORKFLOW_TOOL_NAME
+        _text(tool_call, "tool_name") == HOSPITAL_BAG_MANAGE_TOOL_NAME
         and _text(_hospital_bag_tool_output(tool_call), "status") in completed_statuses
         for tool_call in tool_calls
     )
@@ -1774,7 +1774,7 @@ def _has_completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> bool:
 def _completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> dict[str, Any] | None:
     completed_statuses = {"card_created", "hospital_bag_card_already_created"}
     for tool_call in reversed(tool_calls):
-        if _text(tool_call, "tool_name") != HOSPITAL_BAG_WORKFLOW_TOOL_NAME:
+        if _text(tool_call, "tool_name") != HOSPITAL_BAG_MANAGE_TOOL_NAME:
             continue
         safe_output = _hospital_bag_tool_output(tool_call)
         if _text(safe_output, "status") not in completed_statuses:

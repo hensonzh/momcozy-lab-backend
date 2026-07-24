@@ -37,7 +37,7 @@ def _context(*, args: dict[str, Any]) -> ToolHandlerContext:
         ),
         run_id=uuid4(),
         thread_id=uuid4(),
-        tool_name="milk_analysis",
+        tool_name="milk_analysis_manage",
         call_id="call-1",
         args=args,
     )
@@ -97,7 +97,7 @@ def _handler(
 
 
 def test_milk_analysis_contract_has_described_inputs_and_outputs() -> None:
-    contract = default_tool_registry().get("milk_analysis")
+    contract = default_tool_registry().get("milk_analysis_manage")
 
     assert contract.domain == "lactation_analysis"
     assert contract.effect_scope == "agent_internal"
@@ -197,7 +197,7 @@ def test_milk_analysis_routes_durable_workflow_operations(
     assert result["workflow"]["workflow_phase"] == "collecting_intake"
     assert intake.calls[0].args["action"] == expected_action
     validate_tool_output(
-        schema=default_tool_registry().get("milk_analysis").output_schema,
+        schema=default_tool_registry().get("milk_analysis_manage").output_schema,
         value=result,
     )
     if expected_action == "answer":
@@ -234,7 +234,7 @@ def test_milk_analysis_evaluate_normalizes_result_and_preserves_deferred_events(
     output_for_validation = dict(result)
     output_for_validation.pop(DEFERRED_AGENT_EVENTS_KEY)
     validate_tool_output(
-        schema=default_tool_registry().get("milk_analysis").output_schema,
+        schema=default_tool_registry().get("milk_analysis_manage").output_schema,
         value=output_for_validation,
     )
 

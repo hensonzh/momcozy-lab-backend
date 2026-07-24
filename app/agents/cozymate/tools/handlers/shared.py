@@ -953,7 +953,7 @@ def _pregnancy_plan_workflow_result(
         )
     elif phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
         instruction = (
-            "The trusted intake is ready. Call pregnancy_plan_workflow with command=generate_plan in this same run without "
+            "The trusted intake is ready. Call pregnancy_plan_manage with command=generate_plan in this same run without "
             "another user confirmation question and do not reopen the form."
         )
     elif initial_analysis:
@@ -1173,7 +1173,7 @@ def _pregnancy_plan_urgent_result(signal_ids: list[str]) -> ToolResult:
             **output,
             "instruction": (
                 "Stop the pregnancy-plan workflow. Give required_response immediately and concisely. Do not ask the plan "
-                "supplemental-information question and do not call pregnancy_plan_workflow with command=generate_plan. "
+                "supplemental-information question and do not call pregnancy_plan_manage with command=generate_plan. "
                 "Do not diagnose."
             ),
         }

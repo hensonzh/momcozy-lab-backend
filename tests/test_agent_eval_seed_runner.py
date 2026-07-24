@@ -32,12 +32,7 @@ def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_ef
 def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_request() -> None:
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
-        tool_calls=[
-            {
-                "tool_name": "maternal_infant_profile_update",
-                "status": "completed",
-            }
-        ],
+        tool_calls=[{"tool_name": "profile_write", "status": "completed"}],
         final_text="Saved to profile.",
     )
 
@@ -46,7 +41,7 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "maternal_infant_profile_update"
+    assert result.failures[0].observed == "profile_write"
 
 
 def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_command() -> None:
@@ -54,7 +49,7 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
         "expected_tool_calls": [],
         "forbidden_tool_calls": [
             {
-                "contract": "pregnancy_plan_workflow",
+                "contract": "pregnancy_plan_manage",
                 "args_subset": {"command": "generate_plan"},
             }
         ],
@@ -66,7 +61,7 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
         trace=AgentEvalTrace(
             tool_calls=[
                 {
-                    "tool_name": "pregnancy_plan_workflow",
+                    "tool_name": "pregnancy_plan_manage",
                     "status": "completed",
                     "safe_args": {"command": "answer_current", "choice_id": "no_checkup_records"},
                 }
@@ -78,7 +73,7 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
         trace=AgentEvalTrace(
             tool_calls=[
                 {
-                    "tool_name": "pregnancy_plan_workflow",
+                    "tool_name": "pregnancy_plan_manage",
                     "status": "completed",
                     "safe_args": {"command": "generate_plan"},
                 }
@@ -89,14 +84,14 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
     assert allowed.passed is True
     assert forbidden.passed is False
     assert forbidden.failures[0].category == "forbidden_tool"
-    assert forbidden.failures[0].observed == "pregnancy_plan_workflow"
+    assert forbidden.failures[0].observed == "pregnancy_plan_manage"
 
 
 def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}}
+            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="Saved.",
     )
@@ -111,9 +106,9 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     case = {
         **_case("pregnancy_diary_entry"),
         "expected_tool_calls": [
-            {"contract": "pregnancy_diary_save", "args_subset": {"operation": "create"}},
+            {"contract": "pregnancy_diary_write", "args_subset": {"operation": "create"}},
             {
-                "contract": "pregnancy_diary_save",
+                "contract": "pregnancy_diary_write",
                 "args_subset": {"operation": "update"},
             },
         ],
@@ -121,11 +116,11 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "pregnancy_diary_save",
+                "tool_name": "pregnancy_diary_write",
                 "status": "completed",
                 "safe_args": {"operation": "update"},
             },
-            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}},
+            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}},
         ],
         final_text="Saved.",
     )
@@ -149,7 +144,7 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
     }
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}}
+            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="",
     )
@@ -168,7 +163,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     case = _case(suite)
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary_save", "status": "completed", "safe_args": {"operation": "create"}}
+            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}}
         ],
         final_text="Saved.",
     )
@@ -178,7 +173,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "pregnancy_diary_save"
+    assert result.failures[0].observed == "pregnancy_diary_write"
 
 
 @pytest.mark.parametrize(
@@ -201,7 +196,7 @@ def test_agent_eval_seed_assertion_engine_passes_critical_response_trace(suite: 
 def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flow() -> None:
     case = _case("mixed_intent_and_safety")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "hospital_bag_cart_update", "status": "completed"}],
+        tool_calls=[{"tool_name": "hospital_bag_cart_write", "status": "completed"}],
         events=[{"type": "action.confirmation_required"}],
         actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
     )
@@ -211,17 +206,17 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
     assert result.passed is False
     assert result.failures[0].category == "forbidden_side_effect"
     assert result.failures[0].assertion == "side_effect.none"
-    assert result.failures[0].observed == "hospital_bag_cart_update"
+    assert result.failures[0].observed == "hospital_bag_cart_write"
 
 
 def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> None:
-    case = _case("hospital_bag_cart_update")
+    case = _case("hospital_bag_cart_write")
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "hospital_bag_cart_update",
+                "tool_name": "hospital_bag_cart_write",
                 "status": "completed",
-                "safe_args": {"action": "reset_cart"},
+                "safe_args": {"operation": "reset_cart"},
             }
         ],
         events=[
@@ -271,7 +266,7 @@ def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_h
 def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -> None:
     case = _case("device_known_guidance")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "devices_guidance", "status": "completed"}],
+        tool_calls=[{"tool_name": "devices_guidance_manage", "status": "completed"}],
         final_text="I checked the official Air1 guidance assets.",
     )
 
@@ -301,10 +296,10 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
                 "safe_args": {},
             },
             {
-                "tool_name": "hospital_bag_cart_update",
+                "tool_name": "hospital_bag_cart_write",
                 "status": "completed",
                 "safe_args": {
-                    "action": "replace_pump_model",
+                    "operation": "replace_pump_model",
                     "product_sku_id": "pump-m9",
                 },
             },
@@ -319,7 +314,7 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
     assert read_only_result.failures == []
     assert cart_mutation_result.passed is False
     assert cart_mutation_result.failures[0].category == "forbidden_tool"
-    assert cart_mutation_result.failures[0].observed == "hospital_bag_cart_update"
+    assert cart_mutation_result.failures[0].observed == "hospital_bag_cart_write"
 
 
 def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_operation() -> None:
@@ -327,7 +322,7 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
         **_case("device_unboxing_incomplete_step"),
         "forbidden_tool_calls": [
             {
-                "contract": "devices_guidance",
+                "contract": "devices_guidance_manage",
                 "args_subset": {"operation": "complete_current"},
             }
         ],
@@ -335,7 +330,7 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
     read_trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "devices_guidance",
+                "tool_name": "devices_guidance_manage",
                 "status": "completed",
                 "safe_args": {
                     "model": "Air1",
@@ -349,7 +344,7 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
     advance_trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "devices_guidance",
+                "tool_name": "devices_guidance_manage",
                 "status": "completed",
                 "safe_args": {
                     "model": "Air1",
@@ -367,7 +362,7 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
     assert read_result.failures == []
     assert advance_result.passed is False
     assert advance_result.failures[0].category == "forbidden_tool"
-    assert advance_result.failures[0].observed == "devices_guidance[operation=complete_current]"
+    assert advance_result.failures[0].observed == "devices_guidance_manage[operation=complete_current]"
 
 
 def test_agent_eval_seed_assertion_engine_requires_expected_application_event() -> None:

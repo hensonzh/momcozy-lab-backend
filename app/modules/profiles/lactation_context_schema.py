@@ -235,7 +235,7 @@ class LactationDataQualityIssueOutput(_StrictOutputModel):
 
 
 class MaternalInfantProfileReadOutput(_StrictOutputModel):
-    """maternal_infant_profile_read 返回给模型的紧凑妈妈与宝宝基础资料。"""
+    """profile_read 返回给模型的紧凑妈妈与宝宝基础资料。"""
 
     as_of_date: date = Field(
         description="可信运行时提供的本地基准日期，格式为 YYYY-MM-DD；所有产后天数和宝宝年龄均以此日期派生。",
@@ -292,7 +292,7 @@ class MaternalInfantProfileUpdateSummary(_StrictOutputModel):
 
 
 class MaternalInfantProfileUpdateOutput(_StrictOutputModel):
-    """maternal_infant_profile_update 的 Action 提交或执行结果。"""
+    """profile_write 的 Action 提交或执行结果。"""
 
     action_id: UUID = Field(
         description="本次持久化 Action 的稳定 UUID。",

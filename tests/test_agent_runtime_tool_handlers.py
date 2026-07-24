@@ -91,7 +91,7 @@ from app.agents.cozymate.tools.pump_models import (
 )
 
 
-def test_maternal_infant_profile_update_tool_updates_mother_and_infant_in_one_action() -> None:
+def test_profile_write_tool_handler_updates_user_and_infant_in_one_action() -> None:
     actor = _user()
     infant_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
@@ -182,12 +182,12 @@ def test_maternal_infant_profile_update_tool_updates_mother_and_infant_in_one_ac
         "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
     }
     validate_tool_output(
-        schema=default_tool_registry().get("maternal_infant_profile_update").output_schema,
+        schema=default_tool_registry().get("profile_write").output_schema,
         value=result,
     )
 
 
-def test_maternal_infant_profile_update_tool_requires_at_least_one_field() -> None:
+def test_profile_write_tool_handler_requires_at_least_one_field() -> None:
     handler = MaternalInfantProfileUpdateToolHandler(runtime_service=FakeAgentRuntimeService())
 
     with pytest.raises(ApiError) as exc_info:
@@ -196,7 +196,7 @@ def test_maternal_infant_profile_update_tool_requires_at_least_one_field() -> No
     assert exc_info.value.code == "validation_failed"
 
 
-def test_maternal_infant_profile_update_tool_preserves_explicit_nulls() -> None:
+def test_profile_write_tool_handler_preserves_explicit_nulls() -> None:
     runtime_service = FakeAgentRuntimeService()
     handler = MaternalInfantProfileUpdateToolHandler(runtime_service=runtime_service)
 
@@ -224,7 +224,7 @@ def test_maternal_infant_profile_update_tool_preserves_explicit_nulls() -> None:
     }
 
 
-def test_support_ticket_propose_tool_handler_creates_editable_draft_artifact() -> None:
+def test_support_ticket_write_tool_handler_creates_editable_draft_artifact() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     handler = SupportTicketProposeToolHandler(runtime_service=runtime_service)
@@ -259,7 +259,7 @@ def test_support_ticket_propose_tool_handler_creates_editable_draft_artifact() -
     assert not any("action_type" in call for call in runtime_service.calls)
 
 
-def test_support_ticket_propose_tool_handler_asks_in_chat_before_creating_draft() -> None:
+def test_support_ticket_write_tool_handler_asks_in_chat_before_creating_draft() -> None:
     runtime_service = FakeAgentRuntimeService()
     result = asyncio.run(
         SupportTicketProposeToolHandler(runtime_service=runtime_service).execute(
@@ -281,7 +281,7 @@ def test_support_ticket_propose_tool_handler_asks_in_chat_before_creating_draft(
     assert runtime_service.calls == []
 
 
-def test_hospital_bag_cart_update_propose_tool_handler_creates_confirmation_action() -> None:
+def test_hospital_bag_cart_write_propose_tool_handler_creates_confirmation_action() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     handler = HospitalBagCartUpdateProposeToolHandler(runtime_service=runtime_service)
@@ -324,8 +324,8 @@ def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idem
         asset_service=FakeAssetService(),
         agent_runtime_service=runtime_service,
     )
-    handler = handlers["hospital_bag_cart_update"]
-    context = _context(actor=actor, args={"action": "reset_cart"})
+    handler = handlers["hospital_bag_cart_write"]
+    context = _context(actor=actor, args={"operation": "reset_cart"})
 
     first = asyncio.run(handler(context))
     second = asyncio.run(handler(context))
@@ -361,11 +361,11 @@ def test_registered_hospital_bag_cart_handler_reads_shared_pump_models_object_fo
     )
 
     result = asyncio.run(
-        handlers["hospital_bag_cart_update"](
+        handlers["hospital_bag_cart_write"](
             _context(
                 actor=actor,
                 args={
-                    "action": "replace_pump_model",
+                    "operation": "replace_pump_model",
                     "product_sku_id": "pump-m9",
                 },
             )
@@ -388,7 +388,7 @@ def test_registered_hospital_bag_cart_handler_does_not_create_action_for_clarifi
     runtime_service = FakeAgentRuntimeService()
     handler = HospitalBagCartUpdateProposeToolHandler(runtime_service=runtime_service)
 
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"action": "clarify"})))
+    result = asyncio.run(handler.execute(_context(actor=actor, args={"operation": "clarify"})))
 
     assert result["status"] == "needs_clarification"
     assert "action_id" not in result
@@ -541,7 +541,7 @@ def test_hospital_bag_card_rejects_stale_form_submission() -> None:
     assert exc_info.value.code == "stale_hospital_bag_intake"
 
 
-def test_hospital_bag_workflow_creates_form_when_verified_information_is_incomplete() -> None:
+def test_hospital_bag_manage_creates_form_when_verified_information_is_incomplete() -> None:
     runtime_service = FakeAgentRuntimeService()
 
     result = asyncio.run(
@@ -562,7 +562,7 @@ def test_hospital_bag_workflow_creates_form_when_verified_information_is_incompl
     )
 
     assert result["status"] == "form_created"
-    assert result["tool_name"] == "hospital_bag_workflow"
+    assert result["tool_name"] == "hospital_bag_manage"
     assert result["form"]["default_values"] == {
         "due_date_or_week": "36 周",
         "feeding_intention": "混合喂养",
@@ -572,7 +572,7 @@ def test_hospital_bag_workflow_creates_form_when_verified_information_is_incompl
     assert runtime_service.workflow_state.state["phase"] == "collecting_intake"
 
 
-def test_hospital_bag_workflow_generates_directly_from_complete_verified_facts() -> None:
+def test_hospital_bag_manage_generates_directly_from_complete_verified_facts() -> None:
     runtime_service = FakeAgentRuntimeService()
     verified_values = _complete_hospital_bag_values()
 
@@ -589,7 +589,7 @@ def test_hospital_bag_workflow_generates_directly_from_complete_verified_facts()
     )
 
     assert result["status"] == "card_created"
-    assert result["tool_name"] == "hospital_bag_workflow"
+    assert result["tool_name"] == "hospital_bag_manage"
     assert result["workflow_context"]["information_complete"] is True
     assert runtime_service.artifact.artifact_type == "hospital_bag_card"
     assert runtime_service.workflow_state.status == "completed"
@@ -597,13 +597,13 @@ def test_hospital_bag_workflow_generates_directly_from_complete_verified_facts()
     assert runtime_service.workflow_state.state["generation_mode"] == "quick"
 
 
-def test_hospital_bag_workflow_keeps_form_and_card_json_out_of_model_output() -> None:
+def test_hospital_bag_manage_keeps_form_and_card_json_out_of_model_output() -> None:
     form_result = asyncio.run(
         HospitalBagWorkflowToolHandler(
             runtime_service=FakeAgentRuntimeService()
         )(
             _context(
-                tool_name="hospital_bag_workflow",
+                tool_name="hospital_bag_manage",
                 args={"runtime_workflow_context": {}},
             )
         )
@@ -612,7 +612,7 @@ def test_hospital_bag_workflow_keeps_form_and_card_json_out_of_model_output() ->
         form_result.to_function_call_output()
     )
     assert form_model_output["status"] == "form_created"
-    assert form_model_output["tool_name"] == "hospital_bag_workflow"
+    assert form_model_output["tool_name"] == "hospital_bag_manage"
     assert form_model_output["form_id"] == "hospital_bag_intake"
     assert "form" not in form_model_output
 
@@ -620,7 +620,7 @@ def test_hospital_bag_workflow_keeps_form_and_card_json_out_of_model_output() ->
     result = asyncio.run(
         HospitalBagWorkflowToolHandler(runtime_service=runtime_service)(
             _context(
-                tool_name="hospital_bag_workflow",
+                tool_name="hospital_bag_manage",
                 args={
                     "runtime_verified_form_data": _complete_hospital_bag_values(),
                     "runtime_workflow_context": {},
@@ -638,7 +638,7 @@ def test_hospital_bag_workflow_keeps_form_and_card_json_out_of_model_output() ->
     assert result.audit_output["card"]["card_json"]["title"] == "待产包"
 
 
-def test_hospital_bag_workflow_resumes_active_form_instead_of_using_older_verified_facts() -> None:
+def test_hospital_bag_manage_resumes_active_form_instead_of_using_older_verified_facts() -> None:
     actor = _user()
     thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
@@ -674,7 +674,7 @@ def test_hospital_bag_workflow_resumes_active_form_instead_of_using_older_verifi
     assert runtime_service.workflow_state.status == "collecting"
 
 
-def test_hospital_bag_workflow_generates_from_complete_current_submission() -> None:
+def test_hospital_bag_manage_generates_from_complete_current_submission() -> None:
     actor = _user()
     thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
@@ -701,12 +701,12 @@ def test_hospital_bag_workflow_generates_from_complete_current_submission() -> N
     )
 
     assert generated["status"] == "card_created"
-    assert generated["tool_name"] == "hospital_bag_workflow"
+    assert generated["tool_name"] == "hospital_bag_manage"
     assert runtime_service.workflow_state.state["data_source"] == "verified_form_submission"
     assert runtime_service.workflow_state.state["source_form_submission_id"] == "submission-1"
 
 
-def test_hospital_bag_workflow_reopens_form_for_invalid_current_submission() -> None:
+def test_hospital_bag_manage_reopens_form_for_invalid_current_submission() -> None:
     actor = _user()
     thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
@@ -752,7 +752,7 @@ def test_hospital_bag_workflow_reopens_form_for_invalid_current_submission() -> 
     ],
     ids=["incomplete", "urgent"],
 )
-def test_hospital_bag_workflow_rejects_stale_submission_before_processing_values(
+def test_hospital_bag_manage_rejects_stale_submission_before_processing_values(
     submitted_values: dict,
 ) -> None:
     runtime_service = FakeAgentRuntimeService()
@@ -782,7 +782,7 @@ def test_hospital_bag_workflow_rejects_stale_submission_before_processing_values
     assert len(runtime_service.artifacts) == initial_artifact_count
 
 
-def test_hospital_bag_workflow_interrupts_current_submission_for_urgent_signal() -> None:
+def test_hospital_bag_manage_interrupts_current_submission_for_urgent_signal() -> None:
     actor = _user()
     thread_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
@@ -852,7 +852,7 @@ def test_hospital_bag_workflow_interrupts_current_submission_for_urgent_signal()
     ],
     ids=["future-worry", "medical-risk", "current-worry-about-future"],
 )
-def test_hospital_bag_workflow_does_not_treat_worry_or_risk_as_current_emergency(
+def test_hospital_bag_manage_does_not_treat_worry_or_risk_as_current_emergency(
     field_id: str,
     field_value: list[str],
 ) -> None:
@@ -942,11 +942,11 @@ def test_birth_preparation_artifact_handler_returns_form_card_and_cart_envelopes
 
 
     cart_result = asyncio.run(
-        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update").execute(
-            _context(actor=actor, args={"action": "reset_cart"})
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_write").execute(
+            _context(actor=actor, args={"operation": "reset_cart"})
         )
     )
-    assert cart_result["tool_name"] == "hospital_bag_cart_update"
+    assert cart_result["tool_name"] == "hospital_bag_cart_write"
     assert cart_result["status"] == "cart_updated"
     assert cart_result["cart_update"]["groups"][0]["items"][0]["name"] == "产褥垫组合装"
     assert cart_result["cart_update"]["groups"][0]["items"][0]["image_url"].startswith("https://")
@@ -1012,10 +1012,10 @@ def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
     replace_result = asyncio.run(
         BirthPreparationArtifactToolHandler(
             runtime_service=runtime_service,
-            tool_name="hospital_bag_cart_update",
+            tool_name="hospital_bag_cart_write",
             pump_models_service=_pump_models_service(),
         ).execute(
-            _context(actor=actor, args={"action": "replace_pump_model", "product_sku_id": "pump-m9"})
+            _context(actor=actor, args={"operation": "replace_pump_model", "product_sku_id": "pump-m9"})
         )
     )
     pump_items = [item for group in replace_result["cart_update"]["groups"] for item in group["items"] if item["id"] == "pump-m9"]
@@ -1025,8 +1025,8 @@ def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
     assert replace_result["cart_update"]["replaced_items"][0]["from_item_id"] == "milk-pump"
 
     budget_result = asyncio.run(
-        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update").execute(
-            _context(actor=actor, args={"action": "optimize_budget", "target_budget": 1000, "budget_mode": "under"})
+        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_write").execute(
+            _context(actor=actor, args={"operation": "optimize_budget", "target_budget": 1000, "budget_mode": "under"})
         )
     )
     assert budget_result["cart_update"]["action"] == "optimize_budget"
@@ -1188,7 +1188,7 @@ def test_unified_milk_analysis_review_matches_its_described_output_schema(detail
     )
 
     validate_tool_output(
-        schema=default_tool_registry().get("milk_analysis").output_schema,
+        schema=default_tool_registry().get("milk_analysis_manage").output_schema,
         value=result,
     )
 
@@ -1785,7 +1785,7 @@ def test_device_guidance_tool_rejects_parameters_for_the_wrong_operation(args: d
     assert exc_info.value.code == "validation_failed"
 
 
-def test_conversation_history_image_load_handler_returns_image_in_tool_result() -> None:
+def test_conversation_history_image_read_handler_returns_image_in_tool_result() -> None:
     storage = FakeImageObjectStorage(body=b"image")
     handler = ConversationHistoryImageLoadToolHandler(
         asset_service=FakeImageAssetService(),
@@ -1827,7 +1827,7 @@ def test_conversation_history_image_load_handler_returns_image_in_tool_result() 
     ]
 
 
-def test_conversation_history_image_load_handler_rejects_url_not_visible_to_model() -> None:
+def test_conversation_history_image_read_handler_rejects_url_not_visible_to_model() -> None:
     handler = ConversationHistoryImageLoadToolHandler(
         asset_service=FakeImageAssetService(),
         object_storage=FakeImageObjectStorage(body=b"image"),
@@ -3616,7 +3616,7 @@ def test_milk_reminder_propose_tool_handler_creates_confirmation_action() -> Non
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
 
 
-def test_pregnancy_diary_save_creates_action_with_content_only() -> None:
+def test_pregnancy_diary_write_creates_action_with_content_only() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     context = _context(
@@ -3641,7 +3641,7 @@ def test_pregnancy_diary_save_creates_action_with_content_only() -> None:
     }
 
 
-def test_pregnancy_diary_save_update_replaces_with_complete_content() -> None:
+def test_pregnancy_diary_write_update_replaces_with_complete_content() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
@@ -3663,14 +3663,14 @@ def test_pregnancy_diary_save_update_replaces_with_complete_content() -> None:
     assert runtime_service.calls[0]["apply_payload"]["content"] == ("Earlier facts and the new fact rewritten as one complete entry.")
 
 
-def test_support_ticket_propose_tool_handler_requires_summary() -> None:
+def test_support_ticket_write_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService()).execute(_context(args={})))
 
     assert exc_info.value.code == "validation_failed"
 
 
-def test_hospital_bag_cart_update_propose_tool_handler_requires_cart_update() -> None:
+def test_hospital_bag_cart_write_propose_tool_handler_requires_cart_update() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(HospitalBagCartUpdateProposeToolHandler(runtime_service=FakeAgentRuntimeService()).execute(_context(args={})))
 
@@ -3761,7 +3761,7 @@ def test_milk_reminder_propose_tool_handler_requires_title() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_diary_save_requires_content() -> None:
+def test_pregnancy_diary_write_requires_content() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
             PregnancyDiarySaveToolHandler(runtime_service=FakeAgentRuntimeService()).execute(
@@ -3772,7 +3772,7 @@ def test_pregnancy_diary_save_requires_content() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_pregnancy_diary_delete_requires_grounded_confirmation_evidence() -> None:
+def test_pregnancy_diary_write_requires_grounded_confirmation_evidence() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
@@ -3787,7 +3787,7 @@ def test_pregnancy_diary_delete_requires_grounded_confirmation_evidence() -> Non
     assert runtime_service.calls == []
 
 
-def test_pregnancy_diary_delete_rejects_model_only_confirmation() -> None:
+def test_pregnancy_diary_write_rejects_model_only_confirmation() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
@@ -3809,7 +3809,7 @@ def test_pregnancy_diary_delete_rejects_model_only_confirmation() -> None:
     assert runtime_service.calls == []
 
 
-def test_pregnancy_diary_delete_creates_action_for_explicit_user_intent() -> None:
+def test_pregnancy_diary_write_creates_action_for_explicit_user_intent() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
@@ -3832,7 +3832,7 @@ def test_pregnancy_diary_delete_creates_action_for_explicit_user_intent() -> Non
     assert runtime_service.calls[0]["apply_payload"] == {"entry_date": "2026-07-04"}
 
 
-def test_support_ticket_propose_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
+def test_support_ticket_write_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
             SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService()).execute(
@@ -3856,31 +3856,27 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
     )
 
     assert set(handlers) == {
-        "hospital_bag_workflow",
-        "hospital_bag_cart_update",
+        "hospital_bag_manage",
+        "hospital_bag_cart_write",
         "pump_models_read",
-        "ibclc_consult_card_create",
-        "lactation_timeline_manage",
+        "profile_read",
+        "profile_write",
+        "ibclc_consult_card_write",
+        "lactation_timeline_write",
         "lactation_timeline_read",
-        "milk_analysis",
-        "maternal_infant_profile_read",
-        "maternal_infant_profile_update",
+        "milk_analysis_manage",
         "plans_calendar_read",
         "plans_current_read",
-        "pregnancy_diary_query",
-        "pregnancy_diary_save",
-        "pregnancy_diary_delete",
-        "devices_guidance",
-        "conversation_history_image_load",
-        "notifications_milk_reminder_propose",
-        "plans_milk_plan_propose",
-        "plans_task_complete_propose",
-        "plans_task_create_propose",
-        "plans_task_delete_propose",
-        "plans_task_update_propose",
-        "plans_plan_delete_propose",
-        "pregnancy_plan_workflow",
-        "support_ticket_propose",
+        "pregnancy_diary_read",
+        "pregnancy_diary_write",
+        "devices_guidance_manage",
+        "conversation_history_image_read",
+        "notifications_milk_reminder_write",
+        "plans_milk_plan_write",
+        "plans_task_write",
+        "plans_plan_write",
+        "pregnancy_plan_manage",
+        "support_ticket_write",
     }
     assert all(callable(handler) for handler in handlers.values())
 

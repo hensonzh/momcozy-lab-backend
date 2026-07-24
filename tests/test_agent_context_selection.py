@@ -44,7 +44,7 @@ def test_context_selection_keeps_function_calls_atomic_and_drops_orphan_outputs(
         _record(
             sequence=2,
             item_key="call-1",
-            item={"type": "function_call", "call_id": "paired", "name": "maternal_infant_profile_read"},
+            item={"type": "function_call", "call_id": "paired", "name": "profile_read"},
         ),
         _record(
             sequence=3,

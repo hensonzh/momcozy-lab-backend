@@ -1,9 +1,9 @@
 from app.agents.cozymate.tools import default_tool_registry
 
 
-def test_maternal_infant_profile_read_replaces_raw_growth_history_as_direct_tool() -> None:
+def test_profile_read_replaces_raw_growth_history_as_direct_tool() -> None:
     registry = default_tool_registry()
-    contract = registry.get("maternal_infant_profile_read")
+    contract = registry.get("profile_read")
     names = set(registry.names_for_sdk())
 
     assert contract.domain == "profiles"
@@ -25,16 +25,16 @@ def test_maternal_infant_profile_read_replaces_raw_growth_history_as_direct_tool
     }
     assert "妈妈与宝宝的基础资料" in contract.description
     assert "不返回奶量产出或摄入记录" in contract.description
-    assert "maternal_infant_profile_read" in names
-    assert "maternal_infant_profile_update" in names
-    assert "profile_read" not in names
-    assert "profile_update" not in names
+    assert "profile_read" in names
+    assert "profile_write" in names
+    assert "maternal_infant_profile_read" not in names
+    assert "maternal_infant_profile_update" not in names
     assert "lactation_context_read" not in names
     assert "records_growth_read" not in names
 
 
-def test_maternal_infant_profile_read_declares_described_nested_output_schema() -> None:
-    contract = default_tool_registry().get("maternal_infant_profile_read")
+def test_profile_read_declares_described_nested_output_schema() -> None:
+    contract = default_tool_registry().get("profile_read")
 
     assert contract.output_schema is not None
     assert contract.output_schema["additionalProperties"] is False
@@ -81,23 +81,26 @@ def test_maternal_infant_profile_read_declares_described_nested_output_schema() 
             assert field_schema.get("description"), f"{object_schema['title']}.{field_name} lacks a description"
 
 
-def test_maternal_infant_profile_update_is_the_described_profile_write_superset() -> None:
-    contract = default_tool_registry().get("maternal_infant_profile_update")
+def test_profile_write_is_the_described_profile_write_superset() -> None:
+    contract = default_tool_registry().get("profile_write")
 
     assert contract.domain == "profiles"
     assert contract.effect_scope == "user_resource"
     assert "action_type" not in type(contract).model_fields
-    assert "maternal_infant_profile_read" in contract.description
+    assert "profile_read" in contract.description
     assert "预产期" in contract.description
     schema = contract.input_schema
     assert schema["additionalProperties"] is False
-    assert schema["minProperties"] == 1
+    assert schema["minProperties"] == 2
+    assert schema["required"] == ["operation"]
     assert set(schema["properties"]) == {
+        "operation",
         "mother",
         "infants",
         "current_infants",
         "idempotency_key",
     }
+    assert schema["properties"]["operation"]["enum"] == ["update"]
     assert {
         "preferred_name",
         "age",

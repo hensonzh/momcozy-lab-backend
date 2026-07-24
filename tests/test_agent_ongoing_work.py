@@ -40,7 +40,7 @@ def test_workflow_context_projects_verified_pregnancy_form_without_internal_line
         }
     }
     assert projected[0]["next_transition"] == {
-        "tool": "pregnancy_plan_workflow",
+        "tool": "pregnancy_plan_manage",
         "command": "submit_form",
     }
     serialized = str(projected)
@@ -80,7 +80,7 @@ def test_workflow_context_rehydrates_other_long_running_service_steps() -> None:
         "visible_question": "宝宝近期体重增长怎么样？",
     }
     assert projected[0]["next_transition"] == {
-        "tool": "milk_analysis",
+        "tool": "milk_analysis_manage",
         "allowed_operations": ["answer"],
     }
     assert "private_rows" not in str(projected[0])
@@ -88,7 +88,7 @@ def test_workflow_context_rehydrates_other_long_running_service_steps() -> None:
     assert projected[1]["completed_steps"] == ["guide.parts", "guide.controls"]
     assert projected[1]["current_step"] == {"name": "guide.charging"}
     assert projected[1]["next_transition"] == {
-        "tool": "devices_guidance",
+        "tool": "devices_guidance_manage",
         "allowed_operations": ["complete_current", "cancel"],
     }
     assert "does not prove that the step was fully presented" in projected[1]["instruction"]

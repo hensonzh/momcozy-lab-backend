@@ -29,16 +29,17 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"support_ticket_propose": profile_read_handler},
+        handlers={"support_ticket_write": profile_read_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="support_ticket_propose",
+            tool_name="support_ticket_write",
             call_id="call-1",
             args={
+                "operation": "create",
                 "issue_summary": "Pump does not start",
                 "user_confirmed": True,
                 "user_contact": "mai@example.com",
@@ -52,10 +53,11 @@ def test_tool_executor_persists_safe_args_and_output() -> None:
     assert repository.output.safe_output["session_token"] == "[redacted]"
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.completed"]
     assert repository.events[0].payload["tool_call_id"] == str(repository.tool_call.id)
-    assert repository.events[0].payload["tool_name"] == "support_ticket_propose"
+    assert repository.events[0].payload["tool_name"] == "support_ticket_write"
     assert repository.events[0].payload["call_id"] == "call-1"
     assert repository.events[0].payload["label"] == "售后工单草稿"
     assert repository.events[0].payload["safe_args"] == {
+        "operation": "create",
         "issue_summary": "Pump does not start",
         "user_confirmed": True,
         "user_contact": "mai@example.com",
@@ -107,14 +109,14 @@ def test_tool_executor_excludes_trusted_confirmed_form_data_from_audit_payloads(
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"hospital_bag_workflow": handler},
+        handlers={"hospital_bag_manage": handler},
     )
 
     asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="hospital_bag_workflow",
+            tool_name="hospital_bag_manage",
             call_id="call-confirmed-form",
             args={},
             trusted_args={
@@ -229,14 +231,14 @@ def test_pregnancy_diary_write_safe_args_omit_health_narrative() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary_save": handler},
+        handlers={"pregnancy_diary_write": handler},
     )
 
     asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary_save",
+            tool_name="pregnancy_diary_write",
             call_id="call-private-safe-args",
             args={
                 "operation": "create",
@@ -259,7 +261,7 @@ def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -
         registry=default_tool_registry(),
         repository=repository,
         handlers={
-            "pregnancy_diary_query": _diary_handler(FakeDiaryMutationService(owner_user_id=actor.user_id))
+            "pregnancy_diary_read": _diary_handler(FakeDiaryMutationService(owner_user_id=actor.user_id))
         },
     )
 
@@ -267,7 +269,7 @@ def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary_query",
+            tool_name="pregnancy_diary_read",
             call_id="call-private-diary-read",
             args={"entry_date": "2026-07-04"},
         )
@@ -299,14 +301,14 @@ def test_pregnancy_diary_ephemeral_model_output_is_bounded_and_omits_attachment_
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary_query": _diary_handler(diary_service)},
+        handlers={"pregnancy_diary_read": _diary_handler(diary_service)},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="pregnancy_diary_query",
+            tool_name="pregnancy_diary_read",
             call_id="call-bounded-diary-read",
             args={"entry_date": "2026-07-04"},
         )
@@ -334,7 +336,7 @@ def test_tool_executor_rolls_back_handler_mutation_before_recording_failure() ->
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary_query": failing_handler},
+        handlers={"pregnancy_diary_read": failing_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -342,7 +344,7 @@ def test_tool_executor_rolls_back_handler_mutation_before_recording_failure() ->
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary_query",
+                tool_name="pregnancy_diary_read",
                 call_id="call-handler-rollback",
                 args={"entry_date": "2026-07-04"},
             )
@@ -377,7 +379,7 @@ def test_tool_executor_rolls_back_business_write_when_completion_event_batch_fai
         registry=default_tool_registry(),
         repository=repository,
         event_sink=FailingCompletionBatchEventSink(repository),
-        handlers={"pregnancy_diary_query": successful_handler},
+        handlers={"pregnancy_diary_read": successful_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -385,7 +387,7 @@ def test_tool_executor_rolls_back_business_write_when_completion_event_batch_fai
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary_query",
+                tool_name="pregnancy_diary_read",
                 call_id="call-completion-rollback",
                 args={"entry_date": "2026-07-04"},
             )
@@ -411,7 +413,7 @@ def test_tool_executor_terminalizes_started_call_after_fatal_commit_failure() ->
         registry=default_tool_registry(),
         repository=repository,
         event_sink=FailingFinalizeEventSink(repository),
-        handlers={"pregnancy_diary_query": successful_handler},
+        handlers={"pregnancy_diary_read": successful_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -419,7 +421,7 @@ def test_tool_executor_terminalizes_started_call_after_fatal_commit_failure() ->
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary_query",
+                tool_name="pregnancy_diary_read",
                 call_id="call-fatal-commit",
                 args={"entry_date": "2026-07-04"},
             )
@@ -443,7 +445,7 @@ def test_tool_executor_cancellation_closes_savepoint_and_terminalizes_tool_call(
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary_query": cancelled_handler},
+        handlers={"pregnancy_diary_read": cancelled_handler},
     )
 
     with pytest.raises(asyncio.CancelledError):
@@ -451,7 +453,7 @@ def test_tool_executor_cancellation_closes_savepoint_and_terminalizes_tool_call(
             executor.execute(
                 actor=_user(),
                 run_id=uuid4(),
-                tool_name="pregnancy_diary_query",
+                tool_name="pregnancy_diary_read",
                 call_id="call-cancelled",
                 args={"entry_date": "2026-07-04"},
             )
@@ -471,14 +473,14 @@ def test_tool_executor_returns_image_inside_standard_tool_result() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"conversation_history_image_load": image_context_handler},
+        handlers={"conversation_history_image_read": image_context_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="conversation_history_image_load",
+            tool_name="conversation_history_image_read",
             call_id="call-image",
             args={"image_url": "/v1/assets/asset-image"},
         )
@@ -647,7 +649,7 @@ def test_tool_executor_rejects_missing_required_tool_args_before_persisting_call
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"support_ticket_propose": profile_read_handler},
+        handlers={"support_ticket_write": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -655,14 +657,14 @@ def test_tool_executor_rejects_missing_required_tool_args_before_persisting_call
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="support_ticket_propose",
+                tool_name="support_ticket_write",
                 call_id="call-1",
                 args={},
             )
         )
 
     assert exc_info.value.code == "tool_input_invalid"
-    assert exc_info.value.details == {"path": "$", "reason": "missing required field: issue_summary"}
+    assert exc_info.value.details == {"path": "$", "reason": "missing required field: operation"}
     assert repository.tool_call is None
     assert repository.events == []
 
@@ -673,7 +675,7 @@ def test_tool_executor_rejects_invalid_diary_content_before_persisting_call() ->
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"pregnancy_diary_save": profile_read_handler},
+        handlers={"pregnancy_diary_write": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -681,7 +683,7 @@ def test_tool_executor_rejects_invalid_diary_content_before_persisting_call() ->
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="pregnancy_diary_save",
+                tool_name="pregnancy_diary_write",
                 call_id="call-1",
                 args={"operation": "create", "entry_date": "2026-07-04", "content": ["not", "text"]},
             )
@@ -699,7 +701,7 @@ def test_tool_executor_rejects_invalid_boolean_tool_args_before_persisting_call(
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"plans_task_complete_propose": profile_read_handler},
+        handlers={"plans_task_write": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -707,9 +709,9 @@ def test_tool_executor_rejects_invalid_boolean_tool_args_before_persisting_call(
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="plans_task_complete_propose",
+                tool_name="plans_task_write",
                 call_id="call-1",
-                args={"task_id": str(uuid4()), "completed": "false"},
+                args={"operation": "update", "task_id": str(uuid4()), "completed": "false"},
             )
         )
 
@@ -729,7 +731,7 @@ def test_tool_executor_rejects_output_outside_registered_schema_before_model_obs
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"maternal_infant_profile_read": malformed_lactation_context},
+        handlers={"profile_read": malformed_lactation_context},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -737,7 +739,7 @@ def test_tool_executor_rejects_output_outside_registered_schema_before_model_obs
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="maternal_infant_profile_read",
+                tool_name="profile_read",
                 call_id="call-invalid-output",
                 args={},
             )
@@ -784,11 +786,11 @@ def test_tool_executor_only_sends_validated_contract_output_to_model() -> None:
         CozymateToolExecutor(
             registry=default_tool_registry(),
             repository=repository,
-            handlers={"maternal_infant_profile_read": lactation_context_with_divergent_raw_text},
+            handlers={"profile_read": lactation_context_with_divergent_raw_text},
         ).execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="maternal_infant_profile_read",
+            tool_name="profile_read",
             call_id="call-valid-output",
             args={},
         )

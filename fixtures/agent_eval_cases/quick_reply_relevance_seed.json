@@ -12,7 +12,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "milk_analysis",
+              "name": "milk_analysis_manage",
               "execution_status": "completed",
               "result": {
                 "status": "milk_analysis_intake_collecting"
@@ -52,7 +52,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "pregnancy_plan_workflow",
+              "name": "pregnancy_plan_manage",
               "execution_status": "completed",
               "result": {
                 "status": "ready_to_generate"
@@ -97,7 +97,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "hospital_bag_workflow",
+              "name": "hospital_bag_manage",
               "execution_status": "completed",
               "result": {
                 "status": "card_created",

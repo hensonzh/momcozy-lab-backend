@@ -658,7 +658,7 @@ def test_agent_runtime_executor_injects_trusted_ibclc_consent_context() -> None:
     turn_state.current_user_text = "好的"
     turn_state.previous_assistant_text = "需要我帮你打开 IBCLC 在线咨询入口吗？"
 
-    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="ibclc_consult_card_create"))
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="ibclc_consult_card_write"))
 
     assert trusted_args == {
         "trusted_current_user_text": "好的",
@@ -674,7 +674,7 @@ def test_agent_runtime_executor_injects_trusted_support_ticket_confirmation_text
     )
     executor._initialize_turn_state(run.id).current_user_text = "好的，请现在帮我创建售后工单"
 
-    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support_ticket_propose"))
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support_ticket_write"))
 
     assert trusted_args == {"trusted_current_user_text": "好的，请现在帮我创建售后工单"}
 
@@ -690,7 +690,7 @@ def test_agent_runtime_executor_injects_runtime_timezone_into_milk_analysis_snap
     turn_state.timezone = "Asia/Shanghai"
 
     trusted_args = asyncio.run(
-        executor._trusted_tool_args(run=run, contract_name="milk_analysis")
+        executor._trusted_tool_args(run=run, contract_name="milk_analysis_manage")
     )
 
     assert trusted_args == {
@@ -1193,47 +1193,46 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     contracts = {contract.name: contract for contract in default_tool_registry().list()}
     assert backend.tool_descriptions_by_contract == {contract_name: contract.description for contract_name, contract in contracts.items()}
     assert backend.tool_schemas_by_contract == {contract_name: contract.input_schema for contract_name, contract in contracts.items()}
-    assert backend.tool_schemas["hospital_bag_workflow"]["additionalProperties"] is False
-    assert backend.tool_schemas["hospital_bag_workflow"]["properties"]["generation_mode"]["enum"] == [
+    assert backend.tool_schemas["hospital_bag_manage"]["additionalProperties"] is False
+    assert backend.tool_schemas["hospital_bag_manage"]["properties"]["generation_mode"]["enum"] == [
         "standard",
         "quick",
         "immediate",
     ]
-    assert backend.tool_schemas["hospital_bag_workflow"]["properties"]["restart"]["type"] == "boolean"
+    assert backend.tool_schemas["hospital_bag_manage"]["properties"]["restart"]["type"] == "boolean"
     assert "hospital_bag_form_create" not in backend.tool_schemas
     assert "hospital_bag_card_create" not in backend.tool_schemas
-    assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
-    assert backend.tool_schemas["devices_guidance"]["required"] == ["model", "operation"]
-    assert backend.tool_schemas["devices_guidance"]["properties"]["operation"]["enum"] == [
+    assert backend.tool_schemas["hospital_bag_cart_write"]["required"] == ["operation"]
+    assert backend.tool_schemas["devices_guidance_manage"]["required"] == ["model", "operation"]
+    assert backend.tool_schemas["devices_guidance_manage"]["properties"]["operation"]["enum"] == [
         "read",
         "start_or_resume",
         "complete_current",
         "cancel",
     ]
-    assert backend.tool_schemas["pregnancy_diary_query"]["properties"]["limit"]["maximum"] == 30
-    assert backend.tool_schemas["pregnancy_diary_save"]["required"] == ["operation", "content"]
-    assert backend.tool_schemas["pregnancy_diary_save"]["properties"]["content"]["maxLength"] == 5000
-    assert backend.tool_schemas["pregnancy_diary_delete"]["required"] == ["entry_date", "confirmation_evidence"]
-    assert backend.tool_schemas["conversation_history_image_load"]["required"] == ["image_url"]
-    assert backend.tool_schemas["hospital_bag_cart_update"]["additionalProperties"] is False
-    assert "groups" not in backend.tool_schemas["hospital_bag_cart_update"]["properties"]
-    assert backend.tool_schemas["notifications_milk_reminder_propose"]["required"] == ["title"]
+    assert backend.tool_schemas["pregnancy_diary_read"]["properties"]["limit"]["maximum"] == 30
+    assert backend.tool_schemas["pregnancy_diary_write"]["required"] == ["operation"]
+    assert backend.tool_schemas["pregnancy_diary_write"]["properties"]["operation"]["enum"] == ["create", "update", "delete"]
+    assert backend.tool_schemas["pregnancy_diary_write"]["properties"]["content"]["maxLength"] == 5000
+    assert backend.tool_schemas["pregnancy_diary_write"]["properties"]["confirmation_evidence"]["maxLength"] == 500
+    assert backend.tool_schemas["conversation_history_image_read"]["required"] == ["image_url"]
+    assert backend.tool_schemas["hospital_bag_cart_write"]["additionalProperties"] is False
+    assert "groups" not in backend.tool_schemas["hospital_bag_cart_write"]["properties"]
+    assert backend.tool_schemas["notifications_milk_reminder_write"]["required"] == ["operation", "title"]
     assert backend.tool_schemas["plans_calendar_read"]["properties"]["task_date"]["maxLength"] == 20
     assert backend.tool_schemas["plans_current_read"]["properties"]["limit"]["maximum"] == 20
-    assert backend.tool_schemas["plans_milk_plan_propose"]["required"] == ["direction"]
-    assert "tasks" not in backend.tool_schemas["plans_milk_plan_propose"]["properties"]
-    assert backend.tool_schemas["plans_milk_plan_propose"]["properties"]["calendar_write_strategy"]["enum"] == [
+    assert backend.tool_schemas["plans_milk_plan_write"]["required"] == ["operation", "direction"]
+    assert "tasks" not in backend.tool_schemas["plans_milk_plan_write"]["properties"]
+    assert backend.tool_schemas["plans_milk_plan_write"]["properties"]["calendar_write_strategy"]["enum"] == [
         "append",
         "replace_future_plan_tasks",
     ]
-    assert backend.tool_schemas["plans_plan_delete_propose"]["required"] == ["plan_id"]
-    assert backend.tool_schemas["plans_task_complete_propose"]["required"] == ["task_id"]
-    assert backend.tool_schemas["plans_task_complete_propose"]["properties"]["completed"]["type"] == "boolean"
-    assert backend.tool_schemas["plans_task_create_propose"]["required"] == ["title"]
-    assert backend.tool_schemas["plans_task_delete_propose"]["required"] == ["task_id"]
-    assert backend.tool_schemas["plans_task_update_propose"]["required"] == ["task_id"]
-    assert backend.tool_schemas["pregnancy_plan_workflow"]["required"] == ["command"]
-    assert backend.tool_schemas["pregnancy_plan_workflow"]["properties"]["command"]["enum"] == [
+    assert backend.tool_schemas["plans_plan_write"]["required"] == ["operation", "plan_id"]
+    assert backend.tool_schemas["plans_task_write"]["required"] == ["operation"]
+    assert backend.tool_schemas["plans_task_write"]["properties"]["completed"]["type"] == "boolean"
+    assert backend.tool_schemas["plans_task_write"]["properties"]["operation"]["enum"] == ["create", "update", "delete"]
+    assert backend.tool_schemas["pregnancy_plan_manage"]["required"] == ["command"]
+    assert backend.tool_schemas["pregnancy_plan_manage"]["properties"]["command"]["enum"] == [
         "start_or_resume",
         "submit_form",
         "answer_current",
@@ -1243,38 +1242,38 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "abandon",
         "generate_plan",
     ]
-    assert backend.tool_schemas["maternal_infant_profile_read"]["additionalProperties"] is False
-    assert backend.tool_schemas["maternal_infant_profile_read"]["properties"]["infant_scope"]["default"] == (
+    assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
+    assert backend.tool_schemas["profile_read"]["properties"]["infant_scope"]["default"] == (
         "current_delivery"
     )
     assert (
-        backend.tool_schemas["maternal_infant_profile_update"]["properties"]["mother"]["properties"]["age"]["anyOf"][0][
+        backend.tool_schemas["profile_write"]["properties"]["mother"]["properties"]["age"]["anyOf"][0][
             "maximum"
         ]
         == 70
     )
-    assert backend.tool_schemas["maternal_infant_profile_update"]["properties"]["infants"]["items"]["required"] == [
+    assert backend.tool_schemas["profile_write"]["properties"]["infants"]["items"]["required"] == [
         "infant_id"
     ]
-    assert backend.tool_schemas["lactation_timeline_manage"]["required"] == ["operation", "item_type"]
-    assert backend.tool_schemas["milk_analysis"]["required"] == ["operation"]
-    assert backend.tool_schemas["milk_analysis"]["properties"]["operation"]["enum"] == [
+    assert backend.tool_schemas["lactation_timeline_write"]["required"] == ["operation", "item_type"]
+    assert backend.tool_schemas["milk_analysis_manage"]["required"] == ["operation"]
+    assert backend.tool_schemas["milk_analysis_manage"]["properties"]["operation"]["enum"] == [
         "review",
         "start_or_resume",
         "answer",
         "evaluate",
     ]
-    assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary", "user_confirmed"]
-    assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
+    assert backend.tool_schemas["support_ticket_write"]["required"] == ["operation", "issue_summary", "user_confirmed"]
+    assert backend.tool_schemas["support_ticket_write"]["additionalProperties"] is False
     assert {
-        "devices_guidance",
+        "devices_guidance_manage",
         "pump_models_read",
-        "support_ticket_propose",
+        "support_ticket_write",
     } <= set(backend.tool_names)
     assert {
         "load_service_skill",
         "devices_pump_status_read",
-        "devices_guidance_read",
+        "devices_guidance_manage_read",
         "devices_unboxing_advance",
         "hospital_bag_pump_recommend",
         "records_growth_read",
@@ -1311,7 +1310,7 @@ def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_re
     }
     assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id
     assert tool_executor.calls[0]["run_id"] == run.id
-    assert tool_executor.calls[0]["tool_name"] == "pregnancy_diary_query"
+    assert tool_executor.calls[0]["tool_name"] == "pregnancy_diary_read"
     assert tool_executor.calls[0]["args"] == {"entry_date": "2026-07-12"}
     assert tool_executor.calls[0]["trusted_args"] == {
         "runtime_local_date": "2026-07-12",
@@ -1329,7 +1328,7 @@ def test_agent_runtime_executor_injects_current_user_text_for_diary_confirmation
     turn_state.current_user_text = "请删除 7 月 4 日的日记"
     turn_state.local_date = "2026-07-12"
 
-    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="pregnancy_diary_delete"))
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="pregnancy_diary_write"))
 
     assert trusted_args == {
         "runtime_local_date": "2026-07-12",
@@ -1431,14 +1430,14 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"milk_analysis": milk_status_handler},
+        handlers={"milk_analysis_manage": milk_status_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="最近奶量是 420ml。",
-                tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "review"}),),
-                expected_available_tools=("milk_analysis",),
+                tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "review"}),),
+                expected_available_tools=("milk_analysis_manage",),
             )
         ]
     )
@@ -1456,7 +1455,7 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
     assert result.final_text == "最近奶量是 420ml。"
     assert tool_calls == [
         {
-            "tool_name": "milk_analysis",
+            "tool_name": "milk_analysis_manage",
             "args": {
                 "operation": "review",
                 "trusted_current_user_text": "今天奶量怎么样？",
@@ -1521,7 +1520,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
                 text_deltas=("已经", "整理好了。"),
                 tool_calls=(
                     {
-                        "tool_name": "milk_analysis",
+                        "tool_name": "milk_analysis_manage",
                         "status": "completed",
                         "safe_output": {
                             "status": "intake_question_ready",
@@ -1576,7 +1575,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     assert finalizer_payload["turn_outcome"] == {
         "tools": [
             {
-                    "name": "milk_analysis",
+                "name": "milk_analysis_manage",
                 "execution_status": "completed",
                 "result": {
                     "status": "intake_question_ready",
@@ -1886,11 +1885,11 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
                 final_text="最近奶量是 420ml。",
                 tool_invocations=(
                     scripted_tool_invocation(
-                        "milk_analysis",
+                        "milk_analysis_manage",
                         {"operation": "review", "days": 7, "limit": 5},
                     ),
                 ),
-                expected_available_tools=("milk_analysis",),
+                expected_available_tools=("milk_analysis_manage",),
             )
         ]
     )
@@ -1904,7 +1903,7 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
     )
 
     assert result.status == "completed"
-    assert tool_executor.calls[0]["tool_name"] == "milk_analysis"
+    assert tool_executor.calls[0]["tool_name"] == "milk_analysis_manage"
     assert tool_executor.calls[0]["args"] == {"operation": "review", "days": 7, "limit": 5}
 
 
@@ -1923,14 +1922,14 @@ def test_agent_runtime_executor_ignores_legacy_run_summaries() -> None:
         payload={
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
-            "tools_used": ["milk_analysis"],
-            "tool_facts": [{"tool_name": "milk_analysis", "safe_output": {"total_ml": 420}}],
+            "tools_used": ["milk_analysis_manage"],
+            "tool_facts": [{"tool_name": "milk_analysis_manage", "safe_output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
                     "skill_version": "v1",
                     "loaded_at": "2026-07-07T10:00:00+00:00",
-                    "tool_names": ["milk_analysis"],
+                    "tool_names": ["milk_analysis_manage"],
                 }
             ],
             "verbose_unused": "x" * 3000,
@@ -1979,14 +1978,14 @@ def test_agent_runtime_executor_uses_history_without_reinjecting_run_summary_fac
         payload={
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低。",
-            "tools_used": ["milk_analysis"],
-            "tool_facts": [{"tool_name": "milk_analysis", "safe_output": {"total_ml": 420}}],
+            "tools_used": ["milk_analysis_manage"],
+            "tool_facts": [{"tool_name": "milk_analysis_manage", "safe_output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
                     "skill_version": "v1",
                     "loaded_at": "2026-07-07T10:00:00+00:00",
-                    "tool_names": ["milk_analysis"],
+                    "tool_names": ["milk_analysis_manage"],
                 }
             ],
         },
@@ -2034,14 +2033,14 @@ def test_agent_runtime_executor_does_not_restore_missing_history_from_run_summar
         payload={
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低。",
-            "tools_used": ["milk_analysis"],
-            "tool_facts": [{"tool_name": "milk_analysis", "safe_output": {"total_ml": 420}}],
+            "tools_used": ["milk_analysis_manage"],
+            "tool_facts": [{"tool_name": "milk_analysis_manage", "safe_output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
                     "skill_version": "v1",
                     "loaded_at": "2026-07-07T10:00:00+00:00",
-                    "tool_names": ["milk_analysis"],
+                    "tool_names": ["milk_analysis_manage"],
                 }
             ],
         },
@@ -2203,7 +2202,7 @@ def test_agent_runtime_executor_auto_continues_verified_hospital_bag_form_withou
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"hospital_bag_workflow": capture_handler},
+        handlers={"hospital_bag_manage": capture_handler},
     )
     transient_stream = FakeTransientStream()
     backend = CapturingSdkBackend(
@@ -2310,7 +2309,7 @@ def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() 
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_workflow": capture_handler},
+        handlers={"pregnancy_plan_manage": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
@@ -2411,7 +2410,7 @@ def test_agent_runtime_executor_injects_current_workflow_and_authenticated_check
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_workflow": capture_handler},
+        handlers={"pregnancy_plan_manage": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
@@ -2512,10 +2511,10 @@ def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_to
         async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
             assert not getattr(request, "required_tool_names", ())
             available_tools = {tool.contract_name for tool in request.tools}
-            assert "pregnancy_plan_workflow" in available_tools
+            assert "pregnancy_plan_manage" in available_tools
             assert "pregnancy_plan_intake_analyze" not in available_tools
             assert request.model_input[-1] == {"role": "user", "content": "我还没确认双胎类型呢"}
-            workflow_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_plan_workflow")
+            workflow_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_plan_manage")
             await workflow_tool.invoke(
                 json.dumps(
                     {
@@ -2534,7 +2533,7 @@ def test_agent_runtime_executor_injects_the_current_pregnancy_workflow_before_to
             tool_executor=CozymateToolExecutor(
                 registry=registry,
                 repository=repository,
-                handlers={"pregnancy_plan_workflow": capture_handler},
+                handlers={"pregnancy_plan_manage": capture_handler},
             ),
         ).execute(run=run)
     )
@@ -2632,7 +2631,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
             tool_executor=CozymateToolExecutor(
                 registry=registry,
                 repository=repository,
-                handlers={"pregnancy_plan_workflow": workflow_handler},
+                handlers={"pregnancy_plan_manage": workflow_handler},
             ),
         ).execute(run=run)
     )
@@ -2658,7 +2657,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
                 "followup_topics": [],
                 "personalized_followup_records": [],
             },
-            "pregnancy_plan_workflow",
+            "pregnancy_plan_manage",
             {"command": "answer_current", "answer": "这是上一道问题的延迟回复。"},
         ),
         (
@@ -2670,7 +2669,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
                 "current_field": "diaper_output",
                 "next_question": "宝宝最近 24 小时大约有几片湿尿布？",
             },
-            "milk_analysis",
+            "milk_analysis_manage",
             {"operation": "answer"},
         ),
         (
@@ -2678,7 +2677,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
             "waiting",
             "guide.controls",
             {"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
-            "devices_guidance",
+            "devices_guidance_manage",
             {"model": "Air1", "operation": "complete_current"},
         ),
     ],
@@ -2834,7 +2833,7 @@ def test_agent_runtime_executor_reissues_the_rejected_workflow_cursor_when_multi
 
     class RecoveringBackend:
         async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-            tool = next(item for item in request.tools if item.contract_name == "pregnancy_plan_workflow")
+            tool = next(item for item in request.tools if item.contract_name == "pregnancy_plan_manage")
             with pytest.raises(ApiError) as exc_info:
                 await tool.invoke(
                     json.dumps(
@@ -2905,7 +2904,7 @@ def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_uplo
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_workflow": capture_handler},
+        handlers={"pregnancy_plan_manage": capture_handler},
     )
     final_text = f"孕中期检查有明确时间窗，我会按孕周安排检查和结果复核。\n\n{PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION}"
     backend = ScriptedSdkBackend(
@@ -2914,7 +2913,7 @@ def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_uplo
                 final_text=final_text,
                 tool_invocations=(
                     scripted_tool_invocation(
-                        "pregnancy_plan_workflow",
+                        "pregnancy_plan_manage",
                         {"command": "submit_form"},
                     ),
                 ),
@@ -2980,7 +2979,7 @@ def test_agent_runtime_executor_passes_urgent_text_to_model_while_awaiting_plan_
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_workflow": urgent_handler},
+        handlers={"pregnancy_plan_manage": urgent_handler},
     )
     backend = ScriptedSdkBackend(
         [
@@ -2988,7 +2987,7 @@ def test_agent_runtime_executor_passes_urgent_text_to_model_while_awaiting_plan_
                 final_text="计划已经生成，请继续。",
                 tool_invocations=(
                     scripted_tool_invocation(
-                        "pregnancy_plan_workflow",
+                        "pregnancy_plan_manage",
                         {"command": "generate_plan"},
                     ),
                 ),
@@ -3102,7 +3101,7 @@ def test_agent_runtime_executor_prefills_form_without_birth_prep_business_projec
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"hospital_bag_workflow": capture_handler},
+        handlers={"hospital_bag_manage": capture_handler},
     )
     business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}}})
     fact_service = FakeFactService(defaults={"due_date_or_week": "30周", "age": 34, "first_birth": "否", "feeding_intention": "混合喂养"})
@@ -3110,7 +3109,7 @@ def test_agent_runtime_executor_prefills_form_without_birth_prep_business_projec
         [
             scripted_sdk_response(
                 final_text="信息采集表已准备好。",
-                tool_invocations=(scripted_tool_invocation("hospital_bag_workflow", {}),),
+                tool_invocations=(scripted_tool_invocation("hospital_bag_manage", {}),),
             )
         ]
     )
@@ -3164,7 +3163,7 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"pregnancy_plan_workflow": capture_handler},
+        handlers={"pregnancy_plan_manage": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
@@ -3172,7 +3171,7 @@ def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_
                 final_text="信息采集表已准备好。",
                 tool_invocations=(
                     scripted_tool_invocation(
-                        "pregnancy_plan_workflow",
+                        "pregnancy_plan_manage",
                         {"command": "start_or_resume"},
                     ),
                 ),
@@ -3345,7 +3344,7 @@ def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_group
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"hospital_bag_cart_update": capture_handler},
+        handlers={"hospital_bag_cart_write": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
@@ -3353,8 +3352,8 @@ def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_group
                 final_text="已经移除纸尿裤。",
                 tool_invocations=(
                     scripted_tool_invocation(
-                        "hospital_bag_cart_update",
-                        {"action": "remove_items", "item_ids": ["baby-diaper"]},
+                        "hospital_bag_cart_write",
+                        {"operation": "remove_items", "item_ids": ["baby-diaper"]},
                     ),
                 ),
             )
@@ -3370,7 +3369,7 @@ def test_agent_runtime_executor_injects_latest_cart_state_without_exposing_group
         ).execute(run=run)
     )
 
-    assert repository.tool_call.safe_args == {"action": "remove_items", "item_ids": ["baby-diaper"]}
+    assert repository.tool_call.safe_args == {"operation": "remove_items", "item_ids": ["baby-diaper"]}
     assert captured_args["groups"] == [{"title": "宝宝用品", "items": [{"id": "baby-diaper", "qty": 1}]}]
 
 
@@ -3406,13 +3405,13 @@ def test_agent_runtime_executor_prefers_explicit_empty_client_cart_over_persiste
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"hospital_bag_cart_update": capture_handler},
+        handlers={"hospital_bag_cart_write": capture_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="已经恢复默认购物车。",
-                tool_invocations=(scripted_tool_invocation("hospital_bag_cart_update", {"action": "reset_cart"}),),
+                tool_invocations=(scripted_tool_invocation("hospital_bag_cart_write", {"operation": "reset_cart"}),),
             )
         ]
     )
@@ -3426,7 +3425,7 @@ def test_agent_runtime_executor_prefers_explicit_empty_client_cart_over_persiste
         ).execute(run=run)
     )
 
-    assert repository.tool_call.safe_args == {"action": "reset_cart"}
+    assert repository.tool_call.safe_args == {"operation": "reset_cart"}
     assert captured_args["groups"] == []
 
 
@@ -4091,7 +4090,7 @@ class CapturingDiaryToolOutputSdkBackend:
         self.safe_output: dict[str, Any] = {}
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
-        diary_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_diary_query")
+        diary_tool = next(tool for tool in request.tools if tool.contract_name == "pregnancy_diary_read")
         invocation = await diary_tool.invoke(json.dumps({"entry_date": "2026-07-12"}))
         self.function_output = str(invocation.to_function_call_output())
         self.safe_output = invocation.to_observation()
@@ -4105,7 +4104,7 @@ class ConversationHistoryImageLoadingSdkBackend:
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         image_tool = next(
-            tool for tool in request.tools if tool.contract_name == "conversation_history_image_load"
+            tool for tool in request.tools if tool.contract_name == "conversation_history_image_read"
         )
         invocation = await image_tool.invoke(json.dumps({"image_url": self.image_url}))
         self.function_output = invocation.to_function_call_output()

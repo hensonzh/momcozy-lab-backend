@@ -82,7 +82,7 @@ def test_backend_metrics_record_tool_and_sdk_operations() -> None:
     metrics = RequestMetrics()
 
     metrics.record_agent_tool(
-        tool_name="maternal_infant_profile_read",
+        tool_name="profile_read",
         outcome="failed",
         error_code="permission_denied",
         duration_ms=3.0,
