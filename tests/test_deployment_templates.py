@@ -75,6 +75,11 @@ def test_compose_uses_local_infra_service_names_not_localhost() -> None:
     assert "redis://redis:6379/0" in env
     assert "localhost" not in env
     assert "127.0.0.1" not in env
+    assert (
+        "mc cp --overwrite /seed/agent-references/pump-models.md "
+        "local/momcozy-local/agent-references/device-service/pump-models.md"
+    ) in compose
+    assert "./assets/agent-references:/seed/agent-references:ro" in compose
 
 
 def test_compose_env_keeps_object_storage_switchable_by_environment() -> None:
@@ -327,6 +332,11 @@ def test_server_test_compose_uses_test_env_and_safe_api_bind() -> None:
     assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.test.env}" in compose
     assert "${MOMCOZY_TEST_API_BIND:-127.0.0.1:8001}:8000" in compose
     assert "mc mb --ignore-existing test/momcozy-test" in compose
+    assert (
+        "mc cp --overwrite /seed/agent-references/pump-models.md "
+        "test/momcozy-test/agent-references/device-service/pump-models.md"
+    ) in compose
+    assert "./assets/agent-references:/seed/agent-references:ro" in compose
     assert "APP_ENV=test" in env
     assert "postgresql+asyncpg://momcozy_test:momcozy_test@postgres:5432/momcozy_test" in env
     assert "REDIS_URL=redis://redis:6379/0" in env
@@ -349,6 +359,8 @@ def test_makefile_exposes_production_compose_release_targets() -> None:
     assert "$(PROD_COMPOSE) up -d --force-recreate api agent-worker memory-worker" in makefile
     assert "backend-prod-services:" in makefile
     assert "backend-prod-logs:" in makefile
+    assert "backend-publish-pump-models-reference:" in makefile
+    assert "$(PYTHON) scripts/publish_pump_models_reference.py" in makefile
 
 
 def test_makefile_exposes_server_test_compose_targets() -> None:

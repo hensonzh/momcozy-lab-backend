@@ -282,6 +282,47 @@ def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -
     assert result.failures == []
 
 
+def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recommendation() -> None:
+    case = _case("device_pump_recommendation")
+    read_only_trace = AgentEvalTrace(
+        tool_calls=[
+            {
+                "tool_name": "pump_models_read",
+                "status": "completed",
+                "safe_args": {},
+            }
+        ],
+        final_text="M9 best matches work, quiet operation, app control, and your budget.",
+    )
+    cart_mutation_trace = AgentEvalTrace(
+        tool_calls=[
+            {
+                "tool_name": "pump_models_read",
+                "status": "completed",
+                "safe_args": {},
+            },
+            {
+                "tool_name": "hospital_bag_cart_update",
+                "status": "completed",
+                "safe_args": {
+                    "action": "replace_pump_model",
+                    "product_sku_id": "pump-m9",
+                },
+            },
+        ],
+        final_text="M9 fits, and I added it to your cart.",
+    )
+
+    read_only_result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=read_only_trace)
+    cart_mutation_result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=cart_mutation_trace)
+
+    assert read_only_result.passed is True
+    assert read_only_result.failures == []
+    assert cart_mutation_result.passed is False
+    assert cart_mutation_result.failures[0].category == "forbidden_tool"
+    assert cart_mutation_result.failures[0].observed == "hospital_bag_cart_update"
+
+
 def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_operation() -> None:
     case = {
         **_case("device_unboxing_incomplete_step"),

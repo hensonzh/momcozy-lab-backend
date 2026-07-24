@@ -103,9 +103,21 @@ runtime 每次调用都注入当前线程的 workflow state、当前消息中已
 
 ### 设备服务智能体（3）
 
-`devices_guidance`、`hospital_bag_pump_recommend`、`support_ticket_propose`。
+`devices_guidance`、`pump_models_read`、`support_ticket_propose`。
 
-以上 3 个 Tool 全部直接暴露给设备服务智能体。`devices_guidance` 同时负责按主题读取官方资料和维护一步步开箱流程。
+以上 3 个 Tool 全部直接暴露给设备服务智能体。`devices_guidance` 同时负责按主题读取官方资料和维护一步步开箱流程；`pump_models_read` 从对象存储中的独立型号文档读取与具体业务流程无关的吸奶器产品事实。
+
+#### `pump_models_read` 只读型号资料契约
+
+该工具采用空对象输入，一次返回当前文档内全部型号的价格、适用场景、功能、吸力、续航、重量、噪声、App 支持、单只购买、图片和来源信息，输出 Schema 为 `pump-models.result.v1`。
+
+工具只提供可比较的产品事实，不接收用户偏好、不执行固定打分、不返回推荐型号、推荐话术或购物车同步建议。设备服务智能体读取型号文档后，结合用户在对话中表达的预算、使用场景和偏好自行比较并组织推荐回复。
+
+型号文档以 `pump_models.reference.v1` 结构化 JSON 代码块保存在 Markdown 中，运行时只从对象存储键 `agent-references/device-service/pump-models.md` 读取；不从 `skills/`、Python 常量或本地发布源回退。文档缺失或对象存储不可用时返回 `pump_models_reference_unavailable`，文档编码、结构或字段校验失败时返回 `pump_models_reference_invalid`，禁止继续使用过期的内置目录。
+
+仓库中的 `assets/agent-references/pump-models.md` 仅作为发布源。发布命令会先执行严格 Schema 校验，再上传到固定对象键；应用容器和智能体运行时均以对象存储内容为唯一事实源。`hospital_bag_cart_update` 在明确添加、替换或恢复具体吸奶器型号时复用同一个读取服务，避免推荐目录与购物车商品信息漂移；其他购物车操作不依赖该文档。
+
+推荐和购物车修改是两个独立边界：普通推荐不得修改任何 Workflow、Artifact 或购物车；只有用户在待产包购物车场景中明确要求添加或替换型号时，才单独调用 `hospital_bag_cart_update`。
 
 #### `devices_guidance` 统一契约
 

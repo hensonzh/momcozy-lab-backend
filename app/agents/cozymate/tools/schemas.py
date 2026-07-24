@@ -729,46 +729,10 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             "idempotency_key": {"type": "string", "maxLength": 255},
         },
     },
-    "hospital_bag_pump_recommend": {
+    "pump_models_read": {
         "type": "object",
         "additionalProperties": False,
-        "properties": {
-            "requested_model": {"type": ["string", "null"], "maxLength": 120},
-            "use_case": {
-                "type": "string",
-                "enum": [
-                    "unknown",
-                    "hospital_backup",
-                    "daily_home",
-                    "work_pumping",
-                    "portable",
-                    "comfort",
-                    "performance",
-                    "high_output",
-                    "budget",
-                ],
-            },
-            "feeding_intention": {"type": "string", "enum": ["unknown", "breastfeeding", "mixed", "formula"]},
-            "preference": {
-                "type": "string",
-                "enum": [
-                    "balanced",
-                    "cheapest",
-                    "comfort",
-                    "breastfeeding",
-                    "minimal",
-                    "budget",
-                    "portable",
-                    "performance",
-                    "app",
-                    "simple",
-                    "premium",
-                ],
-            },
-            "target_budget_usd": {"type": ["number", "null"], "minimum": 0},
-            "must_have_app": {"type": ["boolean", "null"]},
-            "need_single_unit": {"type": ["boolean", "null"]},
-        },
+        "properties": {},
     },
     "support_ticket_propose": {
         "type": "object",

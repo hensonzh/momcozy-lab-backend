@@ -5,29 +5,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .hospital_bag_flow import build_hospital_bag_card_json, build_hospital_bag_followup
+from .pump_models import find_pump_product
 
 
 HOSPITAL_BAG_CART_URL = "/hospital-bag-cart"
 HOSPITAL_BAG_CART_LINK = f"[打开待产包购物车]({HOSPITAL_BAG_CART_URL})"
 HOSPITAL_BAG_DISCLAIMER = "请优先遵循医院要求和医生/助产士的具体指导。"
 HOSPITAL_BAG_CART_USD_TO_CNY_RATE = 6.8
-MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL = "https://momcozy.com/collections/wearable-breast-pump"
-MOMCOZY_PUMP_OFFICIAL_OVERVIEW_URL = "https://momcozy.com/collections/electric-breast-pump"
-MOMCOZY_PUMP_SUPPORT_GUIDE_URL = "https://support.momcozy.com/article/56837165211801"
-
-MOMCOZY_PUMP_IMAGE_URLS = {
-    "milk-pump": "https://momcozy.com/cdn/shop/files/MomcozyMoblieFlow_BreastPump_7.jpg?v=1776163451",
-    "pump-s9-pro": "https://momcozy.com/cdn/shop/files/S9pro_3ff43646-b9be-4b4d-a8d8-918834d887a0.jpg?v=1699943493",
-    "pump-s12-pro-quick": "https://momcozy.com/cdn/shop/files/1.1_a787cf6f-0656-44dc-86e9-0a4f75846cbc.jpg?v=1776744837",
-    "pump-m5-smart": "https://momcozy.com/cdn/shop/files/1_b8f691a7-6acf-44dc-acbc-ed6bf82e8a9d.jpg?v=1760428066",
-    "pump-m6": "https://momcozy.com/cdn/shop/files/01_56489eac-5396-4685-aacc-3c6c14c39930.jpg?v=1775025039",
-    "pump-v1-pro": "https://momcozy.com/cdn/shop/files/lQDPJws-Zh7cFX_NBdrNBLCwLR71U5WToVIG-TXf9_H4AA_1200_1498.jpg?v=1755159282",
-    "pump-v2-pro": "https://momcozy.com/cdn/shop/files/v2pro-4.png?v=1779353933",
-    "pump-m9": "https://momcozy.com/cdn/shop/files/MomcozyMoblieFlow_BreastPump_7.jpg?v=1776163451",
-    "pump-w1": "https://momcozy.com/cdn/shop/files/1._1_app2.jpg?v=1777030861",
-    "pump-air-1": "https://momcozy.com/cdn/shop/files/MomcozyAir1Ultra-slimBreastPump_1.png?v=1740971384",
-}
 HOSPITAL_BAG_CART_PRODUCT_IMAGE_URLS = {
+    "milk-pump": "https://momcozy.com/cdn/shop/files/MomcozyMoblieFlow_BreastPump_7.jpg?v=1776163451",
     "mom-pad": "https://momcozy.com/cdn/shop/files/01_e3747022-14ff-4a12-a503-044276f89265.webp?v=1779352318",
     "mom-sanitary": "https://momcozy.com/cdn/shop/files/01_e3747022-14ff-4a12-a503-044276f89265.webp?v=1779352318",
     "mom-underwear": "https://momcozy.com/cdn/shop/files/PK006-1_-1.png?v=1779351545",
@@ -156,167 +142,6 @@ DEFAULT_HOSPITAL_BAG_CART_GROUPS: list[dict[str, Any]] = [
         ],
     },
 ]
-MOMCOZY_PUMP_PRODUCT_CATALOG: list[dict[str, Any]] = [
-    {
-        "sku_id": "pump-s9-pro",
-        "model": "S9 Pro",
-        "name": "Momcozy S9 Pro 便携式吸奶器",
-        "price_usd": 64.99,
-        "sale_price_usd": 58.49,
-        "tier": "entry",
-        "use_cases": ["budget", "hospital_backup", "daily_home"],
-        "preferences": ["budget", "simple", "balanced"],
-        "best_for": "预算优先、想先备一台简单可靠的入门款。",
-        "features": ["长续航", "LED 显示", "低噪"],
-        "suction": "最高 -285 mmHg",
-        "battery": "约 8-9 次",
-        "weight": "250 g",
-        "noise": "≤45 dB",
-        "app": False,
-        "supports_single_unit": True,
-    },
-    {
-        "sku_id": "pump-s12-pro-quick",
-        "model": "S12 Pro Quick",
-        "name": "Momcozy S12 Pro Quick 可穿戴吸奶器",
-        "price_usd": 74.99,
-        "sale_price_usd": 67.49,
-        "tier": "entry_plus",
-        "use_cases": ["budget", "hospital_backup", "daily_home", "comfort"],
-        "preferences": ["budget", "comfort", "balanced"],
-        "best_for": "第一次准备吸奶器、希望好上手和清洁方便。",
-        "features": ["新手友好", "清洁方便", "节省时间"],
-        "suction": "最高 -292 mmHg",
-        "battery": "约 7-8 次",
-        "weight": "",
-        "noise": "≤46 dB",
-        "app": False,
-        "supports_single_unit": True,
-    },
-    {
-        "sku_id": "pump-m5-smart",
-        "model": "M5 Smart",
-        "name": "Momcozy M5 Smart 可穿戴吸奶器",
-        "price_usd": 119.99,
-        "tier": "mid",
-        "use_cases": ["daily_home", "portable", "work_pumping"],
-        "preferences": ["portable", "app", "balanced"],
-        "best_for": "想要轻一些、日常使用并希望手机 App 调节。",
-        "features": ["轻量", "App 控制", "日常通勤友好"],
-        "suction": "最高 -285 mmHg",
-        "battery": "约 4-5 次",
-        "weight": "230 g",
-        "noise": "≤48 dB",
-        "app": True,
-        "supports_single_unit": True,
-    },
-    {
-        "sku_id": "pump-m6",
-        "model": "M6",
-        "name": "Momcozy M6 Mobile Style 轻薄吸奶器",
-        "price_usd": 129.99,
-        "sale_price_usd": 116.99,
-        "tier": "mid_plus",
-        "use_cases": ["daily_home", "comfort", "balanced"],
-        "preferences": ["comfort", "balanced", "performance"],
-        "best_for": "日常使用频率较高，想要舒适和输出更均衡。",
-        "features": ["舒适贴合", "稳定输出", "轻薄隐蔽"],
-        "suction": "最高 -295 mmHg",
-        "battery": "约 5-6 次",
-        "weight": "293 g",
-        "noise": "≤48 dB",
-        "app": False,
-        "supports_single_unit": True,
-    },
-    {
-        "sku_id": "pump-v1-pro",
-        "model": "V1 Pro",
-        "name": "Momcozy V1 Pro 医院级可穿戴吸奶器",
-        "price_usd": 199.99,
-        "sale_price_usd": 179.99,
-        "tier": "pro",
-        "use_cases": ["daily_home", "performance", "high_output"],
-        "preferences": ["performance", "battery", "balanced"],
-        "best_for": "更看重医院级吸力和长续航，主要在家高频使用。",
-        "features": ["医院级吸力", "长续航", "15 档吸力"],
-        "suction": "最高 -300 mmHg",
-        "battery": "约 7-9 次",
-        "weight": "280 g 电机",
-        "noise": "≤53 dB",
-        "app": False,
-        "supports_single_unit": False,
-    },
-    {
-        "sku_id": "pump-v2-pro",
-        "model": "V2 Pro",
-        "name": "Momcozy V2 Pro 医院级可穿戴吸奶器",
-        "price_usd": 199.99,
-        "sale_price_usd": 169.99,
-        "tier": "pro",
-        "use_cases": ["daily_home", "performance", "high_output", "portable"],
-        "preferences": ["performance", "portable", "balanced"],
-        "best_for": "想要医院级吸力，同时更在意轻量电机和外出便携。",
-        "features": ["医院级吸力", "超轻电机", "低噪便携"],
-        "suction": "最高 -288 mmHg",
-        "battery": "约 4-6 次",
-        "weight": "127 g 电机",
-        "noise": "≤48 dB",
-        "app": False,
-        "supports_single_unit": False,
-    },
-    {
-        "sku_id": "pump-m9",
-        "model": "M9",
-        "name": "Momcozy M9 Mobile Flow 智能吸奶器",
-        "price_usd": 159.99,
-        "sale_price_usd": 143.99,
-        "tier": "pro_app",
-        "use_cases": ["work_pumping", "portable", "performance", "high_output"],
-        "preferences": ["app", "performance", "portable"],
-        "best_for": "上班、外出或高频吸奶，希望效率高并用 App 做个性化控制。",
-        "features": ["强吸力", "App 控制", "个性化节律"],
-        "suction": "最高 -300 mmHg",
-        "battery": "约 4-5 次",
-        "weight": "302 g",
-        "noise": "≤42 dB",
-        "app": True,
-        "supports_single_unit": True,
-    },
-    {
-        "sku_id": "pump-w1",
-        "model": "W1",
-        "name": "Momcozy W1 暖感按摩可穿戴吸奶器",
-        "price_usd": 329.99,
-        "tier": "premium_comfort",
-        "use_cases": ["comfort", "daily_home"],
-        "preferences": ["comfort", "premium"],
-        "best_for": "预算更宽松，并且特别在意暖感按摩和舒适感。",
-        "features": ["暖感按摩", "Milk Boost 模式", "透明顶盖"],
-        "suction": "最高 -295 mmHg",
-        "battery": "约 10 次",
-        "weight": "325 g",
-        "noise": "≤50 dB",
-        "app": True,
-        "supports_single_unit": False,
-    },
-    {
-        "sku_id": "pump-air-1",
-        "model": "Air 1",
-        "name": "Momcozy Air 1 超薄吸奶器",
-        "price_usd": 369.99,
-        "tier": "premium_portable",
-        "use_cases": ["work_pumping", "portable", "discreet"],
-        "preferences": ["portable", "app", "premium"],
-        "best_for": "预算充足，最在意职场/外出场景里的轻薄隐蔽；这是高价轻薄升级款，不是降预算选择。",
-        "features": ["超薄", "充电盒", "App 控制"],
-        "suction": "最高 -285 mmHg",
-        "battery": "约 6-7 次，配充电盒约 15 次",
-        "weight": "260 g",
-        "noise": "≤45 dB",
-        "app": True,
-        "supports_single_unit": False,
-    },
-]
 HOSPITAL_BAG_CART_PUMP_ITEM_ID = "milk-pump"
 HOSPITAL_BAG_CART_BUDGET_REMOVE_ORDER = [
     "baby-clothes",
@@ -357,15 +182,18 @@ HOSPITAL_BAG_CART_REPLACEMENT_ORIGINAL_BY_ID = {
 }
 
 
-def create_birth_preparation_artifact_result(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+def create_birth_preparation_artifact_result(
+    tool_name: str,
+    args: dict[str, Any],
+    *,
+    pump_products: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if tool_name == "hospital_bag_form_create":
         return hospital_bag_form_result(args)
     if tool_name == "hospital_bag_card_create":
         return hospital_bag_card_result(args)
     if tool_name == "hospital_bag_cart_update":
-        return hospital_bag_cart_update_result(args)
-    if tool_name == "hospital_bag_pump_recommend":
-        return hospital_bag_pump_recommend_result(args)
+        return hospital_bag_cart_update_result(args, pump_products=pump_products)
     raise ValueError(f"Unsupported birth-preparation artifact tool: {tool_name}")
 
 
@@ -595,7 +423,12 @@ def build_birth_journey_plan_result(plan_context: dict[str, Any]) -> dict[str, A
     }
 
 
-def hospital_bag_cart_update_result(args: dict[str, Any]) -> dict[str, Any]:
+def hospital_bag_cart_update_result(
+    args: dict[str, Any],
+    *,
+    pump_products: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    available_pump_products = pump_products or []
     action = _text(args.get("action"))
     assistant_message = _text(args.get("assistant_message")) or _text(args.get("message")) or _text(args.get("summary"))
     item_ids = _string_list(args.get("item_ids"))
@@ -603,11 +436,15 @@ def hospital_bag_cart_update_result(args: dict[str, Any]) -> dict[str, Any]:
     current_groups = _cart_groups_from_args(args)
 
     if action in {"replace_pump_model", "add_pump_model"}:
-        product = _momcozy_pump_product(_text(args.get("product_sku_id")))
+        product = find_pump_product(available_pump_products, _text(args.get("product_sku_id")))
         if product is None:
-            message = assistant_message or "你想换成哪一款 Momcozy 吸奶器？比如 S12 Pro Quick、M5 Smart、M9。"
+            message = assistant_message or "你想换成哪一款 Momcozy 吸奶器？请告诉我具体型号。"
             return _cart_needs_clarification(message)
-        next_groups, changed = _upsert_hospital_bag_pump_model(current_groups, product)
+        next_groups, changed = _upsert_hospital_bag_pump_model(
+            current_groups,
+            product,
+            pump_products=available_pump_products,
+        )
         totals = _cart_totals(next_groups)
         if changed["mode"] == "unchanged":
             message = assistant_message or f"购物车里已经是「{product['name']}」了，我先不重复添加。"
@@ -670,7 +507,11 @@ def hospital_bag_cart_update_result(args: dict[str, Any]) -> dict[str, Any]:
     if action == "restore_items":
         if not item_ids:
             return _cart_needs_clarification(assistant_message or "你想加回哪一件？直接告诉我商品名就行。")
-        next_groups, restored_names = _restore_hospital_bag_cart_items(current_groups, item_ids)
+        next_groups, restored_names = _restore_hospital_bag_cart_items(
+            current_groups,
+            item_ids,
+            pump_products=available_pump_products,
+        )
         totals = _cart_totals(next_groups)
         if not restored_names:
             message = assistant_message or "这些商品已经在购物车里了，不需要重复添加。"
@@ -723,68 +564,6 @@ def hospital_bag_cart_update_result(args: dict[str, Any]) -> dict[str, Any]:
         return _cart_needs_clarification(assistant_message or "你想怎么调整购物车？比如删掉某件、换便宜一点，或者恢复默认清单。")
 
     return _cart_needs_clarification(assistant_message or "你想怎么调整待产包购物车？")
-
-
-def hospital_bag_pump_recommend_result(args: dict[str, Any]) -> dict[str, Any]:
-    use_case = _text(args.get("use_case")) or "unknown"
-    preference = _text(args.get("preference")) or "balanced"
-    feeding_intention = _text(args.get("feeding_intention")) or "unknown"
-    requested_model = _text(args.get("requested_model"))
-    target_budget_usd = _target_budget(args.get("target_budget_usd"))
-    must_have_app = args.get("must_have_app")
-    need_single_unit = args.get("need_single_unit")
-    ranked = _rank_momcozy_pump_products(
-        use_case=use_case,
-        preference=preference,
-        target_budget_usd=target_budget_usd,
-        must_have_app=must_have_app if isinstance(must_have_app, bool) else None,
-        need_single_unit=need_single_unit if isinstance(need_single_unit, bool) else None,
-    )
-    requested_product = _momcozy_pump_product(requested_model) if requested_model else None
-    if not ranked:
-        message = "我先确认一下：你更在意预算、通勤隐蔽，还是吸奶效率？这样我再帮你选型号会更准。"
-        return {
-            "tool_name": "hospital_bag_pump_recommend",
-            "status": "needs_clarification",
-            "summary": message,
-            "message": message,
-            "recommended_product": None,
-            "alternatives": [],
-            "cart_sync_suggestion": None,
-        }
-
-    recommended = requested_product or ranked[0]
-    alternatives = [product for product in ranked if product["sku_id"] != recommended["sku_id"]][:2]
-    message = _pump_recommendation_message(
-        recommended,
-        alternatives,
-        use_case=use_case,
-        preference=preference,
-        feeding_intention=feeding_intention,
-        target_budget_usd=target_budget_usd,
-        requested_model=requested_model if requested_product else None,
-    )
-    return {
-        "tool_name": "hospital_bag_pump_recommend",
-        "status": "pump_recommended",
-        "recommendation_mode": "requested_model_review" if requested_product else "ranked_recommendation",
-        "summary": message,
-        "message": message,
-        "recommended_product": _public_pump_product(recommended),
-        "alternatives": [_public_pump_product(product) for product in alternatives],
-        "price_guidance": _pump_price_guidance(recommended, alternatives),
-        "cart_sync_suggestion": {
-            "tool_name": "hospital_bag_cart_update",
-            "action": "replace_pump_model",
-            "product_sku_id": recommended["sku_id"],
-            "item_ids": [HOSPITAL_BAG_CART_PUMP_ITEM_ID],
-        },
-        "source_urls": [
-            MOMCOZY_PUMP_OFFICIAL_OVERVIEW_URL,
-            MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL,
-            MOMCOZY_PUMP_SUPPORT_GUIDE_URL,
-        ],
-    }
 
 
 def _hospital_bag_card_json(form_data: dict[str, Any], *, generation_mode: str = "standard") -> dict[str, Any]:
@@ -945,7 +724,7 @@ def _apply_default_cart_item_image(item: dict[str, Any]) -> None:
     if item.get("image_url"):
         return
     item_id = _text(item.get("id"))
-    image_url = MOMCOZY_PUMP_IMAGE_URLS.get(item_id) or HOSPITAL_BAG_CART_PRODUCT_IMAGE_URLS.get(item_id)
+    image_url = HOSPITAL_BAG_CART_PRODUCT_IMAGE_URLS.get(item_id)
     if not image_url:
         return
     item["image_url"] = image_url
@@ -1018,135 +797,8 @@ def _cart_unchanged(message: str) -> dict[str, Any]:
     }
 
 
-def _rank_momcozy_pump_products(
-    *,
-    use_case: str,
-    preference: str,
-    target_budget_usd: float | None,
-    must_have_app: bool | None,
-    need_single_unit: bool | None,
-) -> list[dict[str, Any]]:
-    scored: list[tuple[float, dict[str, Any]]] = []
-    for product in MOMCOZY_PUMP_PRODUCT_CATALOG:
-        score = 0.0
-        price = float(product["price_usd"])
-        if use_case in set(product.get("use_cases") or []):
-            score += 5
-        if preference in set(product.get("preferences") or []):
-            score += 4
-        if preference == "budget":
-            score += max(0, 4 - price / 100)
-        if preference == "balanced" and product.get("tier") in {"entry_plus", "mid", "mid_plus", "pro"}:
-            score += 2
-        if preference == "performance" and product.get("suction") == "最高 -300 mmHg":
-            score += 2
-        if must_have_app is not None:
-            score += 4 if bool(product.get("app")) == must_have_app else -5
-        if need_single_unit is not None:
-            score += 3 if bool(product.get("supports_single_unit")) == need_single_unit else -3
-        if target_budget_usd is not None:
-            score += 5 if price <= target_budget_usd else -min(8, (price - target_budget_usd) / 25)
-        score -= price / 1000
-        scored.append((score, product))
-    scored.sort(key=lambda item: (-item[0], float(item[1]["price_usd"])))
-    return [product for _, product in scored]
-
-
-def _pump_recommendation_message(
-    product: dict[str, Any],
-    alternatives: list[dict[str, Any]],
-    *,
-    use_case: str,
-    preference: str,
-    feeding_intention: str,
-    target_budget_usd: float | None,
-    requested_model: str | None = None,
-) -> str:
-    reason_parts = [_text(product.get("best_for"))]
-    feature_text = "、".join(str(feature) for feature in product.get("features", [])[:3])
-    if feature_text:
-        reason_parts.append(f"重点是{feature_text}")
-    if target_budget_usd is not None and float(product["price_usd"]) > target_budget_usd:
-        reason_parts.append(f"不过它的官方价折合约 {_pump_price_cny_label(product)}，会超过你说的约 {_money_label(_usd_to_cny(target_budget_usd), 'CNY')} 预算")
-    elif target_budget_usd is not None:
-        reason_parts.append(f"官方价折合约 {_pump_price_cny_label(product)}，在你说的约 {_money_label(_usd_to_cny(target_budget_usd), 'CNY')} 预算内")
-    else:
-        reason_parts.append(f"官方价折合约 {_pump_price_cny_label(product)}")
-
-    prefix = "我会优先看你当前的使用场景和预算，不硬推最贵款。"
-    if feeding_intention == "formula":
-        prefix = "如果你只是少量备用，我会先按轻量备用来选，不建议直接上很贵的型号。"
-    elif use_case in {"work_pumping", "portable"}:
-        prefix = "你这个场景更看重外出时好带、好操作，我会优先选便携和控制体验。"
-    elif preference == "budget":
-        prefix = "你更在意预算的话，我会先选入门里更稳的一款。"
-
-    alternative_text = ""
-    if alternatives:
-        names = "、".join(f"{item['model']}（约 {_pump_price_cny_label(item)}）" for item in alternatives)
-        alternative_text = f"备选可以看 {names}。"
-
-    if requested_model:
-        prefix = f"「{product['model']}」可以考虑，我先按它的官方价格和适用场景评估。"
-        if product["sku_id"] == "pump-air-1":
-            prefix = "「Air 1」可以考虑，但它是高价轻薄/隐蔽升级款，不是降低预算选择。"
-        return f"{prefix}\n\n{'；'.join(part for part in reason_parts if part)}。{alternative_text}"
-    return f"{prefix}\n\n我建议先选「{product['model']}」。{'；'.join(part for part in reason_parts if part)}。{alternative_text}"
-
-
-def _pump_price_guidance(product: dict[str, Any], alternatives: list[dict[str, Any]]) -> str:
-    products = [product, *alternatives]
-    if any(_text(item.get("sku_id")) == "pump-air-1" for item in products):
-        air = _momcozy_pump_product("pump-air-1") or product
-        return (
-            f"Air 1 是高价轻薄款，官方价折合约 {_pump_price_cny_label(air)}；"
-            "不能把 Air 1 描述为降低预算或省钱选择。"
-            "若用户要省预算，应优先说明 S9 Pro、S12 Pro Quick 等更低价型号。"
-        )
-    return "价格比较必须按 official_price_usd / sale_price_usd 和 price_label / sale_price_label 数值说明；不要把更高价型号描述为省预算。"
-
-
-def _public_pump_product(product: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "sku_id": product["sku_id"],
-        "model": product["model"],
-        "name": product["name"],
-        "image_url": MOMCOZY_PUMP_IMAGE_URLS.get(str(product["sku_id"]) or ""),
-        "image_alt": product["name"],
-        "official_price_usd": product["price_usd"],
-        "sale_price_usd": product.get("sale_price_usd"),
-        "price_cny": _usd_to_cny(product["price_usd"]),
-        "sale_price_cny": _usd_to_cny(product.get("sale_price_usd") or product["price_usd"]),
-        "price_label": _pump_price_cny_label(product),
-        "sale_price_label": _pump_sale_price_cny_label(product),
-        "exchange_rate_usd_cny": HOSPITAL_BAG_CART_USD_TO_CNY_RATE,
-        "price_position": _pump_price_position(product),
-        "budget_note": _pump_budget_note(product),
-        "best_for": product.get("best_for"),
-        "features": list(product.get("features") or []),
-        "suction": product.get("suction"),
-        "battery": product.get("battery"),
-        "weight": product.get("weight"),
-        "noise": product.get("noise"),
-        "app": bool(product.get("app")),
-        "supports_single_unit": bool(product.get("supports_single_unit")),
-        "source_url": MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL,
-    }
-
-
-def _momcozy_pump_product(sku_id_or_model: str) -> dict[str, Any] | None:
-    token = _item_match_key(sku_id_or_model).lower()
-    if not token:
-        return None
-    for product in MOMCOZY_PUMP_PRODUCT_CATALOG:
-        aliases = [product["sku_id"], product["model"], product["name"], str(product["model"]).replace(" ", "")]
-        if token in {_item_match_key(alias).lower() for alias in aliases}:
-            return product
-    return None
-
-
-def _hospital_bag_pump_item_ids() -> set[str]:
-    return {HOSPITAL_BAG_CART_PUMP_ITEM_ID, *(str(product["sku_id"]) for product in MOMCOZY_PUMP_PRODUCT_CATALOG)}
+def _hospital_bag_pump_item_ids(pump_products: list[dict[str, Any]]) -> set[str]:
+    return {HOSPITAL_BAG_CART_PUMP_ITEM_ID, *(str(product["sku_id"]) for product in pump_products)}
 
 
 def _hospital_bag_cart_pump_item(product: dict[str, Any]) -> dict[str, Any]:
@@ -1164,8 +816,8 @@ def _hospital_bag_cart_pump_item(product: dict[str, Any]) -> dict[str, Any]:
         "official_price_usd": float(product["price_usd"]),
         "sale_price_usd": float(product.get("sale_price_usd") or product["price_usd"]),
         "exchange_rate_usd_cny": HOSPITAL_BAG_CART_USD_TO_CNY_RATE,
-        "product_url": MOMCOZY_PUMP_OFFICIAL_COLLECTION_URL,
-        "image_url": MOMCOZY_PUMP_IMAGE_URLS.get(str(product["sku_id"]) or ""),
+        "product_url": product["source_url"],
+        "image_url": product["image_url"],
         "image_alt": product["name"],
         "keywords": ["吸奶器", "Momcozy", str(product["model"]), str(product["sku_id"])],
     }
@@ -1178,9 +830,14 @@ def _pump_cart_description(product: dict[str, Any]) -> str:
     return str(product.get("best_for") or "")
 
 
-def _upsert_hospital_bag_pump_model(groups: list[dict[str, Any]], product: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _upsert_hospital_bag_pump_model(
+    groups: list[dict[str, Any]],
+    product: dict[str, Any],
+    *,
+    pump_products: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     next_groups = _clone_hospital_bag_cart_groups(groups)
-    pump_ids = _hospital_bag_pump_item_ids()
+    pump_ids = _hospital_bag_pump_item_ids(pump_products)
     next_item = _hospital_bag_cart_pump_item(product)
     for group in next_groups:
         items = group.get("items", [])
@@ -1205,29 +862,6 @@ def _upsert_hospital_bag_pump_model(groups: list[dict[str, Any]], product: dict[
     group = _find_or_create_hospital_bag_cart_group(next_groups, "母乳喂养", "sky")
     group["items"].append(next_item)
     return next_groups, {"mode": "added", "item_id": next_item["id"], "name": next_item["name"]}
-
-
-def _pump_price_position(product: dict[str, Any]) -> str:
-    sku_id = _text(product.get("sku_id"))
-    price = float(product.get("price_usd") or 0)
-    if sku_id == "pump-air-1":
-        return "premium_highest"
-    if price >= 300:
-        return "premium_high"
-    if price >= 150:
-        return "upper_mid"
-    if price >= 100:
-        return "mid"
-    return "budget"
-
-
-def _pump_budget_note(product: dict[str, Any]) -> str:
-    sku_id = _text(product.get("sku_id"))
-    if sku_id == "pump-air-1":
-        return "Air 1 是高价轻薄/隐蔽升级选择，不适合描述为降低预算；预算优先时应看 S9 Pro 或 S12 Pro Quick。"
-    if sku_id in {"pump-s9-pro", "pump-s12-pro-quick"}:
-        return "预算优先时更适合优先考虑。"
-    return "按功能、舒适度和预算综合比较。"
 
 
 def _pump_price_cny_label(product: dict[str, Any]) -> str:
@@ -1271,7 +905,7 @@ def _optimize_hospital_bag_cart_budget(
     protected_ids = set(HOSPITAL_BAG_CART_PROTECTED_ITEM_IDS)
     protected_ids.update(preserve_item_ids)
     if not allow_remove_pump:
-        protected_ids.update(_hospital_bag_pump_item_ids())
+        protected_ids.update(_pump_item_ids_in_groups(groups))
 
     replaced_items: list[dict[str, Any]] = []
     if preference != "comfort":
@@ -1287,7 +921,11 @@ def _optimize_hospital_bag_cart_budget(
         )
         removed_ids = _ids_for_names(groups, removed_names)
     else:
-        for item_id in _budget_removal_order(allow_remove_pump=allow_remove_pump, preference=preference):
+        for item_id in _budget_removal_order(
+            allow_remove_pump=allow_remove_pump,
+            preference=preference,
+            groups=next_groups,
+        ):
             if item_id in protected_ids:
                 continue
             totals = _cart_totals(next_groups)
@@ -1313,15 +951,29 @@ def _optimize_hospital_bag_cart_budget(
     }
 
 
-def _budget_removal_order(*, allow_remove_pump: bool, preference: str) -> list[str]:
+def _budget_removal_order(
+    *,
+    allow_remove_pump: bool,
+    preference: str,
+    groups: list[dict[str, Any]],
+) -> list[str]:
     order = list(HOSPITAL_BAG_CART_BUDGET_REMOVE_ORDER)
     if preference == "breastfeeding":
         order = [item_id for item_id in order if item_id not in {"milk-pad", "milk-cream", "milk-storage", "milk-bottle"}] + [
             item_id for item_id in order if item_id in {"milk-pad", "milk-cream", "milk-storage", "milk-bottle"}
         ]
     if allow_remove_pump:
-        order.extend(sorted(_hospital_bag_pump_item_ids()))
+        order.extend(sorted(_pump_item_ids_in_groups(groups)))
     return order
+
+
+def _pump_item_ids_in_groups(groups: list[dict[str, Any]]) -> set[str]:
+    return {
+        _text(item.get("id"))
+        for group in groups
+        for item in group.get("items", [])
+        if isinstance(item, dict) and (_text(item.get("id")) == HOSPITAL_BAG_CART_PUMP_ITEM_ID or "吸奶器" in _text(item.get("name")))
+    }
 
 
 def _hospital_bag_budget_message(budget_result: dict[str, Any]) -> str:
@@ -1417,7 +1069,12 @@ def _remove_hospital_bag_cart_items(groups: list[dict[str, Any]], item_ids: list
     return next_groups, removed_names
 
 
-def _restore_hospital_bag_cart_items(groups: list[dict[str, Any]], item_ids: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+def _restore_hospital_bag_cart_items(
+    groups: list[dict[str, Any]],
+    item_ids: list[str],
+    *,
+    pump_products: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
     next_groups = _clone_hospital_bag_cart_groups(groups)
     existing_ids = {_text(item.get("id")) for group in next_groups for item in group.get("items", []) if isinstance(item, dict)}
     restored_names: list[str] = []
@@ -1425,7 +1082,7 @@ def _restore_hospital_bag_cart_items(groups: list[dict[str, Any]], item_ids: lis
         if item_id in existing_ids:
             continue
         original_id = HOSPITAL_BAG_CART_REPLACEMENT_ORIGINAL_BY_ID.get(item_id, item_id)
-        default = _default_hospital_bag_cart_item(original_id)
+        default = _default_hospital_bag_cart_item(original_id, pump_products=pump_products)
         if default is None:
             continue
         group_title, group_tone, item = default
@@ -1475,8 +1132,12 @@ def _update_hospital_bag_cart_quantities(
     return next_groups, updated_names, removed_names
 
 
-def _default_hospital_bag_cart_item(item_id: str) -> tuple[str, str, dict[str, Any]] | None:
-    product = _momcozy_pump_product(item_id)
+def _default_hospital_bag_cart_item(
+    item_id: str,
+    *,
+    pump_products: list[dict[str, Any]],
+) -> tuple[str, str, dict[str, Any]] | None:
+    product = find_pump_product(pump_products, item_id)
     if product:
         return "母乳喂养", "sky", _hospital_bag_cart_pump_item(product)
     for group in DEFAULT_HOSPITAL_BAG_CART_GROUPS:

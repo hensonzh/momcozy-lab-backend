@@ -45,6 +45,7 @@ from .plans_diary import (
 )
 from .devices import (
     DeviceGuidanceToolHandler,
+    PumpModelsReadToolHandler,
     ConversationHistoryImageLoadToolHandler,
 )
 from .pregnancy_plan import PregnancyPlanWorkflowToolHandler
@@ -54,6 +55,7 @@ __all__ = [
     "BirthPreparationArtifactToolHandler",
     "ConversationHistoryImageLoadToolHandler",
     "DeviceGuidanceToolHandler",
+    "PumpModelsReadToolHandler",
     "FeedingRecordDeleteProposeToolHandler",
     "FeedingRecordProposeToolHandler",
     "GrowthRecordDeleteProposeToolHandler",

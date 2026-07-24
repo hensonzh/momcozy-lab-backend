@@ -115,7 +115,10 @@ services:
         sleep 1;
       done;
       mc mb --ignore-existing test/momcozy-test;
+      mc cp --overwrite /seed/agent-references/pump-models.md test/momcozy-test/agent-references/device-service/pump-models.md;
       "
+    volumes:
+      - ./assets/agent-references:/seed/agent-references:ro
 
 volumes:
   postgres_test_data:

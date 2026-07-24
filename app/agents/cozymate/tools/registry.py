@@ -487,15 +487,17 @@ def default_tool_registry() -> ToolContractRegistry:
     )
     registry.register(
         _tool_contract(
-            name="hospital_bag_pump_recommend",
-            domain="hospital_bag",
+            name="pump_models_read",
+            domain="devices",
             description=(
-                "根据当前用户的预算、使用场景和偏好，从 Momcozy 官方目录推荐吸奶器型号并返回购物车同步建议。"
-                "用户在购买前询问适合的型号、型号差异、预算内选择、价格或点名某型号时调用。"
+                "从对象存储中的官方型号资料文档读取 Momcozy 全部吸奶器型号事实，包括价格、适用场景、"
+                "功能、吸力、续航、重量、噪声、App 和单只购买信息。用户询问吸奶器推荐、型号差异、"
+                "预算内选择、价格、功能或点名某型号时调用。工具只提供产品事实，不排序、不替用户做决定、"
+                "不修改购物车；调用后由智能体结合用户需求自行比较型号并组织推荐回复。"
             ),
-            effect_scope="agent_internal",
+            effect_scope="none",
             blocking_policy="must_wait",
-            result_dependency="final_response",
+            result_dependency="next_tool_call",
             timeout_seconds=15,
         )
     )

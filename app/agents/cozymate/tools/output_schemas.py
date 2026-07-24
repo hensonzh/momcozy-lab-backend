@@ -11,6 +11,99 @@ JsonSchema = dict[str, Any]
 
 _TOOL_OUTPUT_SCHEMAS: dict[str, JsonSchema] = {
     "lactation_context_read": LactationContextReadOutput.model_json_schema(),
+    "pump_models_read": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema_version",
+            "status",
+            "currency",
+            "count",
+            "products",
+            "source_urls",
+        ],
+        "properties": {
+            "schema_version": {
+                "type": "string",
+                "enum": ["pump-models.result.v1"],
+            },
+            "status": {
+                "type": "string",
+                "enum": ["models_ready"],
+            },
+            "currency": {
+                "type": "string",
+                "enum": ["USD"],
+            },
+            "count": {
+                "type": "integer",
+                "minimum": 0,
+            },
+            "products": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "sku_id",
+                        "model",
+                        "name",
+                        "official_price",
+                        "sale_price",
+                        "tier",
+                        "use_cases",
+                        "preference_tags",
+                        "best_for",
+                        "features",
+                        "suction",
+                        "battery",
+                        "weight",
+                        "noise",
+                        "app_supported",
+                        "single_unit_available",
+                        "image_url",
+                        "source_url",
+                    ],
+                    "properties": {
+                        "sku_id": {"type": "string"},
+                        "model": {"type": "string"},
+                        "name": {"type": "string"},
+                        "official_price": {"type": "number", "minimum": 0},
+                        "sale_price": {
+                            "type": ["number", "null"],
+                            "minimum": 0,
+                        },
+                        "tier": {"type": "string"},
+                        "use_cases": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "preference_tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "best_for": {"type": "string"},
+                        "features": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "suction": {"type": "string"},
+                        "battery": {"type": "string"},
+                        "weight": {"type": ["string", "null"]},
+                        "noise": {"type": "string"},
+                        "app_supported": {"type": "boolean"},
+                        "single_unit_available": {"type": "boolean"},
+                        "image_url": {"type": "string"},
+                        "source_url": {"type": "string"},
+                    },
+                },
+            },
+            "source_urls": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+    },
 }
 
 

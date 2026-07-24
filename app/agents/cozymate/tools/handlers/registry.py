@@ -11,6 +11,7 @@ from app.modules.profiles.lactation_context import LactationContextService
 from app.modules.profiles.service import ProfileService
 from app.modules.records.service import RecordsService
 from app.agents.cozymate.device_guidance import DeviceGuidanceReferenceService
+from app.agents.cozymate.tools.pump_models import PumpModelsReferenceService
 
 
 from .birth_support import (
@@ -19,7 +20,6 @@ from .birth_support import (
     SupportTicketProposeToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     IbclcConsultCardCreateToolHandler,
-    BirthPreparationArtifactToolHandler,
     HospitalBagWorkflowToolHandler,
 )
 from .milk import (
@@ -55,6 +55,7 @@ from .plans_diary import (
 from .pregnancy_plan import PregnancyPlanWorkflowToolHandler
 from .devices import (
     DeviceGuidanceToolHandler,
+    PumpModelsReadToolHandler,
     ConversationHistoryImageLoadToolHandler,
 )
 
@@ -72,6 +73,7 @@ def build_default_tool_handlers(
     device_guidance_reference_service: DeviceGuidanceReferenceService | None = None,
 ) -> dict[str, ToolHandler]:
     guidance_reference_service = device_guidance_reference_service or DeviceGuidanceReferenceService()
+    pump_models_service = PumpModelsReferenceService(object_storage=object_storage)
     handlers: dict[str, ToolHandler] = {
         "profile_read": ProfileReadToolHandler(service=profile_service),
         "profile_update": ProfileUpdateToolHandler(runtime_service=agent_runtime_service),
@@ -106,6 +108,7 @@ def build_default_tool_handlers(
             asset_service=asset_service,
             reference_service=guidance_reference_service,
         ),
+        "pump_models_read": PumpModelsReadToolHandler(service=pump_models_service),
         "conversation_history_image_load": ConversationHistoryImageLoadToolHandler(
             asset_service=asset_service,
             object_storage=object_storage,
@@ -138,10 +141,8 @@ def build_default_tool_handlers(
             runtime_service=agent_runtime_service
         ),
         "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(
-            runtime_service=agent_runtime_service
-        ),
-        "hospital_bag_pump_recommend": BirthPreparationArtifactToolHandler(
-            runtime_service=agent_runtime_service, tool_name="hospital_bag_pump_recommend"
+            runtime_service=agent_runtime_service,
+            pump_models_service=pump_models_service,
         ),
         "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
         "support_ticket_propose": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),

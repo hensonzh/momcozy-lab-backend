@@ -8,7 +8,7 @@ COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f docker-
 TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE) docker compose -f docker-compose.test.yml
 PROD_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PROD_COMPOSE_ENV_FILE) docker compose -f docker-compose.prod.yml
 
-.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-agent-device-decision-eval backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
+.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-workers backend-workers backend-local-minio backend-test-build backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset backend-test-ps backend-test-logs backend-prod-build backend-prod-migrate backend-prod-up backend-prod-services backend-prod-down backend-prod-ps backend-prod-logs backend-publish-pump-models-reference backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-agent-device-decision-eval backend-test-smoke backend-prod-readiness backend-worker-backlog backend-agent-recover-stuck-runs backend-env-print
 
 backend-local-build:
 	$(MAKE) backend-build
@@ -99,6 +99,10 @@ backend-prod-ps:
 backend-prod-logs:
 	$(PROD_COMPOSE) logs -f api agent-worker memory-worker
 
+backend-publish-pump-models-reference:
+	set -a; . $(BACKEND_ENV_FILE); set +a; \
+	$(PYTHON) scripts/publish_pump_models_reference.py
+
 backend-export-contracts:
 	$(PYTHON) scripts/export_openapi.py --output docs/openapi.generated.json
 	$(PYTHON) scripts/export_api_surface_catalog.py --openapi-input docs/openapi.generated.json --output docs/api-surface-catalog.md
@@ -108,7 +112,8 @@ backend-check-infra:
 	$(PYTHON) scripts/check_database_profile.py; \
 	$(PYTHON) scripts/check_redis_runtime_controls.py; \
 	$(PYTHON) scripts/check_object_storage_profile.py; \
-	$(PYTHON) scripts/check_product_asset_storage.py
+	$(PYTHON) scripts/check_product_asset_storage.py; \
+	$(PYTHON) scripts/check_pump_models_reference.py
 
 backend-productization-status:
 	$(PYTHON) scripts/check_productization_status.py

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from app.core.errors import ApiError
@@ -22,6 +22,7 @@ from app.agents.cozymate.tools.hospital_bag_flow import (
     HOSPITAL_BAG_FORM_ID,
     HOSPITAL_BAG_URGENT_RESPONSE,
 )
+from app.agents.cozymate.tools.pump_models import PumpModelsReferenceService
 from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FORM_ID,
     PregnancyPlanPhase,
@@ -205,8 +206,14 @@ class SupportTicketProposeToolHandler(_StandardToolHandler):
 
 
 class HospitalBagCartUpdateProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_service: AgentRuntimeService,
+        pump_models_service: PumpModelsReferenceService | None = None,
+    ) -> None:
         self.runtime_service = runtime_service
+        self.pump_models_service = pump_models_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         artifact_result: dict[str, Any] = {}
@@ -214,7 +221,14 @@ class HospitalBagCartUpdateProposeToolHandler(_StandardToolHandler):
         if not isinstance(cart_update, dict) or not cart_update:
             if not _text(context.args, "action"):
                 raise ApiError(code="validation_failed", message="action is required.", status=422)
-            artifact_result = hospital_bag_cart_update_result(context.args)
+            pump_products = await _pump_products_for_cart_action(
+                args=context.args,
+                service=self.pump_models_service,
+            )
+            artifact_result = hospital_bag_cart_update_result(
+                context.args,
+                pump_products=pump_products,
+            )
             if _text(artifact_result, "status") not in {"cart_updated"}:
                 return artifact_result
             cart_update = artifact_result.get("cart_update")
@@ -295,12 +309,31 @@ class IbclcConsultCardCreateToolHandler(_StandardToolHandler):
 
 
 class BirthPreparationArtifactToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService, tool_name: str) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_service: AgentRuntimeService,
+        tool_name: str,
+        pump_models_service: PumpModelsReferenceService | None = None,
+    ) -> None:
         self.runtime_service = runtime_service
         self.tool_name = tool_name
+        self.pump_models_service = pump_models_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        result = create_birth_preparation_artifact_result(self.tool_name, context.args)
+        pump_products = (
+            await _pump_products_for_cart_action(
+                args=context.args,
+                service=self.pump_models_service,
+            )
+            if self.tool_name == "hospital_bag_cart_update"
+            else []
+        )
+        result = create_birth_preparation_artifact_result(
+            self.tool_name,
+            context.args,
+            pump_products=pump_products,
+        )
         artifact_record = artifact_record_from_birth_preparation_result(result)
         if artifact_record is None:
             return result
@@ -321,6 +354,31 @@ class BirthPreparationArtifactToolHandler(_StandardToolHandler):
             "schema_version": artifact.schema_version,
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
+
+
+async def _pump_products_for_cart_action(
+    *,
+    args: dict[str, Any],
+    service: PumpModelsReferenceService | None,
+) -> list[dict[str, Any]]:
+    if not _cart_action_requires_pump_models(args):
+        return []
+    reference_service = service or PumpModelsReferenceService(object_storage=None)
+    reference = await reference_service.read()
+    return cast(list[dict[str, Any]], reference["products"])
+
+
+def _cart_action_requires_pump_models(args: dict[str, Any]) -> bool:
+    action = _text(args, "action")
+    if action in {"replace_pump_model", "add_pump_model"}:
+        return bool(_text(args, "product_sku_id"))
+    if action != "restore_items":
+        return False
+    item_ids = args.get("item_ids")
+    return isinstance(item_ids, list) and any(
+        isinstance(item_id, str) and item_id.strip().startswith("pump-")
+        for item_id in item_ids
+    )
 
 
 class HospitalBagFormCreateToolHandler(_StandardToolHandler):

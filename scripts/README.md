@@ -45,6 +45,8 @@ set -a; . env/compose.local.env.example; set +a
 | 脚本 | 用途 | 启动时间 | 启动方式 |
 |---|---|---|---|
 | `build_product_asset_manifest.py` | 根据本地素材目录生成 `product-assets.manifest.json`，用于产品素材发布流程。 | 新增、删除或重命名官方产品素材时手动运行。 | `python scripts/build_product_asset_manifest.py --source-root <asset-dir> --output assets/product-assets.manifest.json --object-key-prefix product-assets/device-guidance/assets` |
+| `publish_pump_models_reference.py` | 严格校验吸奶器型号 Markdown，并上传到智能体固定对象键。 | 型号、价格或产品事实更新后运行。 | `python scripts/publish_pump_models_reference.py --source assets/agent-references/pump-models.md` |
+| `check_pump_models_reference.py` | 检查对象存储中的吸奶器型号文档存在且可通过运行时 Schema 校验。 | 发布后、环境检查和上线前运行。 | `python scripts/check_pump_models_reference.py` |
 | `check_backup_restore_hooks.py` | 检查 PostgreSQL 和对象存储的备份/恢复 hook 配置是否完整。 | PR CI、发布前、生产运维检查时运行。 | `python scripts/check_backup_restore_hooks.py`; 生产严格检查用 `--strict` |
 | `check_database_profile.py` | 检查当前 env 下 PostgreSQL 是否可连接。 | `backend-check-infra`、test smoke、production readiness。 | `set -a; . <env-file>; set +a; python scripts/check_database_profile.py` |
 | `check_object_storage_profile.py` | 对当前对象存储执行临时 `put/get/delete`，验证 provider 可用。 | `backend-check-infra`、CI MinIO 集成测试、test/prod readiness。 | `python scripts/check_object_storage_profile.py` |

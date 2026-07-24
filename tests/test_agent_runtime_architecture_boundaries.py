@@ -535,6 +535,7 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
         ("pregnancy_plan_workflow", "user_resource", "pregnancy.plan.create"),
         ("pregnancy_diary_save", "user_resource", "pregnancy_diary.entry.save"),
         ("devices_guidance", "agent_internal", None),
+        ("pump_models_read", "none", None),
         ("hospital_bag_workflow", "agent_internal", None),
         ("support_ticket_propose", "agent_internal", None),
     ],
@@ -554,7 +555,7 @@ def test_all_tool_contracts_are_available_for_direct_responses_exposure() -> Non
     registry = default_tool_registry()
     device_tool_names = {
         "devices_guidance",
-        "hospital_bag_pump_recommend",
+        "pump_models_read",
         "support_ticket_propose",
     }
 
@@ -565,6 +566,7 @@ def test_all_tool_contracts_are_available_for_direct_responses_exposure() -> Non
         "devices_pump_status_read",
         "devices_guidance_read",
         "devices_unboxing_advance",
+        "hospital_bag_pump_recommend",
         "records_growth_read",
     }.isdisjoint(registry.names_for_sdk())
 
@@ -641,7 +643,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     growth_update_schema = registry.get("records_growth_record_update_propose").input_schema
     hospital_bag_workflow_schema = registry.get("hospital_bag_workflow").input_schema
     hospital_bag_cart_schema = registry.get("hospital_bag_cart_update").input_schema
-    pump_recommend_schema = registry.get("hospital_bag_pump_recommend").input_schema
+    pump_models_contract = registry.get("pump_models_read")
+    pump_models_schema = pump_models_contract.input_schema
     ibclc_schema = registry.get("ibclc_consult_card_create").input_schema
 
     assert profile_schema == {
@@ -813,17 +816,31 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert "groups" not in hospital_bag_cart_schema["properties"]
     assert "confirmed_form_data" not in hospital_bag_cart_schema["properties"]
     assert hospital_bag_cart_schema["properties"]["quantity_updates"]["type"] == "array"
-    assert pump_recommend_schema["additionalProperties"] is False
-    assert "confirmed_form_data" not in pump_recommend_schema["properties"]
-    assert set(pump_recommend_schema["properties"]) == {
-        "requested_model",
-        "use_case",
-        "feeding_intention",
-        "preference",
-        "target_budget_usd",
-        "must_have_app",
-        "need_single_unit",
+    assert pump_models_contract.domain == "devices"
+    assert pump_models_contract.effect_scope == "none"
+    assert pump_models_contract.result_dependency == "next_tool_call"
+    assert "对象存储" in pump_models_contract.description
+    assert "智能体结合用户需求自行比较型号" in pump_models_contract.description
+    assert "不修改购物车" in pump_models_contract.description
+    assert pump_models_schema == {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {},
     }
+    assert pump_models_contract.output_schema is not None
+    assert pump_models_contract.output_schema["required"] == [
+        "schema_version",
+        "status",
+        "currency",
+        "count",
+        "products",
+        "source_urls",
+    ]
+    assert {
+        "recommended_product",
+        "alternatives",
+        "cart_sync_suggestion",
+    }.isdisjoint(pump_models_contract.output_schema["properties"])
     assert ibclc_schema["required"] == ["reason"]
     assert ibclc_schema["properties"]["urgency"]["enum"] == ["routine", "soon", "urgent"]
 
