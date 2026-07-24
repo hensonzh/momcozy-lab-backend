@@ -252,45 +252,30 @@ def _artifact_completed_label(artifact_type: str) -> str:
 
 
 _TOOL_COPY: dict[str, dict[str, str]] = {
-    "profile_read": {
-        "phase": "reading",
-        "started": "我先看看你的基础信息～",
-        "completed": "我把基础信息看好啦",
-    },
-    "profile_update": {
+    "lactation_timeline_manage": {
         "phase": "saving",
-        "started": "我先帮你记一下基础信息～",
-        "completed": "我已经保存好基础信息啦",
+        "started": "我先帮你处理这项奶量日程或记录～",
+        "completed": "我已经处理好这项奶量日程或记录啦",
     },
-    "records_milk_status_read": {
+    "lactation_timeline_read": {
         "phase": "reading",
-        "started": "我先看看今天的奶量状态～",
-        "completed": "我看好今天的奶量状态啦",
+        "started": "我先看看奶量日程和实际记录～",
+        "completed": "我把奶量日程和实际记录整理好啦",
     },
-    "records_milk_summary_read": {
-        "phase": "reading",
-        "started": "我先看看吸奶和喂养记录～",
-        "completed": "我把吸奶和喂养记录整理好啦",
-    },
-    "records_milk_analysis_read": {
-        "phase": "reading",
-        "started": "我先看看之前的奶量分析～",
-        "completed": "我把奶量分析看好啦",
-    },
-    "records_milk_analysis_intake": {
-        "phase": "reading",
-        "started": "我先把奶量分析需要的信息核对齐全～",
-        "completed": "我把需要的信息核对好啦",
-    },
-    "records_milk_analysis_evaluate": {
+    "milk_analysis": {
         "phase": "evaluating",
-        "started": "我来综合评估一下奶量问题～",
-        "completed": "我完成奶量分析啦",
+        "started": "我先核对并分析一下奶量情况～",
+        "completed": "我把奶量情况分析好啦",
     },
-    "lactation_context_read": {
+    "maternal_infant_profile_read": {
         "phase": "reading",
-        "started": "我先看看奶量分析需要的母婴基础信息～",
-        "completed": "我把母婴基础信息整理好啦",
+        "started": "我先看看妈妈和宝宝的基础信息～",
+        "completed": "我把妈妈和宝宝的基础信息整理好啦",
+    },
+    "maternal_infant_profile_update": {
+        "phase": "saving",
+        "started": "我先帮你更新妈妈和宝宝的基础信息～",
+        "completed": "我已经保存好妈妈和宝宝的基础信息啦",
     },
     "plans_current_read": {
         "phase": "reading",
@@ -337,11 +322,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你整理奶量计划～",
         "completed": "我已经准备好奶量计划预览，等你确认～",
     },
-    "plans_milk_schedule_propose": {
-        "phase": "planning",
-        "started": "我先帮你调整一下日程～",
-        "completed": "我整理好日程调整预览啦",
-    },
     "plans_task_create_propose": {
         "phase": "planning",
         "started": "我先帮你准备一项任务～",
@@ -362,16 +342,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你确认要删除的任务～",
         "completed": "我已经准备好任务删除预览，等你确认～",
     },
-    "plans_milk_task_update_propose": {
-        "phase": "planning",
-        "started": "我先帮你调整奶量任务～",
-        "completed": "我已经准备好奶量任务修改，等你确认～",
-    },
-    "plans_milk_task_delete_propose": {
-        "phase": "planning",
-        "started": "我先帮你确认要删除的奶量任务～",
-        "completed": "我已经准备好奶量任务删除预览，等你确认～",
-    },
     "plans_plan_delete_propose": {
         "phase": "planning",
         "started": "我先帮你确认要删除的计划～",
@@ -381,41 +351,6 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "phase": "planning",
         "started": "我先帮你准备奶量提醒～",
         "completed": "我已经准备好提醒预览，等你确认～",
-    },
-    "records_feeding_record_propose": {
-        "phase": "planning",
-        "started": "我先帮你整理这条喂养记录～",
-        "completed": "我已经准备好喂养记录预览，等你确认～",
-    },
-    "records_pumping_record_propose": {
-        "phase": "planning",
-        "started": "我先帮你整理这条吸奶记录～",
-        "completed": "我已经准备好吸奶记录预览，等你确认～",
-    },
-    "records_feeding_record_delete_propose": {
-        "phase": "planning",
-        "started": "我先帮你确认要删除的喂养记录～",
-        "completed": "我已经准备好删除预览，等你确认～",
-    },
-    "records_pumping_record_delete_propose": {
-        "phase": "planning",
-        "started": "我先帮你确认要删除的吸奶记录～",
-        "completed": "我已经准备好删除预览，等你确认～",
-    },
-    "records_growth_record_propose": {
-        "phase": "planning",
-        "started": "我先帮你整理宝宝成长记录～",
-        "completed": "我已经准备好成长记录预览，等你确认～",
-    },
-    "records_growth_record_update_propose": {
-        "phase": "planning",
-        "started": "我先帮你调整宝宝成长记录～",
-        "completed": "我已经准备好成长记录修改，等你确认～",
-    },
-    "records_growth_record_delete_propose": {
-        "phase": "planning",
-        "started": "我先帮你确认要删除的成长记录～",
-        "completed": "我已经准备好成长记录删除预览，等你确认～",
     },
     "hospital_bag_form_create": {
         "phase": "planning",

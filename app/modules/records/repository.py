@@ -92,6 +92,21 @@ class RecordsRepository:
         )
         return cast(FeedingRecord | None, await self.session.scalar(statement))
 
+    async def update_feeding(
+        self,
+        *,
+        record_id: UUID,
+        owner_user_id: UUID,
+        updates: dict[str, Any],
+    ) -> FeedingRecord | None:
+        record = await self.get_feeding_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            return None
+        for field, value in updates.items():
+            setattr(record, field, value)
+        await self.session.flush()
+        return record
+
     async def list_feedings(
         self,
         *,
@@ -163,6 +178,21 @@ class RecordsRepository:
             PumpingRecord.deleted_at.is_(None),
         )
         return cast(PumpingRecord | None, await self.session.scalar(statement))
+
+    async def update_pumping(
+        self,
+        *,
+        record_id: UUID,
+        owner_user_id: UUID,
+        updates: dict[str, Any],
+    ) -> PumpingRecord | None:
+        record = await self.get_pumping_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            return None
+        for field, value in updates.items():
+            setattr(record, field, value)
+        await self.session.flush()
+        return record
 
     async def list_pumpings(
         self,
@@ -260,6 +290,29 @@ class RecordsRepository:
         if infant_id is not None:
             conditions.append(GrowthRecord.infant_id == infant_id)
         statement = select(GrowthRecord).where(*conditions).order_by(GrowthRecord.measured_at.desc()).limit(limit)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_growth_in_range(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime,
+        end_at: datetime,
+        limit: int,
+    ) -> list[GrowthRecord]:
+        statement = (
+            select(GrowthRecord)
+            .where(
+                GrowthRecord.owner_user_id == owner_user_id,
+                GrowthRecord.status == "active",
+                GrowthRecord.deleted_at.is_(None),
+                GrowthRecord.measured_at >= start_at,
+                GrowthRecord.measured_at < end_at,
+            )
+            .order_by(GrowthRecord.measured_at.desc(), GrowthRecord.id.desc())
+            .limit(limit)
+        )
         result = await self.session.scalars(statement)
         return list(result.all())
 

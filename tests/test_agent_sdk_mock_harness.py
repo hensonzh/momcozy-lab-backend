@@ -25,8 +25,8 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
         [
             scripted_sdk_response(
                 final_text="I read your profile.",
-                tool_invocations=(scripted_tool_invocation("profile_read", {"limit": 1}),),
-                expected_available_tools=("profile_read",),
+                tool_invocations=(scripted_tool_invocation("plans_current_read", {"limit": 1}),),
+                expected_available_tools=("plans_current_read",),
             )
         ]
     )
@@ -36,10 +36,10 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "read profile"}],
-        tool_names=("profile_read",),
+        tool_names=("plans_current_read",),
         tools=(
             SdkToolDefinition(
-                contract_name="profile_read",
+                contract_name="plans_current_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "additionalProperties": False, "properties": {}},
                 invoke=invoke_json,
@@ -53,7 +53,7 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
     assert invoked_args == ['{"limit": 1}']
     assert result.tool_calls == [
         {
-            "tool_name": "profile_read",
+            "tool_name": "plans_current_read",
             "status": "completed",
             "args": {"limit": 1},
             "safe_output": {"profile": {"preferred_name": "Mai"}},
@@ -110,7 +110,7 @@ def test_scripted_sdk_backend_fails_on_missing_tool_contract() -> None:
         [
             scripted_sdk_response(
                 final_text="",
-                tool_invocations=(scripted_tool_invocation("profile_read"),),
+                tool_invocations=(scripted_tool_invocation("plans_current_read"),),
             )
         ]
     )
@@ -128,7 +128,7 @@ def test_scripted_sdk_backend_fails_on_missing_tool_contract() -> None:
         asyncio.run(OpenAIResponsesRunner(backend=backend).run_reasoning(request))
 
     assert exc_info.value.code == "sdk_mock_contract_mismatch"
-    assert exc_info.value.details == {"tool_name": "profile_read"}
+    assert exc_info.value.details == {"tool_name": "plans_current_read"}
 
 
 def test_responses_runner_preserves_sanitized_provider_error_details() -> None:

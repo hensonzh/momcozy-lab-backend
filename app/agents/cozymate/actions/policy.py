@@ -48,6 +48,18 @@ COZYMATE_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="low",
         requires_confirmation=False,
     ),
+    "records.feeding_record.update": AgentActionPolicyRule(
+        action_type="records.feeding_record.update",
+        target_type="feeding_record",
+        side_effect_level="medium",
+        requires_confirmation=False,
+    ),
+    "records.pumping_record.update": AgentActionPolicyRule(
+        action_type="records.pumping_record.update",
+        target_type="pumping_record",
+        side_effect_level="medium",
+        requires_confirmation=False,
+    ),
     "records.feeding_record.delete": AgentActionPolicyRule(
         action_type="records.feeding_record.delete",
         target_type="feeding_record",

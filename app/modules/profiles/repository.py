@@ -20,7 +20,9 @@ from .models import (
 
 @dataclass(frozen=True)
 class LactationMotherContext:
+    preferred_name: str | None
     age: int | None
+    estimated_due_date: date | None
     delivery_count: int | None
     latest_delivery_method: str | None
     latest_delivery_date: date | None
@@ -31,6 +33,7 @@ class LactationMotherContext:
 @dataclass(frozen=True)
 class LactationInfantContext:
     infant_id: UUID
+    name: str
     sex_at_birth: str | None
     birth_date: date | None
     birth_weight_kg: float | None
@@ -189,7 +192,9 @@ class ProfileRepository:
     ) -> LactationMotherContext:
         statement = (
             select(
+                UserProfile.preferred_name.label("preferred_name"),
                 UserProfile.age.label("age"),
+                UserProfile.estimated_due_date.label("estimated_due_date"),
                 MaternalProfile.delivery_count.label("delivery_count"),
                 MaternalProfile.latest_delivery_method.label("latest_delivery_method"),
                 MaternalProfile.latest_delivery_date.label("latest_delivery_date"),
@@ -205,7 +210,9 @@ class ProfileRepository:
         row = (await self.session.execute(statement)).one_or_none()
         if row is None:
             return LactationMotherContext(
+                preferred_name=None,
                 age=None,
+                estimated_due_date=None,
                 delivery_count=None,
                 latest_delivery_method=None,
                 latest_delivery_date=None,
@@ -213,7 +220,9 @@ class ProfileRepository:
                 current_feeding_mode=None,
             )
         return LactationMotherContext(
+            preferred_name=row.preferred_name,
             age=row.age,
+            estimated_due_date=row.estimated_due_date,
             delivery_count=row.delivery_count,
             latest_delivery_method=row.latest_delivery_method,
             latest_delivery_date=row.latest_delivery_date,
@@ -230,6 +239,7 @@ class ProfileRepository:
             select(
                 MaternalCurrentDeliveryInfant.birth_order.label("birth_order"),
                 InfantProfile.id.label("infant_id"),
+                InfantProfile.name.label("name"),
                 InfantProfile.sex_at_birth.label("sex_at_birth"),
                 InfantProfile.birth_date.label("birth_date"),
                 InfantProfile.birth_weight_kg.label("birth_weight_kg"),
@@ -256,6 +266,7 @@ class ProfileRepository:
                 row.birth_order,
                 LactationInfantContext(
                     infant_id=row.infant_id,
+                    name=row.name,
                     sex_at_birth=row.sex_at_birth,
                     birth_date=row.birth_date,
                     birth_weight_kg=row.birth_weight_kg,
@@ -274,6 +285,7 @@ class ProfileRepository:
         statement = (
             select(
                 InfantProfile.id.label("infant_id"),
+                InfantProfile.name.label("name"),
                 InfantProfile.sex_at_birth.label("sex_at_birth"),
                 InfantProfile.birth_date.label("birth_date"),
                 InfantProfile.birth_weight_kg.label("birth_weight_kg"),
@@ -290,6 +302,40 @@ class ProfileRepository:
         return [
             LactationInfantContext(
                 infant_id=row.infant_id,
+                name=row.name,
+                sex_at_birth=row.sex_at_birth,
+                birth_date=row.birth_date,
+                birth_weight_kg=row.birth_weight_kg,
+                gestational_age_at_birth_days=row.gestational_age_at_birth_days,
+            )
+            for row in rows
+        ]
+
+    async def list_all_infant_contexts(
+        self,
+        *,
+        owner_user_id: UUID,
+    ) -> list[LactationInfantContext]:
+        statement = (
+            select(
+                InfantProfile.id.label("infant_id"),
+                InfantProfile.name.label("name"),
+                InfantProfile.sex_at_birth.label("sex_at_birth"),
+                InfantProfile.birth_date.label("birth_date"),
+                InfantProfile.birth_weight_kg.label("birth_weight_kg"),
+                InfantProfile.gestational_age_at_birth_days.label("gestational_age_at_birth_days"),
+            )
+            .where(
+                InfantProfile.owner_user_id == owner_user_id,
+                InfantProfile.deleted_at.is_(None),
+            )
+            .order_by(InfantProfile.created_at.asc(), InfantProfile.id.asc())
+        )
+        rows = (await self.session.execute(statement)).all()
+        return [
+            LactationInfantContext(
+                infant_id=row.infant_id,
+                name=row.name,
                 sex_at_birth=row.sex_at_birth,
                 birth_date=row.birth_date,
                 birth_weight_kg=row.birth_weight_kg,

@@ -32,6 +32,8 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
     def effective_effect_scope(self, *, tool_name: str, args: dict[str, Any], default: str) -> str:
         if tool_name == "pregnancy_plan_workflow" and args.get("command") != "generate_plan":
             return "agent_internal"
+        if tool_name == "milk_analysis" and args.get("operation") == "review":
+            return "none"
         return super().effective_effect_scope(tool_name=tool_name, args=args, default=default)
 
     def safe_args(self, *, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -56,13 +58,11 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
                 "pregnancy_diary_delete": "删除孕期日记",
             }[tool_name]
         return {
-            "profile_read": "个人资料",
-            "profile_update": "更新个人资料",
-            "lactation_context_read": "母婴泌乳基础信息",
-            "records_milk_summary_read": "奶量摘要",
-            "records_milk_status_read": "奶量状态",
-            "records_feeding_record_propose": "喂养记录草稿",
-            "records_pumping_record_propose": "吸奶记录草稿",
+            "maternal_infant_profile_read": "妈妈和宝宝基础信息",
+            "maternal_infant_profile_update": "更新妈妈和宝宝基础信息",
+            "lactation_timeline_manage": "管理奶量日程和记录",
+            "lactation_timeline_read": "奶量日程和记录",
+            "milk_analysis": "奶量分析",
             "plans_current_read": "计划信息",
             "plans_milk_plan_propose": "泌乳计划草稿",
             "plans_task_create_propose": "任务草稿",

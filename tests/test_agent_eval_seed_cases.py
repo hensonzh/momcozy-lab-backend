@@ -7,6 +7,7 @@ from app.agents.cozymate.evals import (
     load_product_agent_eval_seed_cases,
     validate_product_agent_eval_seed_payload,
 )
+from app.agents.cozymate.tools import default_tool_registry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +31,7 @@ def test_product_agent_eval_seed_covers_append_only_context_regressions() -> Non
     multimodal = by_suite["context_append_multimodal_tool_result"]
 
     assert followup["input"]["fixtures"]["ordered_context_items"][1]["type"] == "function_call_output"
-    assert "repeat_profile_read" in followup["expected_behavior"]["must_not"]
+    assert "repeat_maternal_infant_profile_read" in followup["expected_behavior"]["must_not"]
     output = multimodal["input"]["fixtures"]["ordered_context_items"][0]["output"]
     assert [block["type"] for block in output] == ["input_text", "input_image"]
 
@@ -53,18 +54,39 @@ def test_product_agent_eval_seed_cases_have_action_and_response_contracts() -> N
         assert isinstance(case["expected_tool_calls"], list)
 
 
-def test_product_agent_eval_seed_uses_current_milk_summary_tool_contract() -> None:
+def test_product_agent_eval_seed_references_only_registered_tool_contracts() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    registered = set(default_tool_registry().names_for_sdk())
+
+    referenced = {
+        tool_call["contract"]
+        for case in cases
+        for field in ("expected_tool_calls", "forbidden_tool_calls")
+        for tool_call in case.get(field, [])
+    }
+
+    assert referenced <= registered
+
+
+def test_product_agent_eval_seed_separates_timeline_facts_from_milk_analysis() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     milk_cases = {case["suite"]: case for case in cases if case["suite"] in {"milk_daily_summary", "milk_trend_analysis"}}
 
     assert set(milk_cases) == {"milk_daily_summary", "milk_trend_analysis"}
-    for case in milk_cases.values():
-        contracts = {tool_call["contract"] for tool_call in case["expected_tool_calls"]}
-        assert "records_milk_summary_read" in contracts
-        assert "milk_summary_read" not in contracts
-        assert "milk_records_read" not in contracts
-    daily_contracts = {tool_call["contract"] for tool_call in milk_cases["milk_daily_summary"]["expected_tool_calls"]}
-    assert "records_milk_status_read" in daily_contracts
+    assert {call["contract"] for call in milk_cases["milk_daily_summary"]["expected_tool_calls"]} == {
+        "lactation_timeline_read"
+    }
+    assert milk_cases["milk_trend_analysis"]["expected_tool_calls"] == [
+        {
+            "contract": "milk_analysis",
+            "timing": "before_final_response",
+            "args_subset": {
+                "operation": "review",
+                "detail_level": "summary",
+                "days": 14,
+            },
+        }
+    ]
 
 
 def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
@@ -74,30 +96,36 @@ def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
     schedule_contracts = {tool_call["contract"] for tool_call in by_suite["milk_schedule_management"]["expected_tool_calls"]}
     plan_contracts = {tool_call["contract"] for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]}
 
-    assert schedule_contracts == {"plans_milk_schedule_propose"}
+    assert schedule_contracts == {"lactation_timeline_manage"}
     assert "plan_task_update_proposal" not in schedule_contracts
-    assert plan_contracts == {
-        "records_milk_analysis_intake",
-        "records_milk_analysis_evaluate",
-        "plans_milk_plan_propose",
-    }
+    assert plan_contracts == {"milk_analysis", "plans_milk_plan_propose"}
+    analysis_calls = [
+        tool_call
+        for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]
+        if tool_call["contract"] == "milk_analysis"
+    ]
+    assert [tool_call["args_subset"]["operation"] for tool_call in analysis_calls] == [
+        "start_or_resume",
+        "evaluate",
+    ]
     assert "milk_plan_proposal" not in plan_contracts
 
 
-def test_product_agent_eval_seed_covers_compact_lactation_context() -> None:
+def test_product_agent_eval_seed_covers_maternal_infant_profile_read() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
-    case = by_suite["lactation_context_read"]
+    case = by_suite["maternal_infant_profile_read"]
 
-    assert {call["contract"] for call in case["expected_tool_calls"]} == {"lactation_context_read"}
+    assert {call["contract"] for call in case["expected_tool_calls"]} == {"maternal_infant_profile_read"}
     assert case["expected_behavior"]["requires_confirmation_before_write"] is False
     assert len(case["input"]["fixtures"]["current_infants"]) == 2
     assert "separate_context_for_each_birth_order" in case["expected_behavior"]["must_include"]
+    assert "stable_infant_id_for_each_infant" in case["expected_behavior"]["must_include"]
     assert "sex_at_birth_for_each_infant" in case["expected_behavior"]["must_include"]
     assert "stable_machine_readable_missing_and_quality_codes" in case["expected_behavior"]["must_include"]
     assert {infant["infant_profile"]["sex_at_birth"] for infant in case["input"]["fixtures"]["current_infants"]} == {"female", "male"}
     assert "return_delivery_history" in case["expected_behavior"]["must_not"]
-    assert "expose_internal_infant_id" in case["expected_behavior"]["must_not"]
+    assert "estimated_due_date_hidden_after_actual_delivery" in case["expected_behavior"]["must_include"]
     assert "dynamic_path_strings_in_missing_or_quality_fields" in case["expected_behavior"]["must_not"]
 
 
@@ -347,7 +375,7 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
     assert continuity["forbidden_tool_calls"] == []
 
     refresh = by_suite["ledger_latest_fact_refresh"]
-    assert [call["contract"] for call in refresh["expected_tool_calls"]] == ["records_milk_status_read"]
+    assert [call["contract"] for call in refresh["expected_tool_calls"]] == ["lactation_timeline_read"]
     assert refresh["input"]["fixtures"]["context_ledger_available"] is True
 
     device = by_suite["device_unboxing_step_continuation"]
@@ -440,11 +468,11 @@ def test_product_agent_eval_seed_keeps_memory_writes_off_live_run_contract() -> 
     forbidden_sensitive_contracts = {tool_call["contract"] for tool_call in by_suite["memory_sensitive_rejection"]["forbidden_tool_calls"]}
 
     assert memory_contracts == set()
-    assert "profile_update" in forbidden_preference_contracts
+    assert "maternal_infant_profile_update" in forbidden_preference_contracts
     assert by_suite["memory_preference_capture"]["expected_behavior"]["route"] == "async_memory_consolidation"
     assert by_suite["memory_preference_capture"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert by_suite["memory_sensitive_rejection"]["expected_tool_calls"] == []
-    assert "profile_update" in forbidden_sensitive_contracts
+    assert "maternal_infant_profile_update" in forbidden_sensitive_contracts
     assert by_suite["memory_sensitive_rejection"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
@@ -457,7 +485,7 @@ def test_product_agent_eval_seed_covers_postpartum_recovery_main_agent_capabilit
 
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert {"profile_read", "plans_current_read"} <= checkin_contracts
+    assert {"maternal_infant_profile_read", "plans_current_read"} <= checkin_contracts
     assert "pregnancy_diary_save" not in checkin_contracts
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is False

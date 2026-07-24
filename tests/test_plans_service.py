@@ -183,6 +183,30 @@ def test_plans_service_can_filter_plans_by_type() -> None:
     }
 
 
+def test_plans_service_lists_milk_timeline_tasks_in_bounded_range() -> None:
+    owner_user_id = uuid4()
+    task = _task(owner_user_id=owner_user_id)
+    repository = FakePlansRepository(tasks=[task])
+    service = PlansService(repository=repository)
+
+    tasks = asyncio.run(
+        service.list_milk_timeline_tasks(
+            owner_user_id=owner_user_id,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            limit=20,
+        )
+    )
+
+    assert tasks == [task]
+    assert repository.list_milk_timeline_tasks_kwargs == {
+        "owner_user_id": owner_user_id,
+        "start_date": date(2026, 7, 1),
+        "end_date": date(2026, 7, 31),
+        "limit": 20,
+    }
+
+
 def test_pregnancy_plan_create_normalizes_stable_todo_item_ids() -> None:
     owner_user_id = uuid4()
     repository = FakePlansRepository()
@@ -484,6 +508,7 @@ class FakePlansRepository:
         self.list_plans_kwargs = {}
         self.update_plan_payload_kwargs = {}
         self.list_future_milk_tasks_kwargs = {}
+        self.list_milk_timeline_tasks_kwargs = {}
         self.locked_task_dates = []
         self.soft_deleted_task_ids = []
 
@@ -517,6 +542,10 @@ class FakePlansRepository:
 
     async def list_future_milk_plan_tasks(self, **kwargs):
         self.list_future_milk_tasks_kwargs = kwargs
+        return self.tasks
+
+    async def list_milk_timeline_tasks(self, **kwargs):
+        self.list_milk_timeline_tasks_kwargs = kwargs
         return self.tasks
 
     async def lock_milk_schedule_dates(self, *, owner_user_id, task_dates):

@@ -77,7 +77,7 @@ def test_tool_executor_rejects_legacy_dict_handler_results() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": legacy_handler},
+        handlers={"plans_current_read": legacy_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -85,7 +85,7 @@ def test_tool_executor_rejects_legacy_dict_handler_results() -> None:
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="profile_read",
+                tool_name="plans_current_read",
                 call_id="call-legacy-result",
                 args={},
             )
@@ -138,7 +138,7 @@ def test_tool_executor_publishes_optimistic_live_events_before_persisted_events(
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
         transient_stream=transient_stream,
     )
 
@@ -146,7 +146,7 @@ def test_tool_executor_publishes_optimistic_live_events_before_persisted_events(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-live",
             args={},
         )
@@ -171,7 +171,7 @@ def test_tool_executor_ignores_optimistic_live_publish_failure() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
         transient_stream=FailingOptimisticTransientStream(),
     )
 
@@ -179,7 +179,7 @@ def test_tool_executor_ignores_optimistic_live_publish_failure() -> None:
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-live-failure",
             args={},
         )
@@ -195,14 +195,14 @@ def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> 
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": artifact_creating_handler},
+        handlers={"plans_current_read": artifact_creating_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-artifact",
             args={},
         )
@@ -510,7 +510,7 @@ def test_tool_executor_externalizes_large_safe_output_after_redaction() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": large_profile_read_handler},
+        handlers={"plans_current_read": large_profile_read_handler},
         object_storage=storage,
         max_inline_output_bytes=80,
     )
@@ -519,7 +519,7 @@ def test_tool_executor_externalizes_large_safe_output_after_redaction() -> None:
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-large",
             args={},
         )
@@ -543,14 +543,14 @@ def test_tool_executor_strips_instructional_output_keys_before_persisting() -> N
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": instructional_profile_read_handler},
+        handlers={"plans_current_read": instructional_profile_read_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-instructions",
             args={},
         )
@@ -574,14 +574,14 @@ def test_tool_executor_uses_authenticated_actor_without_per_tool_permission_stri
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
     )
 
     result = asyncio.run(
         executor.execute(
             actor=_user(roles={"limited"}),
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-1",
             args={},
         )
@@ -597,7 +597,7 @@ def test_tool_executor_blocks_cross_owner_actor_scoped_args() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -605,7 +605,7 @@ def test_tool_executor_blocks_cross_owner_actor_scoped_args() -> None:
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="profile_read",
+                tool_name="plans_current_read",
                 call_id="call-1",
                 args={"owner_user_id": str(uuid4())},
             )
@@ -621,7 +621,7 @@ def test_tool_executor_rejects_args_outside_registered_schema_before_persisting_
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -629,7 +629,7 @@ def test_tool_executor_rejects_args_outside_registered_schema_before_persisting_
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="profile_read",
+                tool_name="plans_current_read",
                 call_id="call-1",
                 args={"unknown": "value"},
             )
@@ -729,7 +729,7 @@ def test_tool_executor_rejects_output_outside_registered_schema_before_model_obs
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"lactation_context_read": malformed_lactation_context},
+        handlers={"maternal_infant_profile_read": malformed_lactation_context},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -737,7 +737,7 @@ def test_tool_executor_rejects_output_outside_registered_schema_before_model_obs
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="lactation_context_read",
+                tool_name="maternal_infant_profile_read",
                 call_id="call-invalid-output",
                 args={},
             )
@@ -745,7 +745,7 @@ def test_tool_executor_rejects_output_outside_registered_schema_before_model_obs
 
     assert exc_info.value.code == "tool_output_invalid"
     assert exc_info.value.status == 500
-    assert exc_info.value.details == {"path": "$", "reason": "missing required field: mother"}
+    assert exc_info.value.details == {"path": "$", "reason": "missing required field: infant_scope"}
     assert repository.tool_call.status == "failed"
     assert repository.tool_call.error_code == "tool_output_invalid"
     assert repository.output is None
@@ -757,8 +757,11 @@ def test_tool_executor_only_sends_validated_contract_output_to_model() -> None:
     repository = FakeToolRepository()
     payload = {
         "as_of_date": "2026-07-23",
+        "infant_scope": "current_delivery",
         "mother": {
+            "preferred_name": None,
             "age": None,
+            "estimated_due_date": None,
             "delivery_count": None,
             "current_delivery_method": None,
             "actual_delivery_date": None,
@@ -781,11 +784,11 @@ def test_tool_executor_only_sends_validated_contract_output_to_model() -> None:
         CozymateToolExecutor(
             registry=default_tool_registry(),
             repository=repository,
-            handlers={"lactation_context_read": lactation_context_with_divergent_raw_text},
+            handlers={"maternal_infant_profile_read": lactation_context_with_divergent_raw_text},
         ).execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="lactation_context_read",
+            tool_name="maternal_infant_profile_read",
             call_id="call-valid-output",
             args={},
         )
@@ -801,7 +804,7 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": failing_handler},
+        handlers={"plans_current_read": failing_handler},
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -809,7 +812,7 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
             executor.execute(
                 actor=actor,
                 run_id=uuid4(),
-                tool_name="profile_read",
+                tool_name="plans_current_read",
                 call_id="call-1",
                 args={},
             )
@@ -821,7 +824,7 @@ def test_tool_executor_marks_tool_call_failed_on_handler_error() -> None:
     assert [event.event_type for event in repository.events] == ["tool.started", "tool.failed"]
     assert repository.events[-1].payload["error_code"] == "dependency_failed"
     assert repository.events[-1].payload["semantic"]["phase"] == "error"
-    assert repository.events[-1].payload["semantic"]["label"] == "个人资料暂时没处理好"
+    assert repository.events[-1].payload["semantic"]["label"] == "计划信息暂时没处理好"
 
 
 def test_tool_executor_logs_safe_exception_type_for_unexpected_handler_error(caplog) -> None:
@@ -834,7 +837,7 @@ def test_tool_executor_logs_safe_exception_type_for_unexpected_handler_error(cap
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": unexpected_handler},
+        handlers={"plans_current_read": unexpected_handler},
     )
 
     with caplog.at_level("INFO", logger="production_backend.agent_runtime"):
@@ -843,7 +846,7 @@ def test_tool_executor_logs_safe_exception_type_for_unexpected_handler_error(cap
                 executor.execute(
                     actor=actor,
                     run_id=uuid4(),
-                    tool_name="profile_read",
+                    tool_name="plans_current_read",
                     call_id="call-unexpected-error",
                     args={},
                 )
@@ -852,7 +855,7 @@ def test_tool_executor_logs_safe_exception_type_for_unexpected_handler_error(cap
     assert exc_info.value.code == "tool_failed"
     records = [json.loads(record.message) for record in caplog.records if record.message.startswith("{")]
     failure = next(record for record in records if record.get("event") == "agent.tool.unexpected_failure")
-    assert failure["tool_name"] == "profile_read"
+    assert failure["tool_name"] == "plans_current_read"
     assert failure["exception_type"] == "TypeError"
     assert "private payload" not in caplog.text
 
@@ -863,7 +866,7 @@ def test_tool_executor_records_success_and_actor_scope_failure_metrics() -> None
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=FakeToolRepository(),
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
         metrics=metrics,
     )
 
@@ -871,7 +874,7 @@ def test_tool_executor_records_success_and_actor_scope_failure_metrics() -> None
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="profile_read",
+            tool_name="plans_current_read",
             call_id="call-1",
             args={},
         )
@@ -881,14 +884,14 @@ def test_tool_executor_records_success_and_actor_scope_failure_metrics() -> None
             executor.execute(
                 actor=_user(roles={"limited"}),
                 run_id=uuid4(),
-                tool_name="profile_read",
+                tool_name="plans_current_read",
                 call_id="call-2",
                 args={"owner_user_id": str(uuid4())},
             )
         )
 
     tool_metrics = metrics.snapshot()["agent_tools"][0]
-    assert tool_metrics["tool_name"] == "profile_read"
+    assert tool_metrics["tool_name"] == "plans_current_read"
     assert tool_metrics["outcome_counts"]["completed"] == 1
     assert tool_metrics["outcome_counts"]["failed"] == 1
     assert tool_metrics["error_code_counts"]["owner_scope_violation"] == 1

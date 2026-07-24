@@ -80,8 +80,8 @@ def test_workflow_context_rehydrates_other_long_running_service_steps() -> None:
         "visible_question": "宝宝近期体重增长怎么样？",
     }
     assert projected[0]["next_transition"] == {
-        "tool": "records_milk_analysis_intake",
-        "allowed_actions": ["answer"],
+        "tool": "milk_analysis",
+        "allowed_operations": ["answer"],
     }
     assert "private_rows" not in str(projected[0])
     assert projected[1]["device_model"] == "Air1"

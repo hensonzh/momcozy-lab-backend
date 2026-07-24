@@ -207,6 +207,30 @@ class PlansService:
         )
         return _bounded_future_milk_plan_tasks(tasks)
 
+    async def list_milk_timeline_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+        limit: int,
+    ) -> list[PlanTask]:
+        window_days = (end_date - start_date).days + 1
+        if window_days < 1 or window_days > 31:
+            raise ApiError(
+                code="validation_failed",
+                message="Timeline date range must contain 1 to 31 days.",
+                status=422,
+            )
+        if limit < 1 or limit > 100:
+            raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
+        return await self.repository.list_milk_timeline_tasks(
+            owner_user_id=owner_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
     async def replace_future_milk_plan_tasks(
         self,
         *,

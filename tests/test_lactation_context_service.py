@@ -56,7 +56,12 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
         gestational_age_at_birth_days=258,
     )
     profile_repository = FakeProfileRepository(
-        user_profile=UserProfile(user_id=owner_user_id, age=32),
+        user_profile=UserProfile(
+            user_id=owner_user_id,
+            preferred_name="Mai",
+            age=32,
+            estimated_due_date=date(2026, 5, 17),
+        ),
         maternal_profile=maternal,
         lactation_profile=lactation,
         current_infants=[
@@ -112,8 +117,11 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
 
     assert result == {
         "as_of_date": "2026-07-23",
+        "infant_scope": "current_delivery",
         "mother": {
+            "preferred_name": "Mai",
             "age": 32,
+            "estimated_due_date": None,
             "delivery_count": 2,
             "current_delivery_method": "cesarean",
             "actual_delivery_date": "2026-05-10",
@@ -123,8 +131,12 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
         },
         "infants": [
             {
+                "infant_id": str(first_infant_id),
+                "name": "Baby A",
+                "is_current_delivery": True,
                 "birth_order": 1,
                 "sex_at_birth": "female",
+                "birth_date": "2026-05-10",
                 "age_days": 74,
                 "age_months": 2,
                 "birth_weight_kg": 2.45,
@@ -142,8 +154,12 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
                 },
             },
             {
+                "infant_id": str(second_infant_id),
+                "name": "Baby B",
+                "is_current_delivery": True,
                 "birth_order": 2,
                 "sex_at_birth": "male",
+                "birth_date": "2026-05-10",
                 "age_days": 74,
                 "age_months": 2,
                 "birth_weight_kg": 2.3,
@@ -172,7 +188,7 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
     ]
 
 
-def test_lactation_context_reports_missing_fields_without_exposing_profile_noise() -> None:
+def test_maternal_infant_profile_read_keeps_prenatal_due_date_when_delivery_is_unknown() -> None:
     owner_user_id = uuid4()
     service = LactationContextService(
         profile_repository=FakeProfileRepository(
@@ -191,13 +207,113 @@ def test_lactation_context_reports_missing_fields_without_exposing_profile_noise
 
     result = asyncio.run(service.read(owner_user_id=owner_user_id, as_of_date=date(2026, 7, 23)))
 
-    assert "preferred_name" not in str(result)
-    assert "estimated_due_date" not in str(result)
+    assert result["mother"]["preferred_name"] == "Not needed for milk analysis"
+    assert result["mother"]["estimated_due_date"] == "2027-01-01"
     assert result["mother"]["postpartum_days"] is None
     assert result["infants"] == []
     assert {"code": "mother_age_missing", "birth_order": None} in result["missing_fields"]
     assert {"code": "mother_actual_delivery_date_missing", "birth_order": None} in result["missing_fields"]
     assert {"code": "current_infant_profiles_missing", "birth_order": None} in result["missing_fields"]
+
+
+def test_maternal_infant_profile_read_hides_due_date_when_baby_birth_date_exists() -> None:
+    owner_user_id = uuid4()
+    infant = InfantProfile(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        name="Baby",
+        birth_date=date(2026, 5, 10),
+    )
+    service = LactationContextService(
+        profile_repository=FakeProfileRepository(
+            user_profile=UserProfile(
+                user_id=owner_user_id,
+                estimated_due_date=date(2026, 5, 17),
+            ),
+            maternal_profile=None,
+            lactation_profile=None,
+            current_infants=[],
+            infants=[infant],
+        ),
+        records_service=FakeRecordsService(growth_by_infant={}),
+    )
+
+    result = asyncio.run(
+        service.read(
+            owner_user_id=owner_user_id,
+            as_of_date=date(2026, 7, 23),
+        )
+    )
+
+    assert result["mother"]["actual_delivery_date"] is None
+    assert result["mother"]["estimated_due_date"] is None
+    assert result["infants"][0]["birth_date"] == "2026-05-10"
+
+
+def test_maternal_infant_profile_read_all_scope_returns_current_and_previous_babies() -> None:
+    owner_user_id = uuid4()
+    current_infant = InfantProfile(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        name="Current baby",
+        sex_at_birth="female",
+        birth_date=date(2026, 5, 10),
+    )
+    previous_infant = InfantProfile(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        name="Older child",
+        sex_at_birth="male",
+        birth_date=date(2022, 3, 2),
+    )
+    maternal = MaternalProfile(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        latest_delivery_date=date(2026, 5, 10),
+    )
+    service = LactationContextService(
+        profile_repository=FakeProfileRepository(
+            user_profile=UserProfile(user_id=owner_user_id),
+            maternal_profile=maternal,
+            lactation_profile=None,
+            current_infants=[
+                (
+                    MaternalCurrentDeliveryInfant(
+                        maternal_profile_id=maternal.id,
+                        infant_id=current_infant.id,
+                        birth_order=1,
+                    ),
+                    current_infant,
+                )
+            ],
+            infants=[previous_infant, current_infant],
+        ),
+        records_service=FakeRecordsService(growth_by_infant={}),
+    )
+
+    result = asyncio.run(
+        service.read(
+            owner_user_id=owner_user_id,
+            as_of_date=date(2026, 7, 23),
+            infant_scope="all",
+        )
+    )
+
+    assert result["infant_scope"] == "all"
+    assert [
+        (
+            infant["infant_id"],
+            infant["name"],
+            infant["is_current_delivery"],
+            infant["birth_order"],
+        )
+        for infant in result["infants"]
+    ] == [
+        (str(previous_infant.id), "Older child", False, None),
+        (str(current_infant.id), "Current baby", True, 1),
+    ]
+    assert result["infants"][0]["age_days"] == 1604
+    assert result["infants"][1]["age_days"] == 74
 
 
 def test_lactation_context_reports_stable_data_quality_codes_with_infant_scope() -> None:
@@ -416,6 +532,54 @@ def test_maternal_profile_partial_update_checks_existing_current_infant() -> Non
     assert repository.upsert_values is None
 
 
+def test_maternal_profile_update_accepts_matching_infant_birth_date_from_same_action() -> None:
+    owner_user_id = uuid4()
+    infant_id = uuid4()
+    maternal = MaternalProfile(
+        id=uuid4(),
+        owner_user_id=owner_user_id,
+        latest_delivery_date=date(2026, 5, 10),
+    )
+    infant = InfantProfile(
+        id=infant_id,
+        owner_user_id=owner_user_id,
+        name="Baby",
+        birth_date=date(2026, 5, 10),
+    )
+    repository = FakeProfileRepository(
+        user_profile=None,
+        maternal_profile=maternal,
+        lactation_profile=None,
+        current_infants=[
+            (
+                MaternalCurrentDeliveryInfant(
+                    maternal_profile_id=maternal.id,
+                    infant_id=infant_id,
+                    birth_order=1,
+                ),
+                infant,
+            )
+        ],
+        infants=[infant],
+    )
+    service = LactationContextService(
+        profile_repository=repository,
+        records_service=FakeRecordsService(growth_by_infant={}),
+    )
+
+    profile, _ = asyncio.run(
+        service.update_maternal_profile(
+            owner_user_id=owner_user_id,
+            values={"actual_delivery_date": date(2026, 5, 11)},
+            anticipated_infant_birth_dates={
+                infant_id: date(2026, 5, 11),
+            },
+        )
+    )
+
+    assert profile.actual_delivery_date == date(2026, 5, 11)
+
+
 class FakeProfileRepository:
     def __init__(
         self,
@@ -451,7 +615,13 @@ class FakeProfileRepository:
 
     async def get_lactation_mother_context(self, *, owner_user_id):
         return LactationMotherContext(
+            preferred_name=(self.user_profile.preferred_name if self.user_profile is not None else None),
             age=self.user_profile.age if self.user_profile is not None else None,
+            estimated_due_date=(
+                self.user_profile.estimated_due_date
+                if self.user_profile is not None
+                else None
+            ),
             delivery_count=(self.maternal_profile.delivery_count if self.maternal_profile is not None else None),
             latest_delivery_method=(self.maternal_profile.latest_delivery_method if self.maternal_profile is not None else None),
             latest_delivery_date=(self.maternal_profile.latest_delivery_date if self.maternal_profile is not None else None),
@@ -470,6 +640,9 @@ class FakeProfileRepository:
 
     async def list_infant_context_candidates(self, *, owner_user_id, limit):
         return [_infant_context(infant) for infant in self.infants[:limit]]
+
+    async def list_all_infant_contexts(self, *, owner_user_id):
+        return [_infant_context(infant) for infant in self.infants]
 
     async def get_infant_for_owner(self, *, infant_id, owner_user_id):
         return next(
@@ -532,6 +705,7 @@ class FakeRecordsService:
 def _infant_context(infant: InfantProfile) -> LactationInfantContext:
     return LactationInfantContext(
         infant_id=infant.id,
+        name=infant.name,
         sex_at_birth=infant.sex_at_birth,
         birth_date=infant.birth_date,
         birth_weight_kg=infant.birth_weight_kg,

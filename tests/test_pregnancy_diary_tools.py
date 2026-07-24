@@ -35,10 +35,9 @@ def test_pregnancy_diary_action_backed_writes_wait_for_real_database_result() ->
     save_contract = registry.get("pregnancy_diary_save")
     delete_contract = registry.get("pregnancy_diary_delete")
 
-    assert save_contract.blocking_policy == "must_wait"
-    assert save_contract.result_dependency == "final_response"
-    assert save_contract.action_type == "pregnancy_diary.entry.save"
-    assert delete_contract.action_type == "pregnancy_diary.entry.delete"
+    removed_contract_fields = {"action_type", "blocking_policy", "result_dependency"}
+    assert removed_contract_fields.isdisjoint(type(save_contract).model_fields)
+    assert removed_contract_fields.isdisjoint(type(delete_contract).model_fields)
 
 
 def test_pregnancy_diary_schemas_separate_query_save_and_delete() -> None:

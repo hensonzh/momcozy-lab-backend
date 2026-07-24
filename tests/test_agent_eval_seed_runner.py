@@ -32,7 +32,12 @@ def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_ef
 def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_request() -> None:
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "profile_update", "status": "completed"}],
+        tool_calls=[
+            {
+                "tool_name": "maternal_infant_profile_update",
+                "status": "completed",
+            }
+        ],
         final_text="Saved to profile.",
     )
 
@@ -41,7 +46,7 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "profile_update"
+    assert result.failures[0].observed == "maternal_infant_profile_update"
 
 
 def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_command() -> None:
@@ -236,10 +241,7 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
 def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_skill_expectation() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
-        tool_calls=[
-            {"tool_name": "records_milk_status_read", "status": "completed"},
-            {"tool_name": "records_milk_summary_read", "status": "completed"},
-        ],
+        tool_calls=[{"tool_name": "lactation_timeline_read", "status": "completed"}],
         service_skill_id="cozymate_service_agent",
         final_text="Here is your milk summary.",
     )
@@ -253,10 +255,7 @@ def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_s
 def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_has_route() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
-        tool_calls=[
-            {"tool_name": "records_milk_status_read", "status": "completed"},
-            {"tool_name": "records_milk_summary_read", "status": "completed"},
-        ],
+        tool_calls=[{"tool_name": "lactation_timeline_read", "status": "completed"}],
         service_skill_id="birth-prep",
         final_text="Here is your milk summary.",
     )

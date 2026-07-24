@@ -147,7 +147,7 @@ def test_agent_runtime_executor_uses_ordered_context_items_without_runtime_proje
         {"role": "user", "content": "Read my profile."},
         {
             "type": "function_call",
-            "name": "profile_read",
+            "name": "plans_current_read",
             "call_id": "call_1",
             "arguments": "{}",
         },
@@ -690,7 +690,7 @@ def test_agent_runtime_executor_injects_runtime_timezone_into_milk_analysis_snap
     turn_state.timezone = "Asia/Shanghai"
 
     trusted_args = asyncio.run(
-        executor._trusted_tool_args(run=run, contract_name="records_milk_analysis_intake")
+        executor._trusted_tool_args(run=run, contract_name="milk_analysis")
     )
 
     assert trusted_args == {
@@ -1067,7 +1067,7 @@ def test_agent_runtime_executor_never_streams_partial_tool_json_after_visible_te
                 final_text="我先帮你看一下。",
                 text_deltas=(
                     '我先帮你看一下。\n{"tool_name":',
-                    '"profile_read","safe_output":{"preferred_name":"Mai"}}',
+                    '"plans_current_read","safe_output":{"preferred_name":"Mai"}}',
                 ),
             )
         ]
@@ -1240,20 +1240,27 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "abandon",
         "generate_plan",
     ]
-    assert backend.tool_schemas["profile_read"]["additionalProperties"] is False
-    assert backend.tool_schemas["profile_read"]["properties"] == {}
-    assert backend.tool_schemas["profile_update"]["properties"]["user"]["properties"]["age"]["anyOf"][0]["maximum"] == 70
-    assert backend.tool_schemas["profile_update"]["properties"]["infants"]["items"]["required"] == ["infant_id"]
-    assert backend.tool_schemas["records_feeding_record_propose"]["required"] == ["feed_time", "feed_type"]
-    assert backend.tool_schemas["records_feeding_record_delete_propose"]["required"] == ["record_id"]
-    assert backend.tool_schemas["lactation_context_read"]["properties"] == {}
-    assert backend.tool_schemas["records_growth_record_propose"]["required"] == ["measured_at"]
-    assert backend.tool_schemas["records_growth_record_update_propose"]["required"] == ["record_id"]
-    assert backend.tool_schemas["records_milk_status_read"]["properties"]["days"]["maximum"] == 30
-    assert backend.tool_schemas["records_milk_analysis_read"]["properties"]["limit"]["default"] == 8
-    assert backend.tool_schemas["records_milk_summary_read"]["properties"]["days"]["maximum"] == 30
-    assert backend.tool_schemas["records_pumping_record_propose"]["required"] == ["pump_start_time"]
-    assert backend.tool_schemas["records_pumping_record_delete_propose"]["required"] == ["record_id"]
+    assert backend.tool_schemas["maternal_infant_profile_read"]["additionalProperties"] is False
+    assert backend.tool_schemas["maternal_infant_profile_read"]["properties"]["infant_scope"]["default"] == (
+        "current_delivery"
+    )
+    assert (
+        backend.tool_schemas["maternal_infant_profile_update"]["properties"]["mother"]["properties"]["age"]["anyOf"][0][
+            "maximum"
+        ]
+        == 70
+    )
+    assert backend.tool_schemas["maternal_infant_profile_update"]["properties"]["infants"]["items"]["required"] == [
+        "infant_id"
+    ]
+    assert backend.tool_schemas["lactation_timeline_manage"]["required"] == ["operation", "item_type"]
+    assert backend.tool_schemas["milk_analysis"]["required"] == ["operation"]
+    assert backend.tool_schemas["milk_analysis"]["properties"]["operation"]["enum"] == [
+        "review",
+        "start_or_resume",
+        "answer",
+        "evaluate",
+    ]
     assert backend.tool_schemas["support_ticket_propose"]["required"] == ["issue_summary", "user_confirmed"]
     assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
     assert {
@@ -1385,19 +1392,49 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
 
     async def milk_status_handler(context: ToolHandlerContext) -> ToolResult:
         tool_calls.append({"tool_name": context.tool_name, "args": context.args})
-        return ToolResult.json({"milk_status": {"total_ml": 420}})
+        return ToolResult.json(
+            {
+                "status": "milk_analysis_review_ready",
+                "operation": "review",
+                "review": {
+                    "detail_level": "summary",
+                    "window": {"days": 7, "limit": 5, "include_today": True},
+                    "status": {
+                        "data_coverage": "ready",
+                        "pumping_trend": "stable",
+                        "measured_only": True,
+                    },
+                    "counts": {
+                        "infants": 1,
+                        "recent_feedings": 1,
+                        "recent_pumpings": 1,
+                        "trend_days": 7,
+                        "days_with_pumping": 7,
+                        "trend_pumping_count": 7,
+                    },
+                    "volumes": {
+                        "recent_feeding_volume_ml": 420,
+                        "recent_pumped_volume_ml": 420,
+                        "trend_pumped_volume_ml": 420,
+                        "average_daily_pumped_volume_ml": 60,
+                    },
+                    "latest": {"feeding_at": None, "pumping_at": None},
+                    "observation_flags": [],
+                },
+            }
+        )
 
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"records_milk_status_read": milk_status_handler},
+        handlers={"milk_analysis": milk_status_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="最近奶量是 420ml。",
-                tool_invocations=(scripted_tool_invocation("records_milk_status_read"),),
-                expected_available_tools=("records_milk_status_read",),
+                tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "review"}),),
+                expected_available_tools=("milk_analysis",),
             )
         ]
     )
@@ -1413,7 +1450,16 @@ def test_agent_runtime_executor_allows_service_tool_without_skill_load() -> None
 
     assert result.status == "completed"
     assert result.final_text == "最近奶量是 420ml。"
-    assert tool_calls == [{"tool_name": "records_milk_status_read", "args": {}}]
+    assert tool_calls == [
+        {
+            "tool_name": "milk_analysis",
+            "args": {
+                "operation": "review",
+                "trusted_current_user_text": "今天奶量怎么样？",
+                "runtime_timezone": "UTC",
+            },
+        }
+    ]
 
 
 def test_agent_runtime_executor_skips_quick_reply_progress_without_finalizer() -> None:
@@ -1471,7 +1517,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
                 text_deltas=("已经", "整理好了。"),
                 tool_calls=(
                     {
-                        "tool_name": "records_milk_analysis_intake",
+                        "tool_name": "milk_analysis",
                         "status": "completed",
                         "safe_output": {
                             "status": "intake_question_ready",
@@ -1526,7 +1572,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
     assert finalizer_payload["turn_outcome"] == {
         "tools": [
             {
-                "name": "records_milk_analysis_intake",
+                    "name": "milk_analysis",
                 "execution_status": "completed",
                 "result": {
                     "status": "intake_question_ready",
@@ -1543,7 +1589,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
                 "name": "maternal_red_flags",
                 "visible_question": "最近有没有发热、寒战或乳房红肿硬块？",
             },
-            "allowed_actions": ["answer"],
+                "allowed_operations": ["answer"],
         },
     }
     assert repository.active_workflow_queries == 2
@@ -1750,7 +1796,7 @@ def test_agent_runtime_executor_exposes_tools_directly_to_responses_runner() -> 
 
     assert result.status == "completed"
     assert backend.tool_names == default_tool_registry().names_for_sdk()
-    assert tool_executor.calls[0]["tool_name"] == "profile_read"
+    assert tool_executor.calls[0]["tool_name"] == "plans_current_read"
 
 
 def test_agent_runtime_executor_does_not_inject_dynamic_service_context() -> None:
@@ -1834,8 +1880,13 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
         [
             scripted_sdk_response(
                 final_text="最近奶量是 420ml。",
-                tool_invocations=(scripted_tool_invocation("records_milk_status_read", {"days": 7, "limit": 5}),),
-                expected_available_tools=("records_milk_status_read",),
+                tool_invocations=(
+                    scripted_tool_invocation(
+                        "milk_analysis",
+                        {"operation": "review", "days": 7, "limit": 5},
+                    ),
+                ),
+                expected_available_tools=("milk_analysis",),
             )
         ]
     )
@@ -1849,8 +1900,8 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
     )
 
     assert result.status == "completed"
-    assert tool_executor.calls[0]["tool_name"] == "records_milk_status_read"
-    assert tool_executor.calls[0]["args"] == {"days": 7, "limit": 5}
+    assert tool_executor.calls[0]["tool_name"] == "milk_analysis"
+    assert tool_executor.calls[0]["args"] == {"operation": "review", "days": 7, "limit": 5}
 
 
 def test_agent_runtime_executor_ignores_legacy_run_summaries() -> None:
@@ -1868,14 +1919,14 @@ def test_agent_runtime_executor_ignores_legacy_run_summaries() -> None:
         payload={
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
-            "tools_used": ["records_milk_summary_read"],
-            "tool_facts": [{"tool_name": "records_milk_summary_read", "safe_output": {"total_ml": 420}}],
+            "tools_used": ["milk_analysis"],
+            "tool_facts": [{"tool_name": "milk_analysis", "safe_output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
                     "skill_version": "v1",
                     "loaded_at": "2026-07-07T10:00:00+00:00",
-                    "tool_names": ["records_milk_summary_read"],
+                    "tool_names": ["milk_analysis"],
                 }
             ],
             "verbose_unused": "x" * 3000,
@@ -1924,14 +1975,14 @@ def test_agent_runtime_executor_uses_history_without_reinjecting_run_summary_fac
         payload={
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低。",
-            "tools_used": ["records_milk_summary_read"],
-            "tool_facts": [{"tool_name": "records_milk_summary_read", "safe_output": {"total_ml": 420}}],
+            "tools_used": ["milk_analysis"],
+            "tool_facts": [{"tool_name": "milk_analysis", "safe_output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
                     "skill_version": "v1",
                     "loaded_at": "2026-07-07T10:00:00+00:00",
-                    "tool_names": ["records_milk_summary_read"],
+                    "tool_names": ["milk_analysis"],
                 }
             ],
         },
@@ -1979,14 +2030,14 @@ def test_agent_runtime_executor_does_not_restore_missing_history_from_run_summar
         payload={
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低。",
-            "tools_used": ["records_milk_summary_read"],
-            "tool_facts": [{"tool_name": "records_milk_summary_read", "safe_output": {"total_ml": 420}}],
+            "tools_used": ["milk_analysis"],
+            "tool_facts": [{"tool_name": "milk_analysis", "safe_output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
                     "skill_version": "v1",
                     "loaded_at": "2026-07-07T10:00:00+00:00",
-                    "tool_names": ["records_milk_summary_read"],
+                    "tool_names": ["milk_analysis"],
                 }
             ],
         },
@@ -2051,14 +2102,14 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     tool_executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"profile_read": profile_read_handler},
+        handlers={"plans_current_read": profile_read_handler},
     )
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
                 final_text="Profile context loaded.",
-                tool_invocations=(scripted_tool_invocation("profile_read"),),
-                expected_available_tools=("profile_read",),
+                tool_invocations=(scripted_tool_invocation("plans_current_read"),),
+                expected_available_tools=("plans_current_read",),
             )
         ]
     )
@@ -2078,10 +2129,10 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     assert repository.tool_call.safe_args == {}
     tool_events = [event for event in repository.events if event.event_type.startswith("tool.")]
     assert [event.event_type for event in tool_events] == ["tool.started", "tool.completed"]
-    assert tool_events[0].payload["label"] == "个人资料"
-    assert tool_events[1].payload["label"] == "个人资料"
-    assert tool_events[0].payload["semantic"]["label"] == "我先看看你的基础信息～"
-    assert tool_events[1].payload["semantic"]["label"] == "我把基础信息看好啦"
+    assert tool_events[0].payload["label"] == "计划信息"
+    assert tool_events[1].payload["label"] == "计划信息"
+    assert tool_events[0].payload["semantic"]["label"] == "我先看看计划和日程任务～"
+    assert tool_events[1].payload["semantic"]["label"] == "我把计划和日程整理好啦"
     assert [
         event.payload["phase"]
         for event in repository.events
@@ -2614,8 +2665,8 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
                 "current_field": "diaper_output",
                 "next_question": "宝宝最近 24 小时大约有几片湿尿布？",
             },
-            "records_milk_analysis_intake",
-            {"action": "answer"},
+            "milk_analysis",
+            {"operation": "answer"},
         ),
         (
             "device_unboxing",
@@ -4015,7 +4066,7 @@ class InvokingSdkBackend:
         self.tool_schemas = {tool.contract_name: tool.params_json_schema for tool in request.tools}
         self.tool_schemas_by_contract = {tool.contract_name: tool.params_json_schema for tool in request.tools}
         self.tool_descriptions_by_contract = {tool.contract_name: tool.description for tool in request.tools}
-        profile_tool = next(tool for tool in request.tools if tool.contract_name == "profile_read")
+        profile_tool = next(tool for tool in request.tools if tool.contract_name == "plans_current_read")
         invocation = await profile_tool.invoke("{}")
         return SdkNodeResult(final_text=str(invocation.to_function_call_output()))
 

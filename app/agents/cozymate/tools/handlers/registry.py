@@ -9,13 +9,12 @@ from app.modules.diary.service import DiaryService
 from app.modules.plans.service import PlansService
 from app.modules.profiles.lactation_context import LactationContextService
 from app.modules.profiles.service import ProfileService
+from app.modules.records.lactation_timeline import LactationTimelineService
 from app.modules.records.service import RecordsService
 from app.agents.cozymate.device_guidance import DeviceGuidanceReferenceService
 
 
 from .birth_support import (
-    ProfileReadToolHandler,
-    ProfileUpdateToolHandler,
     SupportTicketProposeToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     IbclcConsultCardCreateToolHandler,
@@ -24,21 +23,16 @@ from .birth_support import (
     HospitalBagCardCreateToolHandler,
 )
 from .milk import (
-    MilkSummaryReadToolHandler,
+    LactationTimelineManageToolHandler,
+    LactationTimelineReadToolHandler,
+    MilkAnalysisToolHandler,
     MilkStatusReadToolHandler,
     MilkAnalysisReadToolHandler,
     MilkAnalysisIntakeToolHandler,
     MilkAnalysisEvaluateToolHandler,
-    LactationContextReadToolHandler,
-    FeedingRecordProposeToolHandler,
-    PumpingRecordProposeToolHandler,
-    FeedingRecordDeleteProposeToolHandler,
-    PumpingRecordDeleteProposeToolHandler,
-    GrowthRecordProposeToolHandler,
-    GrowthRecordUpdateProposeToolHandler,
-    GrowthRecordDeleteProposeToolHandler,
+    MaternalInfantProfileReadToolHandler,
+    MaternalInfantProfileUpdateToolHandler,
     MilkPlanProposeToolHandler,
-    MilkScheduleRescheduleProposeToolHandler,
 )
 from .plans_diary import (
     PlansCurrentReadToolHandler,
@@ -74,29 +68,38 @@ def build_default_tool_handlers(
 ) -> dict[str, ToolHandler]:
     guidance_reference_service = device_guidance_reference_service or DeviceGuidanceReferenceService()
     handlers: dict[str, ToolHandler] = {
-        "profile_read": ProfileReadToolHandler(service=profile_service),
-        "profile_update": ProfileUpdateToolHandler(runtime_service=agent_runtime_service),
-        "lactation_context_read": LactationContextReadToolHandler(
+        "lactation_timeline_manage": LactationTimelineManageToolHandler(
+            runtime_service=agent_runtime_service,
+            plans_service=plans_service,
+        ),
+        "lactation_timeline_read": LactationTimelineReadToolHandler(
+            service=LactationTimelineService(
+                records_service=records_service,
+                plans_service=plans_service,
+            )
+        ),
+        "milk_analysis": MilkAnalysisToolHandler(
+            summary_handler=MilkStatusReadToolHandler(
+                records_service=records_service,
+                profile_service=profile_service,
+            ),
+            detailed_handler=MilkAnalysisReadToolHandler(
+                records_service=records_service,
+                profile_service=profile_service,
+            ),
+            intake_handler=MilkAnalysisIntakeToolHandler(
+                records_service=records_service,
+                profile_service=profile_service,
+                runtime_service=agent_runtime_service,
+            ),
+            evaluate_handler=MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
+        ),
+        "maternal_infant_profile_read": MaternalInfantProfileReadToolHandler(
             service=lactation_context_service
         ),
-        "records_milk_summary_read": MilkSummaryReadToolHandler(
-            records_service=records_service,
-            profile_service=profile_service,
+        "maternal_infant_profile_update": MaternalInfantProfileUpdateToolHandler(
+            runtime_service=agent_runtime_service
         ),
-        "records_milk_status_read": MilkStatusReadToolHandler(
-            records_service=records_service,
-            profile_service=profile_service,
-        ),
-        "records_milk_analysis_read": MilkAnalysisReadToolHandler(
-            records_service=records_service,
-            profile_service=profile_service,
-        ),
-        "records_milk_analysis_intake": MilkAnalysisIntakeToolHandler(
-            records_service=records_service,
-            profile_service=profile_service,
-            runtime_service=agent_runtime_service,
-        ),
-        "records_milk_analysis_evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=agent_runtime_service),
         "plans_current_read": PlansCurrentReadToolHandler(plans_service=plans_service),
         "plans_calendar_read": PlansCalendarReadToolHandler(plans_service=plans_service),
         "pregnancy_diary_query": PregnancyDiaryQueryToolHandler(diary_service=diary_service),
@@ -115,26 +118,13 @@ def build_default_tool_handlers(
             runtime_service=agent_runtime_service,
             plans_service=plans_service,
         ),
-        "plans_milk_schedule_propose": MilkScheduleRescheduleProposeToolHandler(
-            runtime_service=agent_runtime_service,
-            plans_service=plans_service,
-        ),
         "pregnancy_plan_workflow": PregnancyPlanWorkflowToolHandler(runtime_service=agent_runtime_service),
         "plans_task_create_propose": PlanTaskCreateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_complete_propose": PlanTaskCompleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_task_delete_propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans_milk_task_update_propose": PlanTaskUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "plans_milk_task_delete_propose": PlanTaskDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "plans_plan_delete_propose": PlanDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "notifications_milk_reminder_propose": MilkReminderProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_feeding_record_propose": FeedingRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_pumping_record_propose": PumpingRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_feeding_record_delete_propose": FeedingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_pumping_record_delete_propose": PumpingRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_growth_record_propose": GrowthRecordProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_growth_record_update_propose": GrowthRecordUpdateProposeToolHandler(runtime_service=agent_runtime_service),
-        "records_growth_record_delete_propose": GrowthRecordDeleteProposeToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_form_create": HospitalBagFormCreateToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_card_create": HospitalBagCardCreateToolHandler(runtime_service=agent_runtime_service),
         "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(

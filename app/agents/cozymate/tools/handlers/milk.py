@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from app.core.errors import ApiError
 from app.agent_runtime.runs.service import AgentRuntimeService
@@ -11,6 +12,10 @@ from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CALENDAR_REPLACE,
     MILK_PLAN_CREATE_ACTION,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
+    PLAN_TASK_COMPLETE_ACTION,
+    PLAN_TASK_CREATE_ACTION,
+    PLAN_TASK_DELETE_ACTION,
+    PLAN_TASK_UPDATE_ACTION,
 )
 from app.modules.plans.models import PlanTask
 from app.modules.plans.milk_plan_builder import (
@@ -25,15 +30,19 @@ from app.modules.plans.milk_schedule_calendar import (
 from app.modules.plans.service import PlansService
 from app.modules.profiles.lactation_context import LactationContextService
 from app.modules.profiles.service import ProfileService
+from app.modules.records.lactation_timeline import LactationTimelineService
 from app.agents.cozymate.actions.records import (
     FEEDING_RECORD_CREATE_ACTION,
     FEEDING_RECORD_DELETE_ACTION,
+    FEEDING_RECORD_UPDATE_ACTION,
     GROWTH_RECORD_CREATE_ACTION,
     GROWTH_RECORD_DELETE_ACTION,
     GROWTH_RECORD_UPDATE_ACTION,
     PUMPING_RECORD_CREATE_ACTION,
     PUMPING_RECORD_DELETE_ACTION,
+    PUMPING_RECORD_UPDATE_ACTION,
 )
+from app.agents.cozymate.actions.profiles import PROFILE_UPDATE_ACTION
 from app.modules.records.service import RecordsService
 from app.agents.cozymate.tools.milk_analysis_flow import (
     MILK_ANALYSIS_SCHEMA_VERSION,
@@ -54,10 +63,14 @@ from .base import (
 )
 from .shared import (
     _datetime_value,
+    _current_delivery_infant_links,
     _deferred_artifact_created_event,
     _feeding_payload,
     _feeding_record_apply_payload,
     _feeding_record_preview_payload,
+    _feeding_record_update_apply_payload,
+    _feeding_record_update_fields,
+    _feeding_record_update_preview_payload,
     _grounded_milk_analysis_answers,
     _growth_payload,
     _growth_record_apply_payload,
@@ -66,7 +79,6 @@ from .shared import (
     _growth_record_update_preview_payload,
     _growth_update_fields,
     _has_any_growth_measurement,
-    _infant_payload,
     _limit,
     _milk_analysis_payload,
     _milk_analysis_window,
@@ -76,55 +88,373 @@ from .shared import (
     _milk_schedule_target_dates,
     _milk_status_payload,
     _milk_trend_payload,
+    _maternal_profile_update_values,
     _optional_date_arg,
     _optional_int,
     _optional_number,
     _optional_uuid_arg,
+    _plan_task_complete_apply_payload,
+    _plan_task_complete_preview_payload,
+    _plan_task_create_apply_payload,
+    _plan_task_create_preview_payload,
+    _plan_task_delete_apply_payload,
+    _plan_task_delete_preview_payload,
+    _plan_task_update_apply_payload,
+    _plan_task_update_fields,
+    _plan_task_update_preview_payload,
+    _profile_infant_updates,
     _proposal_result,
     _propose_action_reusing_idempotency,
     _pumping_payload,
     _pumping_record_apply_payload,
     _pumping_record_preview_payload,
+    _pumping_record_update_apply_payload,
+    _pumping_record_update_fields,
+    _pumping_record_update_preview_payload,
     _record_delete_apply_payload,
     _record_delete_preview_payload,
-    _record_volume_sum,
     _stable_payload_key,
     _string_list,
     _text,
 )
 
 
-class MilkSummaryReadToolHandler(_StandardToolHandler):
-    def __init__(self, *, records_service: RecordsService, profile_service: ProfileService) -> None:
-        self.records_service = records_service
-        self.profile_service = profile_service
+class LactationTimelineManageToolHandler(_StandardToolHandler):
+    def __init__(self, *, runtime_service: AgentRuntimeService, plans_service: PlansService) -> None:
+        self.runtime_service = runtime_service
+        self.plans_service = plans_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        owner_user_id = context.actor.user_id
-        days = _limit(context.args.get("days"), default=7, max_limit=30)
-        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
-        feedings = await self.records_service.list_feedings(owner_user_id=owner_user_id, limit=limit)
-        pumpings = await self.records_service.list_pumpings(owner_user_id=owner_user_id, limit=limit)
-        trends = await self.records_service.get_milk_trends(owner_user_id=owner_user_id, days=days, include_today=True)
-        infants = await self.profile_service.list_infants(owner_user_id=owner_user_id)
-        trend_items = [_milk_trend_payload(item) for item in trends.items]
-        output = {
-            "window": {
-                "days": days,
-                "include_today": True,
-            },
-            "infants": [_infant_payload(infant) for infant in infants[:limit]],
-            "recent_feedings": [_feeding_payload(record) for record in feedings],
-            "recent_pumpings": [_pumping_payload(record) for record in pumpings],
-            "pumping_trends": trend_items,
-            "totals": {
-                "recent_feeding_volume_ml": _record_volume_sum(feedings, "volume_ml"),
-                "recent_pumped_volume_ml": _record_volume_sum(pumpings, "milk_volume_ml"),
-                "trend_pumped_volume_ml": round(sum(float(item["pumped_milk_volume_ml"] or 0) for item in trend_items), 2),
-                "trend_pumping_count": sum(int(item["pumping_count"] or 0) for item in trend_items),
-            },
+        operation = _text(context.args, "operation")
+        item_type = _text(context.args, "item_type")
+        if operation not in {"create", "update", "delete", "set_status", "reschedule"}:
+            raise ApiError(code="validation_failed", message="Unsupported timeline operation.", status=422)
+        if item_type not in {"schedule", "feeding", "pumping", "growth"}:
+            raise ApiError(code="validation_failed", message="Unsupported timeline item_type.", status=422)
+        if operation in {"set_status", "reschedule"} and item_type != "schedule":
+            raise ApiError(
+                code="validation_failed",
+                message=f"{operation} is only supported for schedule items.",
+                status=422,
+            )
+
+        if item_type == "schedule":
+            result = await self._manage_schedule(context=context, operation=operation)
+        else:
+            result = await self._manage_record(
+                context=context,
+                operation=operation,
+                item_type=item_type,
+            )
+        return _timeline_manage_result(
+            result=result,
+            operation=operation,
+            item_type=item_type,
+        )
+
+    async def _manage_record(
+        self,
+        *,
+        context: ToolHandlerContext,
+        operation: str,
+        item_type: str,
+    ) -> dict[str, Any]:
+        if operation not in {"create", "update", "delete"}:
+            raise ApiError(code="validation_failed", message="Unsupported record operation.", status=422)
+        record_context = _timeline_record_context(
+            context=context,
+            operation=operation,
+            item_type=item_type,
+        )
+        handlers = {
+            ("create", "feeding"): FeedingRecordProposeToolHandler(runtime_service=self.runtime_service),
+            ("update", "feeding"): FeedingRecordUpdateProposeToolHandler(runtime_service=self.runtime_service),
+            ("delete", "feeding"): FeedingRecordDeleteProposeToolHandler(runtime_service=self.runtime_service),
+            ("create", "pumping"): PumpingRecordProposeToolHandler(runtime_service=self.runtime_service),
+            ("update", "pumping"): PumpingRecordUpdateProposeToolHandler(runtime_service=self.runtime_service),
+            ("delete", "pumping"): PumpingRecordDeleteProposeToolHandler(runtime_service=self.runtime_service),
+            ("create", "growth"): GrowthRecordProposeToolHandler(runtime_service=self.runtime_service),
+            ("update", "growth"): GrowthRecordUpdateProposeToolHandler(runtime_service=self.runtime_service),
+            ("delete", "growth"): GrowthRecordDeleteProposeToolHandler(runtime_service=self.runtime_service),
         }
-        return output
+        result = await handlers[(operation, item_type)].execute(record_context)
+        if not isinstance(result, dict):
+            raise TypeError("Timeline record handlers must return structured output.")
+        return result
+
+    async def _manage_schedule(
+        self,
+        *,
+        context: ToolHandlerContext,
+        operation: str,
+    ) -> dict[str, Any]:
+        if operation == "reschedule":
+            return await MilkScheduleRescheduleProposeToolHandler(
+                runtime_service=self.runtime_service,
+                plans_service=self.plans_service,
+            ).execute(context)
+
+        args = dict(context.args)
+        item_id = _optional_uuid_arg(args, "item_id")
+        if operation == "create":
+            plan_id = _optional_uuid_arg(args, "plan_id")
+            if plan_id is None:
+                raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
+            await self._require_milk_plan(owner_user_id=context.actor.user_id, plan_id=plan_id)
+            event_type = _text(args, "event_type") or "other"
+            create_action_args = {
+                "plan_id": str(plan_id),
+                "task_date": _text(args, "task_date"),
+                "task_time": _text(args, "task_time"),
+                "title": _text(args, "title"),
+                "description": _text(args, "description"),
+                "payload": {"task_type": event_type},
+            }
+            apply_payload = _plan_task_create_apply_payload(create_action_args)
+            if not all(_text(apply_payload, key) for key in ("task_date", "task_time", "title")):
+                raise ApiError(
+                    code="validation_failed",
+                    message="task_date, task_time, and title are required.",
+                    status=422,
+                )
+            return await self._propose_schedule_action(
+                context=context,
+                action_type=PLAN_TASK_CREATE_ACTION,
+                target_id="",
+                apply_payload=apply_payload,
+                preview_payload=_plan_task_create_preview_payload(apply_payload),
+                key_suffix="schedule-create",
+            )
+
+        if item_id is None:
+            raise ApiError(code="validation_failed", message="item_id is required.", status=422)
+        task = await self._require_milk_task(owner_user_id=context.actor.user_id, task_id=item_id)
+
+        if operation == "update":
+            update_action_args: dict[str, Any] = {
+                "task_id": str(item_id),
+                **{
+                    key: args[key]
+                    for key in ("task_date", "task_time", "title", "description")
+                    if key in args
+                },
+            }
+            if "event_type" in args:
+                payload = dict(task.payload) if isinstance(task.payload, dict) else {}
+                update_action_args["payload"] = {
+                    **payload,
+                    "task_type": _text(args, "event_type"),
+                }
+            apply_payload = _plan_task_update_apply_payload(update_action_args)
+            if not _plan_task_update_fields(apply_payload):
+                raise ApiError(
+                    code="validation_failed",
+                    message="At least one schedule update field is required.",
+                    status=422,
+                )
+            return await self._propose_schedule_action(
+                context=context,
+                action_type=PLAN_TASK_UPDATE_ACTION,
+                target_id=str(item_id),
+                apply_payload=apply_payload,
+                preview_payload=_plan_task_update_preview_payload(apply_payload),
+                key_suffix="schedule-update",
+            )
+
+        if operation == "set_status":
+            apply_payload = _plan_task_complete_apply_payload(
+                {
+                    "task_id": str(item_id),
+                    "completed": context.args.get("completed", True),
+                }
+            )
+            return await self._propose_schedule_action(
+                context=context,
+                action_type=PLAN_TASK_COMPLETE_ACTION,
+                target_id=str(item_id),
+                apply_payload=apply_payload,
+                preview_payload=_plan_task_complete_preview_payload(apply_payload),
+                key_suffix="schedule-status",
+            )
+
+        if operation == "delete":
+            apply_payload = _plan_task_delete_apply_payload(
+                {
+                    "task_id": str(item_id),
+                    "reason": _text(args, "reason"),
+                }
+            )
+            return await self._propose_schedule_action(
+                context=context,
+                action_type=PLAN_TASK_DELETE_ACTION,
+                target_id=str(item_id),
+                apply_payload=apply_payload,
+                preview_payload=_plan_task_delete_preview_payload(apply_payload),
+                key_suffix="schedule-delete",
+            )
+
+        raise ApiError(code="validation_failed", message="Unsupported schedule operation.", status=422)
+
+    async def _require_milk_plan(self, *, owner_user_id: Any, plan_id: Any) -> Any:
+        plan = await self.plans_service.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
+        if plan.plan_type != "milk_management":
+            raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+        return plan
+
+    async def _require_milk_task(self, *, owner_user_id: Any, task_id: Any) -> Any:
+        task = await self.plans_service.get_task(owner_user_id=owner_user_id, task_id=task_id)
+        if task.plan_id is None:
+            raise ApiError(code="validation_failed", message="Task is not part of a milk-management plan.", status=422)
+        await self._require_milk_plan(owner_user_id=owner_user_id, plan_id=task.plan_id)
+        return task
+
+    async def _propose_schedule_action(
+        self,
+        *,
+        context: ToolHandlerContext,
+        action_type: str,
+        target_id: str,
+        apply_payload: dict[str, Any],
+        preview_payload: dict[str, Any],
+        key_suffix: str,
+    ) -> dict[str, Any]:
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=action_type,
+            target_type="plan_task",
+            target_id=target_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key")
+            or f"{context.run_id}:{context.call_id}:{key_suffix}",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+def _timeline_record_context(
+    *,
+    context: ToolHandlerContext,
+    operation: str,
+    item_type: str,
+) -> ToolHandlerContext:
+    source = context.args
+    args: dict[str, Any] = {
+        key: source[key]
+        for key in (
+            "plan_task_id",
+            "infant_id",
+            "title",
+            "feed_type",
+            "feed_action",
+            "volume_ml",
+            "milk_volume_ml",
+            "duration_seconds",
+            "pump_type",
+            "source",
+            "height_cm",
+            "weight_kg",
+            "head_cm",
+            "reason",
+            "idempotency_key",
+        )
+        if key in source
+    }
+    if operation in {"update", "delete"}:
+        record_id = _text(source, "item_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="item_id is required.", status=422)
+        args["record_id"] = record_id
+    if "occurred_at" in source:
+        occurred_at_field = {
+            "feeding": "feed_time",
+            "pumping": "pump_start_time",
+            "growth": "measured_at",
+        }[item_type]
+        args[occurred_at_field] = source["occurred_at"]
+    if item_type == "pumping" and "ended_at" in source:
+        args["pump_end_time"] = source["ended_at"]
+    if operation == "create" and not _text(source, "occurred_at"):
+        raise ApiError(code="validation_failed", message="occurred_at is required.", status=422)
+    return ToolHandlerContext(
+        actor=context.actor,
+        run_id=context.run_id,
+        tool_name=context.tool_name,
+        call_id=context.call_id,
+        args=args,
+        thread_id=context.thread_id,
+    )
+
+
+def _timeline_manage_result(
+    *,
+    result: dict[str, Any],
+    operation: str,
+    item_type: str,
+) -> dict[str, Any]:
+    write_succeeded = result.get("write_succeeded") is True
+    requires_confirmation = result.get("requires_confirmation") is True
+    raw_status = _text(result, "status")
+    if raw_status == "action_failed":
+        status = "action_failed"
+    elif raw_status == "milk_schedule_no_changes":
+        status = "timeline_no_changes"
+    elif write_succeeded:
+        status = "timeline_change_applied"
+    elif requires_confirmation:
+        status = "timeline_change_pending_confirmation"
+    else:
+        status = "timeline_change_proposed"
+    output: dict[str, Any] = {
+        "status": status,
+        "operation": operation,
+        "item_type": item_type,
+        "requires_confirmation": requires_confirmation,
+        "confirmation_policy": _text(result, "confirmation_policy") or "explicit_intent",
+        "user_visible": result.get("user_visible") is True,
+        "write_succeeded": write_succeeded,
+        "preview_payload": (
+            dict(result["preview_payload"])
+            if isinstance(result.get("preview_payload"), dict)
+            else {}
+        ),
+    }
+    for key in (
+        "action_id",
+        "action_type",
+        "action_status",
+        "error_code",
+        "artifact_id",
+        "artifact_type",
+        "plan_id",
+        "conflict_count",
+        "updated_count",
+        "affected_dates",
+        DEFERRED_AGENT_EVENTS_KEY,
+    ):
+        if key in result:
+            output[key] = result[key]
+    return output
+
+
+class LactationTimelineReadToolHandler(_StandardToolHandler):
+    def __init__(self, *, service: LactationTimelineService) -> None:
+        self.service = service
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        as_of_date = _optional_date_arg(context.args, "runtime_local_date") or datetime.now(timezone.utc).date()
+        start_date = _optional_date_arg(context.args, "start_date") or as_of_date - timedelta(days=7)
+        end_date = _optional_date_arg(context.args, "end_date") or as_of_date + timedelta(days=7)
+        output = await self.service.read(
+            owner_user_id=context.actor.user_id,
+            as_of_date=as_of_date,
+            start_date=start_date,
+            end_date=end_date,
+            timezone_name=_text(context.args, "runtime_timezone") or "UTC",
+            limit=_limit(context.args.get("limit"), default=50, max_limit=50),
+        )
+        return output.model_dump(mode="json")
 
 
 class MilkStatusReadToolHandler(_StandardToolHandler):
@@ -379,15 +709,251 @@ class MilkAnalysisEvaluateToolHandler(_StandardToolHandler):
         return output
 
 
-class LactationContextReadToolHandler(_StandardToolHandler):
+class MilkAnalysisToolHandler(_StandardToolHandler):
+    """Single model-facing facade for deterministic review and durable analysis."""
+
+    def __init__(
+        self,
+        *,
+        summary_handler: MilkStatusReadToolHandler,
+        detailed_handler: MilkAnalysisReadToolHandler,
+        intake_handler: MilkAnalysisIntakeToolHandler,
+        evaluate_handler: MilkAnalysisEvaluateToolHandler,
+    ) -> None:
+        self.summary_handler = summary_handler
+        self.detailed_handler = detailed_handler
+        self.intake_handler = intake_handler
+        self.evaluate_handler = evaluate_handler
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        operation = _text(context.args, "operation")
+        if operation == "review":
+            _reject_milk_analysis_arguments(
+                context.args,
+                allowed={"operation", "detail_level", "days", "limit"},
+            )
+            detail_level = _text(context.args, "detail_level") or "summary"
+            if detail_level not in {"summary", "detailed"}:
+                raise ApiError(code="validation_failed", message="Unsupported milk analysis detail level.", status=422)
+            read_args = _selected_milk_analysis_args(
+                context.args,
+                keys=("days", "limit", "runtime_timezone"),
+            )
+            reader = self.detailed_handler if detail_level == "detailed" else self.summary_handler
+            raw_review = await reader.execute(replace(context, args=read_args))
+            review = _dict_tool_operation_output(raw_review)
+            return {
+                "status": "milk_analysis_review_ready",
+                "operation": operation,
+                "review": {"detail_level": detail_level, **review},
+            }
+
+        if operation == "start_or_resume":
+            _reject_milk_analysis_arguments(
+                context.args,
+                allowed={"operation", "restart"},
+            )
+            intake_args = {
+                "action": "reset" if context.args.get("restart") is True else "start",
+                **_selected_milk_analysis_args(context.args, keys=("runtime_timezone",)),
+            }
+            raw_workflow = await self.intake_handler.execute(replace(context, args=intake_args))
+            workflow = _dict_tool_operation_output(raw_workflow)
+            return {
+                "status": str(workflow.pop("status", "milk_analysis_intake_collecting")),
+                "operation": operation,
+                "workflow": workflow,
+            }
+
+        if operation == "answer":
+            _reject_milk_analysis_arguments(
+                context.args,
+                allowed={"operation", "observed_answers"},
+            )
+            intake_args = {
+                "action": "answer",
+                **_selected_milk_analysis_args(
+                    context.args,
+                    keys=("observed_answers", "trusted_current_user_text", "runtime_timezone"),
+                ),
+            }
+            raw_workflow = await self.intake_handler.execute(replace(context, args=intake_args))
+            workflow = _dict_tool_operation_output(raw_workflow)
+            return {
+                "status": str(workflow.pop("status", "milk_analysis_intake_collecting")),
+                "operation": operation,
+                "workflow": workflow,
+            }
+
+        if operation == "evaluate":
+            _reject_milk_analysis_arguments(context.args, allowed={"operation"})
+            raw_evaluation = await self.evaluate_handler.execute(replace(context, args={}))
+            evaluation = _dict_tool_operation_output(raw_evaluation)
+            deferred_events = evaluation.pop(DEFERRED_AGENT_EVENTS_KEY, None)
+            output = {
+                "status": str(evaluation.pop("status", "milk_analysis_completed")),
+                "operation": operation,
+                "evaluation": {
+                    **evaluation,
+                    "replayed": evaluation.get("replayed") is True,
+                },
+            }
+            if deferred_events is not None:
+                output[DEFERRED_AGENT_EVENTS_KEY] = deferred_events
+            return output
+
+        raise ApiError(code="validation_failed", message="Unsupported milk analysis operation.", status=422)
+
+
+def _selected_milk_analysis_args(args: dict[str, Any], *, keys: tuple[str, ...]) -> dict[str, Any]:
+    return {key: args[key] for key in keys if key in args}
+
+
+def _reject_milk_analysis_arguments(args: dict[str, Any], *, allowed: set[str]) -> None:
+    trusted_keys = {"runtime_timezone", "runtime_local_date", "trusted_current_user_text"}
+    unsupported = sorted(set(args) - allowed - trusted_keys)
+    if unsupported:
+        raise ApiError(
+            code="validation_failed",
+            message=f"Arguments are not valid for this milk analysis operation: {', '.join(unsupported)}.",
+            status=422,
+        )
+
+
+def _dict_tool_operation_output(output: _ToolOperationOutput) -> dict[str, Any]:
+    if not isinstance(output, dict):
+        raise TypeError("Milk analysis operation handlers must return JSON object payloads.")
+    return dict(output)
+
+
+class MaternalInfantProfileReadToolHandler(_StandardToolHandler):
     def __init__(self, *, service: LactationContextService) -> None:
         self.service = service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        raw_infant_scope = str(
+            context.args.get("infant_scope") or "current_delivery"
+        )
+        if raw_infant_scope not in {"current_delivery", "all"}:
+            raise ApiError(
+                code="validation_failed",
+                message="infant_scope must be current_delivery or all.",
+                status=422,
+            )
+        infant_scope: Literal["current_delivery", "all"] = (
+            "all" if raw_infant_scope == "all" else "current_delivery"
+        )
         return await self.service.read(
             owner_user_id=context.actor.user_id,
             as_of_date=_optional_date_arg(context.args, "runtime_local_date"),
+            infant_scope=infant_scope,
         )
+
+
+class MaternalInfantProfileUpdateToolHandler(_StandardToolHandler):
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        raw_mother_values = context.args.get("mother")
+        if "mother" in context.args and not isinstance(raw_mother_values, dict):
+            raise ApiError(
+                code="validation_failed",
+                message="mother must be an object.",
+                status=422,
+            )
+        mother_values = (
+            _maternal_profile_update_values(raw_mother_values)
+            if isinstance(raw_mother_values, dict)
+            else {}
+        )
+        if "mother" in context.args and not mother_values:
+            raise ApiError(
+                code="validation_failed",
+                message="mother requires at least one field.",
+                status=422,
+            )
+        infant_updates = _profile_infant_updates(context.args)
+        current_infants_supplied = "current_infants" in context.args
+        current_infants = (
+            _current_delivery_infant_links(context.args)
+            if current_infants_supplied
+            else []
+        )
+        if not mother_values and not infant_updates and not current_infants_supplied:
+            raise ApiError(
+                code="validation_failed",
+                message="maternal_infant_profile_update requires at least one field.",
+                status=422,
+            )
+
+        apply_payload: dict[str, Any] = {}
+        if mother_values:
+            apply_payload["mother"] = {
+                key: value.isoformat() if isinstance(value, date) else value
+                for key, value in mother_values.items()
+            }
+        if infant_updates:
+            apply_payload["infants"] = [
+                {
+                    "infant_id": str(update["infant_id"]),
+                    **{
+                        key: value.isoformat() if isinstance(value, date) else value
+                        for key, value in update["values"].items()
+                    },
+                }
+                for update in infant_updates
+            ]
+        if current_infants_supplied:
+            apply_payload["current_infants"] = [
+                {
+                    "infant_id": str(link["infant_id"]),
+                    "birth_order": link["birth_order"],
+                }
+                for link in current_infants
+            ]
+
+        updated = {
+            "mother_fields": sorted(mother_values),
+            "infants": [
+                {
+                    "infant_id": str(update["infant_id"]),
+                    "fields": sorted(update["values"]),
+                }
+                for update in infant_updates
+            ],
+            "current_infants_updated": current_infants_supplied,
+        }
+        preview_payload = {
+            key: value
+            for key, value in updated.items()
+            if value not in ([], False)
+        }
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PROFILE_UPDATE_ACTION,
+            target_type="profile",
+            target_id=str(context.actor.user_id),
+            side_effect_level="low",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key")
+            or f"{context.run_id}:{context.call_id}:maternal-infant-profile-update",
+        )
+        output = _proposal_result(
+            action=action,
+            preview_payload=preview_payload,
+        )
+        if output["write_succeeded"]:
+            output.update(
+                {
+                    "status": "maternal_infant_profile_updated",
+                    "updated": updated,
+                }
+            )
+        return output
 
 
 class FeedingRecordProposeToolHandler(_StandardToolHandler):
@@ -430,6 +996,60 @@ class PumpingRecordProposeToolHandler(_StandardToolHandler):
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pumping-record",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class FeedingRecordUpdateProposeToolHandler(_StandardToolHandler):
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _feeding_record_update_apply_payload(context.args)
+        record_id = _text(apply_payload, "record_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="record_id is required.", status=422)
+        if not _feeding_record_update_fields(apply_payload):
+            raise ApiError(code="validation_failed", message="At least one feeding update field is required.", status=422)
+        preview_payload = _feeding_record_update_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=FEEDING_RECORD_UPDATE_ACTION,
+            target_type="feeding_record",
+            target_id=record_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key")
+            or f"{context.run_id}:{context.call_id}:feeding-record-update",
+        )
+        return _proposal_result(action=action, preview_payload=preview_payload)
+
+
+class PumpingRecordUpdateProposeToolHandler(_StandardToolHandler):
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        apply_payload = _pumping_record_update_apply_payload(context.args)
+        record_id = _text(apply_payload, "record_id")
+        if not record_id:
+            raise ApiError(code="validation_failed", message="record_id is required.", status=422)
+        if not _pumping_record_update_fields(apply_payload):
+            raise ApiError(code="validation_failed", message="At least one pumping update field is required.", status=422)
+        preview_payload = _pumping_record_update_preview_payload(apply_payload)
+        action = await self.runtime_service.propose_action(
+            owner_user_id=context.actor.user_id,
+            run_id=context.run_id,
+            action_type=PUMPING_RECORD_UPDATE_ACTION,
+            target_type="pumping_record",
+            target_id=record_id,
+            side_effect_level="medium",
+            preview_payload=preview_payload,
+            apply_payload=apply_payload,
+            idempotency_key=_text(context.args, "idempotency_key")
+            or f"{context.run_id}:{context.call_id}:pumping-record-update",
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 

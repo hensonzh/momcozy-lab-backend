@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -8,8 +8,6 @@ from app.core.errors import ApiError
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agent_runtime.tools.executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandlerContext
 from app.agents.cozymate.actions.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION
-from app.agents.cozymate.actions.profiles import PROFILE_UPDATE_ACTION
-from app.modules.profiles.service import ProfileService
 from app.agents.cozymate.tools.birth_preparation_artifacts import (
     artifact_record_from_birth_preparation_result,
     create_birth_preparation_artifact_result,
@@ -44,15 +42,10 @@ from .shared import (
     _interrupt_pregnancy_plan_for_safety,
     _ibclc_consult_card_payload,
     _ibclc_consult_consent,
-    _infant_payload,
     _optional_int,
     _pregnancy_plan_urgent_result,
     _pregnancy_plan_workflow_result,
-    _profile_infant_updates,
-    _profile_payload,
-    _profile_update_values,
     _proposal_result,
-    _propose_action_reusing_idempotency,
     _require_hospital_bag_thread_id,
     _require_pregnancy_plan_thread_id,
     _support_ticket_confirmation_message,
@@ -63,85 +56,6 @@ from .shared import (
     _upsert_hospital_bag_workflow,
     _upsert_pregnancy_plan_workflow,
 )
-
-
-class ProfileReadToolHandler(_StandardToolHandler):
-    def __init__(self, *, service: ProfileService) -> None:
-        self.service = service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        profile = await self.service.get_user_profile(user_id=context.actor.user_id)
-        infants = await self.service.list_infants(owner_user_id=context.actor.user_id)
-        output = {
-            "user": _profile_payload(profile=profile, actor_user_id=context.actor.user_id),
-            "infants": [_infant_payload(infant) for infant in infants],
-        }
-        return output
-
-
-class ProfileUpdateToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        raw_user_values = context.args.get("user")
-        if "user" in context.args and not isinstance(raw_user_values, dict):
-            raise ApiError(code="validation_failed", message="user must be an object.", status=422)
-        user_values = _profile_update_values(raw_user_values) if isinstance(raw_user_values, dict) else {}
-        if "user" in context.args and not user_values:
-            raise ApiError(code="validation_failed", message="user requires at least one field.", status=422)
-        infant_updates = _profile_infant_updates(context.args)
-        if not user_values and not infant_updates:
-            raise ApiError(code="validation_failed", message="profile_update requires at least one field.", status=422)
-
-        apply_payload: dict[str, Any] = {}
-        if user_values:
-            apply_payload["user"] = {
-                key: value.isoformat() if isinstance(value, date) else value
-                for key, value in user_values.items()
-            }
-        if infant_updates:
-            apply_payload["infants"] = [
-                {
-                    "infant_id": str(update["infant_id"]),
-                    **{
-                        key: value.isoformat() if isinstance(value, date) else value
-                        for key, value in update["values"].items()
-                    },
-                }
-                for update in infant_updates
-            ]
-        updated = {
-            "user_fields": sorted(user_values),
-            "infants": [
-                {
-                    "infant_id": str(update["infant_id"]),
-                    "fields": sorted(update["values"]),
-                }
-                for update in infant_updates
-            ],
-        }
-        preview_payload = {key: value for key, value in updated.items() if value}
-        action = await _propose_action_reusing_idempotency(
-            self.runtime_service,
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PROFILE_UPDATE_ACTION,
-            target_type="profile",
-            target_id=str(context.actor.user_id),
-            side_effect_level="low",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:profile-update",
-        )
-        output = _proposal_result(action=action, preview_payload=preview_payload)
-        if output["write_succeeded"]:
-            output.update({
-                "status": "profile_updated",
-                "updated": updated,
-            })
-        return output
 
 
 class SupportTicketProposeToolHandler(_StandardToolHandler):

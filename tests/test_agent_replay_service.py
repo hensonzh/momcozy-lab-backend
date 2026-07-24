@@ -163,7 +163,7 @@ class FakeReplayRepository:
         self.tool_call = AgentToolCall(
             id=uuid4(),
             run_id=self.run.id,
-            tool_name="profile_read",
+            tool_name="maternal_infant_profile_read",
             call_id="call_1",
             status="completed",
             safe_args={"limit": 1},

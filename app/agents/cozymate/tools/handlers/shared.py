@@ -121,6 +121,92 @@ def _profile_update_values(args: dict[str, Any]) -> dict[str, Any]:
     return values
 
 
+def _maternal_profile_update_values(args: dict[str, Any]) -> dict[str, Any]:
+    values = _profile_update_values(args)
+    for field in (
+        "delivery_count",
+        "current_delivery_method",
+        "has_cesarean_history",
+        "current_feeding_mode",
+    ):
+        if field in args:
+            values[field] = args[field]
+    if "actual_delivery_date" in args:
+        actual_delivery_date = args["actual_delivery_date"]
+        if actual_delivery_date is not None:
+            if not isinstance(actual_delivery_date, str):
+                raise ApiError(
+                    code="validation_failed",
+                    message="actual_delivery_date must be a date.",
+                    status=422,
+                )
+            try:
+                actual_delivery_date = date.fromisoformat(actual_delivery_date)
+            except ValueError as exc:
+                raise ApiError(
+                    code="validation_failed",
+                    message="actual_delivery_date must be a date.",
+                    status=422,
+                ) from exc
+        values["actual_delivery_date"] = actual_delivery_date
+    return values
+
+
+def _current_delivery_infant_links(args: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_links = args.get("current_infants")
+    if not isinstance(raw_links, list) or len(raw_links) > 10:
+        raise ApiError(
+            code="validation_failed",
+            message="current_infants must be a list with at most 10 items.",
+            status=422,
+        )
+    links: list[dict[str, Any]] = []
+    seen_infant_ids: set[UUID] = set()
+    seen_birth_orders: set[int] = set()
+    for raw_link in raw_links:
+        if not isinstance(raw_link, dict) or set(raw_link) != {"infant_id", "birth_order"}:
+            raise ApiError(
+                code="validation_failed",
+                message="Each current infant link is invalid.",
+                status=422,
+            )
+        try:
+            infant_id = UUID(str(raw_link["infant_id"]))
+        except (TypeError, ValueError) as exc:
+            raise ApiError(
+                code="validation_failed",
+                message="current infant_id must be a UUID.",
+                status=422,
+            ) from exc
+        birth_order = raw_link["birth_order"]
+        if (
+            isinstance(birth_order, bool)
+            or not isinstance(birth_order, int)
+            or not 1 <= birth_order <= 10
+        ):
+            raise ApiError(
+                code="validation_failed",
+                message="birth_order must be between 1 and 10.",
+                status=422,
+            )
+        if infant_id in seen_infant_ids or birth_order in seen_birth_orders:
+            raise ApiError(
+                code="validation_failed",
+                message="Current infant IDs and birth orders must be unique.",
+                status=422,
+            )
+        seen_infant_ids.add(infant_id)
+        seen_birth_orders.add(birth_order)
+        links.append({"infant_id": infant_id, "birth_order": birth_order})
+    if sorted(seen_birth_orders) != list(range(1, len(links) + 1)):
+        raise ApiError(
+            code="validation_failed",
+            message="birth_order must be contiguous starting at 1.",
+            status=422,
+        )
+    return sorted(links, key=lambda item: item["birth_order"])
+
+
 def _profile_infant_updates(args: dict[str, Any]) -> list[dict[str, Any]]:
     if "infants" not in args:
         return []
@@ -538,6 +624,7 @@ def _short_ibclc_affirmation(text: str) -> bool:
 def _feeding_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "infant_id": _text(args, "infant_id"),
+        "plan_task_id": _text(args, "plan_task_id"),
         "feed_time": _text(args, "feed_time"),
         "feed_type": _text(args, "feed_type"),
         "feed_action": _text(args, "feed_action"),
@@ -560,12 +647,14 @@ def _feeding_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, 
         "duration_seconds": apply_payload.get("duration_seconds"),
         "title": _text(apply_payload, "title"),
         "has_infant_id": bool(_text(apply_payload, "infant_id")),
+        "has_plan_task_id": bool(_text(apply_payload, "plan_task_id")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
 
 def _pumping_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "plan_task_id": _text(args, "plan_task_id"),
         "pump_start_time": _text(args, "pump_start_time"),
         "pump_end_time": _text(args, "pump_end_time"),
         "milk_volume_ml": _optional_number(args, "milk_volume_ml"),
@@ -589,6 +678,7 @@ def _pumping_record_preview_payload(apply_payload: dict[str, Any]) -> dict[str, 
         "duration_seconds": apply_payload.get("duration_seconds"),
         "source": _text(apply_payload, "source"),
         "title": _text(apply_payload, "title"),
+        "has_plan_task_id": bool(_text(apply_payload, "plan_task_id")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
@@ -611,6 +701,78 @@ def _record_delete_preview_payload(apply_payload: dict[str, Any], *, record_type
         "reason": _text(apply_payload, "reason"),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
+
+
+def _feeding_record_update_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {"record_id": _text(args, "record_id")}
+    for key in ("plan_task_id", "infant_id", "feed_time", "feed_type", "feed_action", "title"):
+        if key in args:
+            payload[key] = _text(args, key)
+    for key in ("volume_ml", "duration_seconds"):
+        if key in args:
+            parser = _optional_number if key == "volume_ml" else _optional_int
+            payload[key] = parser(args, key)
+    return {key: value for key, value in payload.items() if value not in ("", None)}
+
+
+def _feeding_record_update_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = _feeding_record_preview_payload(apply_payload)
+    preview["record_id"] = _text(apply_payload, "record_id")
+    preview["fields"] = _feeding_record_update_fields(apply_payload)
+    return {key: value for key, value in preview.items() if value not in ("", None, [])}
+
+
+def _feeding_record_update_fields(payload: dict[str, Any]) -> list[str]:
+    return sorted(
+        key
+        for key in (
+            "plan_task_id",
+            "infant_id",
+            "feed_time",
+            "feed_type",
+            "feed_action",
+            "volume_ml",
+            "duration_seconds",
+            "title",
+        )
+        if key in payload
+    )
+
+
+def _pumping_record_update_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {"record_id": _text(args, "record_id")}
+    for key in ("plan_task_id", "pump_start_time", "pump_end_time", "pump_type", "source", "title"):
+        if key in args:
+            payload[key] = _text(args, key)
+    for key in ("milk_volume_ml", "duration_seconds"):
+        if key in args:
+            parser = _optional_number if key == "milk_volume_ml" else _optional_int
+            payload[key] = parser(args, key)
+    return {key: value for key, value in payload.items() if value not in ("", None)}
+
+
+def _pumping_record_update_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
+    preview = _pumping_record_preview_payload(apply_payload)
+    preview["record_id"] = _text(apply_payload, "record_id")
+    preview["fields"] = _pumping_record_update_fields(apply_payload)
+    return {key: value for key, value in preview.items() if value not in ("", None, [])}
+
+
+def _pumping_record_update_fields(payload: dict[str, Any]) -> list[str]:
+    return sorted(
+        key
+        for key in (
+            "plan_task_id",
+            "pump_start_time",
+            "pump_end_time",
+            "milk_volume_ml",
+            "pump_type",
+            "duration_seconds",
+            "source",
+            "title",
+        )
+        if key in payload
+    )
 
 
 def _growth_record_apply_payload(args: dict[str, Any]) -> dict[str, Any]:

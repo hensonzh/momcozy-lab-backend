@@ -19,10 +19,13 @@ from app.agents.cozymate.tools import (
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
     IbclcConsultCardCreateToolHandler,
+    LactationTimelineManageToolHandler,
+    MilkAnalysisReadToolHandler,
+    MilkAnalysisToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
+    MilkStatusReadToolHandler,
     MilkPlanProposeToolHandler,
-    MilkScheduleRescheduleProposeToolHandler,
     PregnancyDiarySaveToolHandler,
     PregnancyPlanWorkflowToolHandler,
     SupportTicketProposeToolHandler,
@@ -292,11 +295,11 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         text="帮我完整分析奶量。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("records_milk_analysis_intake", {"action": "start"}),
+            scripted_tool_invocation("milk_analysis", {"operation": "start_or_resume"}),
         ),
         final_text="先确认宝宝近 24 小时的湿尿布。",
     )
-    _assert_tools(started.trace, "records_milk_analysis_intake")
+    _assert_tools(started.trace, "milk_analysis")
     assert scenario.workflow("milk_analysis").active_step == "infant_wet_diapers"
 
     answers = (
@@ -310,20 +313,20 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         turn = scenario.run_turn(
             text=answer,
             handlers=handlers,
-            tool_invocations=(scripted_tool_invocation("records_milk_analysis_intake", {"action": "answer"}),),
+            tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "answer"}),),
             final_text="继续下一项。",
         )
-        _assert_tools(turn.trace, "records_milk_analysis_intake")
-        assert turn.trace.tool_calls[0]["safe_args"] == {"action": "answer"}
+        _assert_tools(turn.trace, "milk_analysis")
+        assert turn.trace.tool_calls[0]["safe_args"] == {"operation": "answer"}
 
     assert scenario.workflow("milk_analysis").active_step == "ready_to_evaluate"
     evaluated = scenario.run_turn(
         text="请给我分析结果。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("records_milk_analysis_evaluate", {}),),
+        tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "evaluate"}),),
         final_text="分析完成，可以制定温和的稳奶计划。",
     )
-    _assert_tools(evaluated.trace, "records_milk_analysis_evaluate")
+    _assert_tools(evaluated.trace, "milk_analysis")
     _assert_artifact_events(evaluated.trace, "milk_analysis_card")
     milk_workflow = scenario.workflow("milk_analysis")
     assert milk_workflow.state["phase"] == "assessment_complete"
@@ -370,8 +373,10 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "plans_milk_schedule_propose",
+                "lactation_timeline_manage",
                 {
+                    "operation": "reschedule",
+                    "item_type": "schedule",
                     "plan_id": str(plan.id),
                     "calendar_events": [
                         {
@@ -386,7 +391,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         ),
         final_text="请确认日程调整。",
     )
-    _assert_tools(schedule_turn.trace, "plans_milk_schedule_propose")
+    _assert_tools(schedule_turn.trace, "lactation_timeline_manage")
     _assert_actions(schedule_turn.trace, ("plans.milk_schedule.reschedule", "confirmation_required", "plan"))
     _assert_artifact_events(schedule_turn.trace, "milk_schedule_reschedule_preview")
     _assert_event_types(schedule_turn.trace, required={"action.confirmation_required"})
@@ -407,7 +412,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
     scenario.run_turn(
         text="分析奶量。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("records_milk_analysis_intake", {"action": "start"}),),
+        tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "start_or_resume"}),),
         final_text="开始分析。",
     )
     for answer in (
@@ -420,13 +425,13 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
         scenario.run_turn(
             text=answer,
             handlers=handlers,
-            tool_invocations=(scripted_tool_invocation("records_milk_analysis_intake", {"action": "answer"}),),
+            tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "answer"}),),
             final_text="继续。",
         )
     scenario.run_turn(
         text="给我结论。",
         handlers=handlers,
-        tool_invocations=(scripted_tool_invocation("records_milk_analysis_evaluate", {}),),
+        tool_invocations=(scripted_tool_invocation("milk_analysis", {"operation": "evaluate"}),),
         final_text="请先联系专业人员。",
     )
     assert scenario.workflow("milk_analysis").state["assessment"]["plan_decision"] == {
@@ -907,17 +912,27 @@ class ObservedScenario:
 
     def milk_handlers(self) -> dict[str, Any]:
         return {
-            "records_milk_analysis_intake": MilkAnalysisIntakeToolHandler(
-                records_service=self.records,
-                profile_service=self.profiles,
-                runtime_service=self.runtime_service,
+            "milk_analysis": MilkAnalysisToolHandler(
+                summary_handler=MilkStatusReadToolHandler(
+                    records_service=self.records,
+                    profile_service=self.profiles,
+                ),
+                detailed_handler=MilkAnalysisReadToolHandler(
+                    records_service=self.records,
+                    profile_service=self.profiles,
+                ),
+                intake_handler=MilkAnalysisIntakeToolHandler(
+                    records_service=self.records,
+                    profile_service=self.profiles,
+                    runtime_service=self.runtime_service,
+                ),
+                evaluate_handler=MilkAnalysisEvaluateToolHandler(runtime_service=self.runtime_service),
             ),
-            "records_milk_analysis_evaluate": MilkAnalysisEvaluateToolHandler(runtime_service=self.runtime_service),
             "plans_milk_plan_propose": MilkPlanProposeToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),
-            "plans_milk_schedule_propose": MilkScheduleRescheduleProposeToolHandler(
+            "lactation_timeline_manage": LactationTimelineManageToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),

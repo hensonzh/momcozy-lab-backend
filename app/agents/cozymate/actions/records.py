@@ -12,6 +12,8 @@ from app.modules.records.service import RecordsService
 
 FEEDING_RECORD_CREATE_ACTION = "records.feeding_record.create"
 PUMPING_RECORD_CREATE_ACTION = "records.pumping_record.create"
+FEEDING_RECORD_UPDATE_ACTION = "records.feeding_record.update"
+PUMPING_RECORD_UPDATE_ACTION = "records.pumping_record.update"
 FEEDING_RECORD_DELETE_ACTION = "records.feeding_record.delete"
 PUMPING_RECORD_DELETE_ACTION = "records.pumping_record.delete"
 GROWTH_RECORD_CREATE_ACTION = "records.growth_record.create"
@@ -36,6 +38,7 @@ class FeedingRecordCreateActionHandler:
             record = await self.service.create_feeding(
                 owner_user_id=action.actor_user_id,
                 infant_id=_optional_uuid(payload, "infant_id", "invalid_infant_id"),
+                plan_task_id=_optional_uuid(payload, "plan_task_id", "invalid_plan_task_id"),
                 feed_time=feed_time,
                 feed_type=feed_type,
                 feed_action=_text(payload, "feed_action"),
@@ -78,6 +81,7 @@ class PumpingRecordCreateActionHandler:
         try:
             record = await self.service.create_pumping(
                 owner_user_id=action.actor_user_id,
+                plan_task_id=_optional_uuid(payload, "plan_task_id", "invalid_plan_task_id"),
                 pump_start_time=pump_start_time,
                 pump_end_time=_optional_datetime(payload, "pump_end_time", "invalid_pump_end_time"),
                 milk_volume_ml=milk_volume_ml,
@@ -97,6 +101,66 @@ class PumpingRecordCreateActionHandler:
             details={
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
+            },
+        )
+
+
+class FeedingRecordUpdateActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        record_id = _required_uuid(payload, "record_id", "missing_record_id", "invalid_record_id")
+        updates = _feeding_updates(payload)
+        if not updates:
+            raise PermanentActionError("missing_feeding_update")
+        try:
+            record = await self.service.update_feeding(
+                owner_user_id=action.actor_user_id,
+                record_id=record_id,
+                updates=updates,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentActionError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="feeding_record",
+            resource_id=str(record.id),
+            details={
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+                "fields": sorted(updates),
+            },
+        )
+
+
+class PumpingRecordUpdateActionHandler:
+    def __init__(self, *, service: RecordsService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        record_id = _required_uuid(payload, "record_id", "missing_record_id", "invalid_record_id")
+        updates = _pumping_updates(payload)
+        if not updates:
+            raise PermanentActionError("missing_pumping_update")
+        try:
+            record = await self.service.update_pumping(
+                owner_user_id=action.actor_user_id,
+                record_id=record_id,
+                updates=updates,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentActionError(exc.code) from exc
+        return AgentActionApplyResult(
+            resource_type="pumping_record",
+            resource_id=str(record.id),
+            details={
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+                "fields": sorted(updates),
             },
         )
 
@@ -313,4 +377,52 @@ def _growth_updates(payload: dict[str, Any]) -> dict[str, Any]:
     for key, code in (("height_cm", "invalid_height_cm"), ("weight_kg", "invalid_weight_kg"), ("head_cm", "invalid_head_cm")):
         if key in payload:
             updates[key] = _optional_number(payload, key, code)
+    return updates
+
+
+def _feeding_updates(payload: dict[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    for key, code in (
+        ("plan_task_id", "invalid_plan_task_id"),
+        ("infant_id", "invalid_infant_id"),
+    ):
+        if key in payload:
+            updates[key] = _optional_uuid(payload, key, code)
+    if "feed_time" in payload:
+        updates["feed_time"] = _required_datetime(
+            payload,
+            "feed_time",
+            "missing_feed_time",
+            "invalid_feed_time",
+        )
+    for key in ("feed_type", "feed_action", "title"):
+        if key in payload:
+            updates[key] = _text(payload, key)
+    if "volume_ml" in payload:
+        updates["volume_ml"] = _optional_number(payload, "volume_ml", "invalid_volume_ml")
+    if "duration_seconds" in payload:
+        updates["duration_seconds"] = _optional_int(payload, "duration_seconds", "invalid_duration_seconds")
+    return updates
+
+
+def _pumping_updates(payload: dict[str, Any]) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    if "plan_task_id" in payload:
+        updates["plan_task_id"] = _optional_uuid(payload, "plan_task_id", "invalid_plan_task_id")
+    if "pump_start_time" in payload:
+        updates["pump_start_time"] = _required_datetime(
+            payload,
+            "pump_start_time",
+            "missing_pump_start_time",
+            "invalid_pump_start_time",
+        )
+    if "pump_end_time" in payload:
+        updates["pump_end_time"] = _optional_datetime(payload, "pump_end_time", "invalid_pump_end_time")
+    for key in ("pump_type", "source", "title"):
+        if key in payload:
+            updates[key] = _text(payload, key)
+    if "milk_volume_ml" in payload:
+        updates["milk_volume_ml"] = _optional_number(payload, "milk_volume_ml", "invalid_milk_volume_ml")
+    if "duration_seconds" in payload:
+        updates["duration_seconds"] = _optional_int(payload, "duration_seconds", "invalid_duration_seconds")
     return updates
