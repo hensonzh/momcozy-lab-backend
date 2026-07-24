@@ -432,10 +432,10 @@ _TOOL_COPY: dict[str, dict[str, str]] = {
         "started": "我先帮你调整待产包购物车～",
         "completed": "我已经调整好待产包购物车啦",
     },
-    "hospital_bag_pump_recommend": {
-        "phase": "planning",
-        "started": "我先帮你看看吸奶器型号～",
-        "completed": "我把吸奶器型号整理好啦",
+    "pump_models_read": {
+        "phase": "reading",
+        "started": "我先看看各型号吸奶器的信息～",
+        "completed": "我已经读取了各型号吸奶器的信息",
     },
     "support_ticket_propose": {
         "phase": "planning",

@@ -26,8 +26,8 @@
 | --- | ---: |
 | 模型可见 Tool Contract | 39 |
 | 顶层工具 | 39 |
-| `none` | 9 |
-| `agent_internal` | 8 |
+| `none` | 10 |
+| `agent_internal` | 7 |
 | `user_resource` | 22 |
 | Action-backed Tool 对应的唯一 Action Type | 20 |
 
@@ -41,11 +41,11 @@ Tool Contract 与 Responses API 函数名使用同一个 canonical `snake_case` 
 
 ### `none`
 
-`profile_read`、`lactation_context_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`conversation_history_image_load`。
+`profile_read`、`lactation_context_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`plans_current_read`、`plans_calendar_read`、`pregnancy_diary_query`、`pump_models_read`、`conversation_history_image_load`。
 
 ### `agent_internal`
 
-`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_guidance`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_pump_recommend`、`support_ticket_propose`、`ibclc_consult_card_create`。
+`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`devices_guidance`、`hospital_bag_form_create`、`hospital_bag_card_create`、`support_ticket_propose`、`ibclc_consult_card_create`。
 
 `agent_internal` 仍可以写 Agent Runtime 自身的 Workflow 或 Artifact，但不允许从 Tool Handler 直接修改 Profile、Diary、Plan、Record、Notification 等用户业务资源。
 

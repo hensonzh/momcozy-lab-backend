@@ -67,6 +67,22 @@ def test_product_agent_eval_seed_uses_current_milk_summary_tool_contract() -> No
     assert "records_milk_status_read" in daily_contracts
 
 
+def test_product_agent_eval_seed_keeps_pump_recommendation_read_only_and_model_owned() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    case = next(case for case in cases if case["suite"] == "device_pump_recommendation")
+
+    assert case["expected_tool_calls"] == [
+        {
+            "contract": "pump_models_read",
+            "timing": "before_recommendation",
+            "args_subset": {},
+        }
+    ]
+    assert case["forbidden_tool_calls"] == [{"contract": "hospital_bag_cart_update"}]
+    assert "model_selected_recommendation" in case["expected_behavior"]["must_include"]
+    assert "tool_selected_recommendation" in case["expected_behavior"]["must_not"]
+
+
 def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}

@@ -175,6 +175,52 @@
       ]
     },
     {
+      "suite": "device_pump_recommendation",
+      "name": "pump recommendation reads the complete catalog and leaves the choice to the model",
+      "domain": "device-guidance",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "I need a quiet pump for work with app control, preferably under $200. Which model fits me?"
+          }
+        ],
+        "fixtures": {}
+      },
+      "expected_behavior": {
+        "intent": "device_pump_recommendation",
+        "route": "read_catalog_then_model_compare",
+        "requires_confirmation_before_write": false,
+        "requires_final_response_after_tools": true,
+        "service_skill_id": "device-guidance",
+        "must_include": [
+          "catalog_facts",
+          "user_constraints",
+          "model_selected_recommendation",
+          "comparison_reason"
+        ],
+        "must_not": [
+          "tool_selected_recommendation",
+          "automatic_cart_sync",
+          "invent_product_specs",
+          "claim_cart_updated"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "pump_models_read",
+          "timing": "before_recommendation",
+          "args_subset": {}
+        }
+      ],
+      "forbidden_tool_calls": [
+        {
+          "contract": "hospital_bag_cart_update"
+        }
+      ]
+    },
+    {
       "suite": "device_support_handoff",
       "name": "burning smell stops normal device flow before any support write",
       "domain": "device-guidance",

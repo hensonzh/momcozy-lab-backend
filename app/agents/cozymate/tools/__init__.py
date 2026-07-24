@@ -10,6 +10,7 @@ from .executor import CozymateToolExecutor
 from .handlers import (
     ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceToolHandler,
+    PumpModelsReadToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
     GrowthRecordDeleteProposeToolHandler,
@@ -56,6 +57,7 @@ from .registry import default_tool_registry
 __all__ = [
     "ConversationHistoryImageLoadToolHandler",
     "DeviceGuidanceToolHandler",
+    "PumpModelsReadToolHandler",
     "FeedingRecordDeleteProposeToolHandler",
     "FeedingRecordProposeToolHandler",
     "GrowthRecordDeleteProposeToolHandler",

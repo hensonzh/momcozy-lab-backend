@@ -1258,7 +1258,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["support_ticket_propose"]["additionalProperties"] is False
     assert {
         "devices_guidance",
-        "hospital_bag_pump_recommend",
+        "pump_models_read",
         "support_ticket_propose",
     } <= set(backend.tool_names)
     assert {
@@ -1266,6 +1266,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "devices_pump_status_read",
         "devices_guidance_read",
         "devices_unboxing_advance",
+        "hospital_bag_pump_recommend",
         "records_growth_read",
     }.isdisjoint(backend.tool_names)
 

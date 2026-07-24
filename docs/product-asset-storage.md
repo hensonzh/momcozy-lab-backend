@@ -77,3 +77,23 @@ Agent workers receive the same `ObjectStorage` provider as the API process, but
 they do not need product asset blobs on disk. This keeps worker
 images small and makes asset rollout an object-storage operation instead of an
 application redeploy.
+
+## Agent Reference Documents
+
+Structured reference documents are published separately from the public product
+asset manifest. The pump model publication source is
+`assets/agent-references/pump-models.md`; publish it with:
+
+```bash
+make backend-publish-pump-models-reference \
+  BACKEND_ENV_FILE=env/compose.prod.env
+```
+
+The command validates the embedded `pump_models.reference.v1` payload before
+uploading it to `agent-references/device-service/pump-models.md`. Agent runtime
+reads only that object key and does not fall back to a packaged file or Python
+catalog. Local and test Compose profiles seed the same validated publication
+source into their MinIO buckets during `minio-init`; managed production storage
+still uses the explicit publish command as part of the release process.
+`backend-check-infra` runs `check_pump_models_reference.py` so readiness fails
+when the object is missing or its embedded schema is invalid.

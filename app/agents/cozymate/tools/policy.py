@@ -73,7 +73,7 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
             "hospital_bag_form_create": "我先帮你准备确认内容～",
             "hospital_bag_card_create": "我先帮你整理待产包清单～",
             "hospital_bag_cart_update": "我先帮你调整待产包购物车～",
-            "hospital_bag_pump_recommend": "我先帮你看看吸奶器型号～",
+            "pump_models_read": "吸奶器型号信息",
             "notifications_milk_reminder_propose": "奶量提醒草稿",
             "support_ticket_propose": "售后工单草稿",
         }.get(tool_name, "相关信息")

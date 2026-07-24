@@ -17,6 +17,7 @@ from app.agents.cozymate.device_guidance import AIR1_UNBOXING_STEPS, DeviceGuida
 from .base import (
     _StandardToolHandler,
 )
+from ..pump_models import PumpModelsReferenceService
 from .shared import (
     _AIR1_PRODUCT_HIGHLIGHTS,
     _air1_flange_recommendation,
@@ -95,6 +96,15 @@ class _DeviceGuidanceContentService:
             "document_version": reference["document_version"],
             "guidance": guidance,
         }
+
+
+class PumpModelsReadToolHandler(_StandardToolHandler):
+    def __init__(self, *, service: PumpModelsReferenceService) -> None:
+        self.service = service
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        del context
+        return await self.service.tool_result()
 
 
 class DeviceGuidanceToolHandler(_StandardToolHandler):

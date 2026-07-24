@@ -1,5 +1,6 @@
 import asyncio
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,7 @@ from app.agent_runtime.tools.result import ToolResult
 from app.agents.cozymate.tools import (
     ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceToolHandler,
+    PumpModelsReadToolHandler,
     FeedingRecordDeleteProposeToolHandler,
     FeedingRecordProposeToolHandler,
     GrowthRecordDeleteProposeToolHandler,
@@ -79,6 +81,10 @@ from app.agents.cozymate.actions.records import (
 from app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 from app.agents.cozymate.tools.milk_analysis_flow import (
     milk_analysis_context_fingerprint,
+)
+from app.agents.cozymate.tools.pump_models import (
+    PUMP_MODELS_OBJECT_KEY,
+    PumpModelsReferenceService,
 )
 
 
@@ -343,6 +349,45 @@ def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idem
     assert cart_actions[0].apply_payload["cart_update"] == first_output["cart_update"]
 
 
+def test_registered_hospital_bag_cart_handler_reads_shared_pump_models_object_for_model_replacement() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    source_path = Path(__file__).resolve().parents[1] / "assets" / "agent-references" / "pump-models.md"
+    storage = FakeImageObjectStorage(body=source_path.read_bytes())
+    handlers = build_default_tool_handlers(
+        profile_service=FakeProfileService(profile=None, infants=[]),
+        lactation_context_service=FakeLactationContextService(),
+        records_service=FakeRecordsService(owner_user_id=actor.user_id),
+        plans_service=FakePlansService(owner_user_id=actor.user_id),
+        diary_service=FakeDiaryService(owner_user_id=actor.user_id),
+        asset_service=FakeAssetService(),
+        agent_runtime_service=runtime_service,
+        object_storage=storage,
+    )
+
+    result = asyncio.run(
+        handlers["hospital_bag_cart_update"](
+            _context(
+                actor=actor,
+                args={
+                    "action": "replace_pump_model",
+                    "product_sku_id": "pump-m9",
+                },
+            )
+        )
+    ).to_observation()
+
+    assert result["status"] == "cart_updated"
+    assert storage.keys == [PUMP_MODELS_OBJECT_KEY]
+    pump_items = [
+        item
+        for group in result["cart_update"]["groups"]
+        for item in group["items"]
+        if item["id"] == "pump-m9"
+    ]
+    assert pump_items[0]["official_price_usd"] == 159.99
+
+
 def test_registered_hospital_bag_cart_handler_does_not_create_action_for_clarification() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -542,38 +587,52 @@ def test_birth_preparation_artifact_handler_returns_form_card_and_cart_envelopes
     assert cart_result["cart_update"]["totals"]["total"] > 0
 
 
-def test_birth_preparation_artifact_handler_matches_cart_and_pump_actions() -> None:
+def test_pump_models_read_returns_all_comparable_models_without_recommending_or_mutating_cart() -> None:
+    result = asyncio.run(
+        PumpModelsReadToolHandler(service=_pump_models_service()).execute(_context(args={}))
+    )
+
+    assert result["schema_version"] == "pump-models.result.v1"
+    assert result["status"] == "models_ready"
+    assert result["currency"] == "USD"
+    assert result["count"] == 9
+    assert {product["model"] for product in result["products"]} == {
+        "S9 Pro",
+        "S12 Pro Quick",
+        "M5 Smart",
+        "M6",
+        "V1 Pro",
+        "V2 Pro",
+        "M9",
+        "W1",
+        "Air 1",
+    }
+    air1 = next(product for product in result["products"] if product["model"] == "Air 1")
+    assert air1["official_price"] == 369.99
+    assert air1["app_supported"] is True
+    assert air1["use_cases"] == ["work_pumping", "portable", "discreet"]
+    assert air1["features"] == ["超薄", "充电盒", "App 控制"]
+    assert {
+        "recommended_product",
+        "alternatives",
+        "recommendation_mode",
+        "message",
+        "price_guidance",
+        "cart_sync_suggestion",
+    }.isdisjoint(result)
+    assert all(product["source_url"] for product in result["products"])
+
+
+def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
 
-    pump_result = asyncio.run(
-        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_pump_recommend").execute(
-            _context(
-                actor=actor,
-                args={
-                    "requested_model": "Air1",
-                    "use_case": "work_pumping",
-                    "preference": "portable",
-                    "feeding_intention": "breastfeeding",
-                },
-            )
-        )
-    )
-    assert pump_result["tool_name"] == "hospital_bag_pump_recommend"
-    assert pump_result["status"] == "pump_recommended"
-    assert pump_result["recommendation_mode"] == "requested_model_review"
-    assert pump_result["recommended_product"]["sku_id"] == "pump-air-1"
-    assert pump_result["recommended_product"]["price_position"] == "premium_highest"
-    assert pump_result["cart_sync_suggestion"] == {
-        "tool_name": "hospital_bag_cart_update",
-        "action": "replace_pump_model",
-        "product_sku_id": "pump-air-1",
-        "item_ids": ["milk-pump"],
-    }
-    assert "不能把 Air 1 描述为降低预算" in pump_result["price_guidance"]
-
     replace_result = asyncio.run(
-        BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_update").execute(
+        BirthPreparationArtifactToolHandler(
+            runtime_service=runtime_service,
+            tool_name="hospital_bag_cart_update",
+            pump_models_service=_pump_models_service(),
+        ).execute(
             _context(actor=actor, args={"action": "replace_pump_model", "product_sku_id": "pump-m9"})
         )
     )
@@ -3424,7 +3483,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "hospital_bag_form_create",
         "hospital_bag_card_create",
         "hospital_bag_cart_update",
-        "hospital_bag_pump_recommend",
+        "pump_models_read",
         "profile_read",
         "profile_update",
         "ibclc_consult_card_create",
@@ -3472,6 +3531,13 @@ def _context(*, actor: CurrentUser | None = None, args: dict | None = None, thre
         call_id="call-1",
         args=args or {},
         thread_id=thread_id or uuid4(),
+    )
+
+
+def _pump_models_service() -> PumpModelsReferenceService:
+    source_path = Path(__file__).resolve().parents[1] / "assets" / "agent-references" / "pump-models.md"
+    return PumpModelsReferenceService(
+        object_storage=FakeImageObjectStorage(body=source_path.read_bytes())
     )
 
 

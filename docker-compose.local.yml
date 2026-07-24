@@ -125,9 +125,11 @@ services:
       done;
       mc mb --ignore-existing local/momcozy-local;
       mc mirror --overwrite /seed/product-assets local/momcozy-local/product-assets;
+      mc cp --overwrite /seed/agent-references/pump-models.md local/momcozy-local/agent-references/device-service/pump-models.md;
       "
     volumes:
       - ./.local/object_storage/product-assets:/seed/product-assets:ro
+      - ./assets/agent-references:/seed/agent-references:ro
 
 volumes:
   postgres_data:
