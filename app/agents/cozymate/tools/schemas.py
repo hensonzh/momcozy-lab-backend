@@ -10,17 +10,27 @@ JsonSchema = dict[str, Any]
 
 
 _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
-    "profile_read": {
+    "maternal_infant_profile_read": {
         "type": "object",
         "additionalProperties": False,
-        "properties": {},
+        "properties": {
+            "infant_scope": {
+                "type": "string",
+                "enum": ["current_delivery", "all"],
+                "default": "current_delivery",
+                "description": (
+                    "宝宝读取范围。current_delivery 仅返回当前这次分娩的宝宝，供奶量分析使用；"
+                    "all 返回当前用户的全部宝宝，供通用资料核对和选择 infant_id 使用。"
+                ),
+            }
+        },
     },
-    "profile_update": {
+    "maternal_infant_profile_update": {
         "type": "object",
         "additionalProperties": False,
         "minProperties": 1,
         "properties": {
-            "user": {
+            "mother": {
                 "type": "object",
                 "additionalProperties": False,
                 "minProperties": 1,
@@ -29,19 +39,79 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                         "anyOf": [
                             {"type": "string", "minLength": 1, "maxLength": 120},
                             {"type": "null"},
-                        ]
+                        ],
+                        "description": "妈妈希望使用的称呼；传 null 表示清空。",
                     },
                     "age": {
                         "anyOf": [
                             {"type": "integer", "minimum": 12, "maximum": 70},
                             {"type": "null"},
-                        ]
+                        ],
+                        "description": "妈妈当前周岁；传 null 表示清空。",
                     },
                     "estimated_due_date": {
                         "anyOf": [
                             {"type": "string", "format": "date"},
                             {"type": "null"},
-                        ]
+                        ],
+                        "description": (
+                            "预产期，格式 YYYY-MM-DD；仅用于尚无实际分娩日期的孕期资料。"
+                            "已有妈妈实际分娩日期或宝宝实际出生日期时，读取结果固定返回 null；"
+                            "传 null 可清空数据库原始值。"
+                        ),
+                    },
+                    "delivery_count": {
+                        "anyOf": [
+                            {"type": "integer", "minimum": 1, "maximum": 20},
+                            {"type": "null"},
+                        ],
+                        "description": "截至当前这次分娩的累计分娩次数；传 null 表示清空。",
+                    },
+                    "current_delivery_method": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "vaginal",
+                                    "cesarean",
+                                    "assisted_vaginal",
+                                    "other",
+                                    "unknown",
+                                ],
+                            },
+                            {"type": "null"},
+                        ],
+                        "description": "当前这次分娩方式；传 null 表示清空。",
+                    },
+                    "actual_delivery_date": {
+                        "anyOf": [
+                            {"type": "string", "format": "date"},
+                            {"type": "null"},
+                        ],
+                        "description": (
+                            "当前这次实际分娩日期，格式 YYYY-MM-DD；"
+                            "设置后 maternal_infant_profile_read 不再暴露 estimated_due_date。"
+                        ),
+                    },
+                    "has_cesarean_history": {
+                        "anyOf": [{"type": "boolean"}, {"type": "null"}],
+                        "description": "当前或以前是否有过剖宫产；传 null 表示尚未确认。",
+                    },
+                    "current_feeding_mode": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "exclusive_breastfeeding",
+                                    "expressed_milk_feeding",
+                                    "mixed_feeding",
+                                    "formula_feeding",
+                                    "unknown",
+                                ],
+                            },
+                            {"type": "null"},
+                        ],
+                        "description": "妈妈当前喂养模式；传 null 表示清空。",
                     },
                 },
             },
@@ -55,8 +125,17 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                     "minProperties": 2,
                     "required": ["infant_id"],
                     "properties": {
-                        "infant_id": {"type": "string", "format": "uuid"},
-                        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+                        "infant_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "maternal_infant_profile_read 返回的宝宝稳定 UUID。",
+                        },
+                        "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120,
+                            "description": "宝宝姓名或称呼。",
+                        },
                         "sex_at_birth": {
                             "anyOf": [
                                 {
@@ -64,13 +143,15 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                                     "enum": ["female", "male", "intersex", "unknown", "undisclosed"],
                                 },
                                 {"type": "null"},
-                            ]
+                            ],
+                            "description": "宝宝出生时登记的生理性别；传 null 表示清空。",
                         },
                         "birth_date": {
                             "anyOf": [
                                 {"type": "string", "format": "date"},
                                 {"type": "null"},
-                            ]
+                            ],
+                            "description": "宝宝实际出生日期，格式 YYYY-MM-DD；传 null 表示清空。",
                         },
                         "birth_weight_kg": {
                             "anyOf": [
@@ -80,7 +161,8 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                                     "maximum": 10,
                                 },
                                 {"type": "null"},
-                            ]
+                            ],
+                            "description": "宝宝出生体重，单位 kg；传 null 表示清空。",
                         },
                         "gestational_age_at_birth_days": {
                             "anyOf": [
@@ -90,87 +172,359 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                                     "maximum": 315,
                                 },
                                 {"type": "null"},
-                            ]
+                            ],
+                            "description": "宝宝出生孕周的标准总孕天数；传 null 表示清空。",
                         },
                     },
                 },
             },
-        },
-    },
-    "records_milk_summary_read": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "days": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 30,
-                "default": 7,
-                "description": "需要汇总的近期趋势天数。",
+            "current_infants": {
+                "type": "array",
+                "maxItems": 10,
+                "description": (
+                    "完整替换当前这次分娩的宝宝关联；空数组表示清空关联。"
+                    "多宝宝必须分别给出连续且不重复的 birth_order。"
+                ),
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["infant_id", "birth_order"],
+                    "properties": {
+                        "infant_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "maternal_infant_profile_read 返回的宝宝稳定 UUID。",
+                        },
+                        "birth_order": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 10,
+                            "description": "宝宝在当前这次分娩中的出生顺序，从 1 开始且必须连续。",
+                        },
+                    },
+                },
             },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "最多纳入的近期喂养和吸奶记录数。",
-            },
-        },
-    },
-    "records_milk_status_read": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "days": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 30,
-                "default": 7,
-                "description": "用于状态分类判断的近期趋势天数。",
-            },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 5,
-                "description": "最多检查的近期喂养和吸奶记录数。",
-            },
-        },
-    },
-    "records_milk_analysis_read": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "days": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 30,
-                "default": 7,
-                "description": "用于生成奶量分析快照的近期趋势天数。",
-            },
-            "limit": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 20,
-                "default": 8,
-                "description": "最多纳入的近期喂养、吸奶和宝宝生长记录数。",
-            },
-        },
-    },
-    "records_milk_analysis_intake": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "action": {
+            "idempotency_key": {
                 "type": "string",
-                "enum": ["start", "resume", "answer", "reset"],
-                "default": "start",
-                "description": "开始、恢复、回答当前唯一问题，或明确重置六项奶量分析采集。",
+                "minLength": 1,
+                "maxLength": 160,
+                "description": "可选幂等键；同一更新重试时复用相同值。",
+            },
+        },
+    },
+    "lactation_timeline_manage": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["operation", "item_type"],
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["create", "update", "delete", "set_status", "reschedule"],
+                "description": (
+                    "执行一个时间线变更：create 新增，update 更正，delete 删除，"
+                    "set_status 修改计划完成状态，reschedule 批量避让日程。"
+                ),
+            },
+            "item_type": {
+                "type": "string",
+                "enum": ["schedule", "feeding", "pumping", "growth"],
+                "description": "目标类型：计划日程、宝宝喂养记录、妈妈吸奶记录或宝宝生长测量。",
+            },
+            "item_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "更新、删除或设置状态时的目标任务或记录 UUID，必须来自时间线读取结果。",
+            },
+            "plan_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "新增日程或批量重排时所属的奶量管理计划 UUID。",
+            },
+            "plan_task_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "实际喂养或吸奶记录对应的计划任务 UUID；临时发生、没有计划时省略。",
+            },
+            "event_type": {
+                "type": "string",
+                "enum": ["feeding", "pumping", "other"],
+                "description": "新增或更新计划日程时的事件类型，用于约束后续可关联的实际记录。",
+            },
+            "task_date": {
+                "type": "string",
+                "format": "date",
+                "description": "计划日程的本地日期，格式 YYYY-MM-DD。",
+            },
+            "task_time": {
+                "type": "string",
+                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                "description": "计划日程的本地 24 小时时间，格式 HH:MM。",
+            },
+            "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "description": "计划日程或实际记录的简短标题。",
+            },
+            "description": {
+                "type": "string",
+                "maxLength": 2000,
+                "description": "计划日程说明；没有说明时省略。",
+            },
+            "completed": {
+                "type": "boolean",
+                "description": "set_status 时为 true 表示完成，为 false 表示恢复为待执行。",
+            },
+            "infant_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "喂养或生长记录对应的宝宝 UUID，必须来自母婴基础信息读取结果。",
+            },
+            "occurred_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "喂养、吸奶或测量实际发生时间，必须包含明确时区偏移。",
+            },
+            "ended_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "吸奶实际结束时间，必须包含明确时区偏移；其他记录类型省略。",
+            },
+            "feed_type": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32,
+                "description": "喂养方式，例如 bottle 或 breastfeeding；仅喂养记录使用。",
+            },
+            "feed_action": {
+                "type": "string",
+                "maxLength": 32,
+                "description": "喂养动作或侧别；仅喂养记录使用。",
+            },
+            "volume_ml": {
+                "type": "number",
+                "minimum": 0,
+                "description": "宝宝侧本次摄入量，单位 ml；仅喂养记录使用。",
+            },
+            "milk_volume_ml": {
+                "type": "number",
+                "minimum": 0,
+                "description": "妈妈侧本次吸奶产出量，单位 ml；仅吸奶记录使用。",
+            },
+            "duration_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "本次喂养或吸奶持续时间，单位秒。",
+            },
+            "pump_type": {
+                "type": "string",
+                "maxLength": 32,
+                "description": "吸奶方式或设备类型；仅吸奶记录使用。",
+            },
+            "source": {
+                "type": "string",
+                "maxLength": 32,
+                "description": "吸奶记录来源，例如 manual、agent 或 device；省略时使用 agent。",
+            },
+            "height_cm": {
+                "type": "number",
+                "minimum": 0,
+                "description": "宝宝身高，单位 cm；仅生长记录使用。",
+            },
+            "weight_kg": {
+                "type": "number",
+                "minimum": 0,
+                "description": "宝宝体重，单位 kg；仅生长记录使用。",
+            },
+            "head_cm": {
+                "type": "number",
+                "minimum": 0,
+                "description": "宝宝头围，单位 cm；仅生长记录使用。",
+            },
+            "reason": {
+                "type": "string",
+                "maxLength": 500,
+                "description": "删除或调整原因；用户没有说明时省略。",
+            },
+            "target_date": {
+                "type": "string",
+                "format": "date",
+                "description": "批量重排的单个目标本地日期；与 target_dates 二选一。",
+            },
+            "target_dates": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 7,
+                "uniqueItems": True,
+                "items": {"type": "string", "format": "date"},
+                "description": "批量重排的目标本地日期列表，最多 7 天。",
+            },
+            "busy_windows": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 21,
+                "description": "已存在且仅用于避让的不可用时段，不会被重复创建。",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["start_time", "end_time"],
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "不可用时段的本地日期；省略时使用当前目标日期。",
+                        },
+                        "start_time": {
+                            "type": "string",
+                            "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "不可用时段开始时间，格式 HH:MM。",
+                        },
+                        "end_time": {
+                            "type": "string",
+                            "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "不可用时段结束时间，格式 HH:MM。",
+                        },
+                        "title": {
+                            "type": "string",
+                            "maxLength": 120,
+                            "description": "不可用时段标题；没有时省略。",
+                        },
+                    },
+                },
+            },
+            "calendar_events": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 21,
+                "description": "用户本轮明确要求新增到日程、并参与奶量任务避让的生活事项。",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["date", "start_time", "end_time", "title"],
+                    "properties": {
+                        "date": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "生活事项的本地日期。",
+                        },
+                        "start_time": {
+                            "type": "string",
+                            "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "生活事项开始时间，格式 HH:MM。",
+                        },
+                        "end_time": {
+                            "type": "string",
+                            "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "生活事项结束时间，格式 HH:MM。",
+                        },
+                        "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120,
+                            "description": "生活事项标题。",
+                        },
+                        "description": {
+                            "type": "string",
+                            "maxLength": 500,
+                            "description": "生活事项补充说明；没有时省略。",
+                        },
+                    },
+                },
+            },
+            "min_gap_minutes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 360,
+                "default": 90,
+                "description": "批量重排时奶量任务与不可用时段之间的最小间隔分钟数。",
+            },
+            "default_duration_minutes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 240,
+                "default": 30,
+                "description": "批量重排时缺少明确时长的奶量任务默认持续分钟数。",
+            },
+            "idempotency_key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "description": "可选幂等键；同一变更重试时复用相同值。",
+            },
+        },
+    },
+    "lactation_timeline_read": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "start_date": {
+                "type": "string",
+                "format": "date",
+                "description": "时间线起始本地日期，格式 YYYY-MM-DD，包含该日；省略时读取本地今天之前 7 天。",
+            },
+            "end_date": {
+                "type": "string",
+                "format": "date",
+                "description": "时间线结束本地日期，格式 YYYY-MM-DD，包含该日；省略时读取本地今天之后 7 天。",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 50,
+                "description": "最多返回的时间线项目数；关联日程和记录合并后只计为一个项目。",
+            },
+        },
+    },
+    "milk_analysis": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["operation"],
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["review", "start_or_resume", "answer", "evaluate"],
+                "description": (
+                    "奶量分析操作：review 读取确定性快照；start_or_resume 开始或恢复六项采集；"
+                    "answer 提交本轮用户回答；evaluate 在 can_evaluate=true 后生成分析卡和计划准入结论。"
+                ),
+            },
+            "detail_level": {
+                "type": "string",
+                "enum": ["summary", "detailed"],
+                "default": "summary",
+                "description": "operation=review 时选择状态摘要或包含实际记录、生长记录和趋势的详细分析快照。",
+            },
+            "days": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 7,
+                "description": "operation=review 时快照覆盖的近期自然日数。",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 20,
+                "description": (
+                    "operation=review 时每类近期明细最多返回的记录数；省略时摘要模式使用 5，详细模式使用 8。"
+                ),
+            },
+            "restart": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "仅用于 operation=start_or_resume；为 true 时明确放弃当前采集并重新开始，"
+                    "否则恢复进行中的采集，或在没有进行中采集时开始。"
+                ),
             },
             "observed_answers": {
                 "type": "array",
                 "maxItems": 5,
-                "description": "action=answer 时，列出本轮用户原话中明确回答到的一个或多个采集字段；evidence 必须逐字来自本轮消息。",
+                "description": (
+                    "仅用于 operation=answer；列出本轮用户原话中明确回答到的一个或多个采集字段，"
+                    "evidence 必须逐字来自本轮消息。"
+                ),
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -185,6 +539,7 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                                 "maternal_red_flags",
                                 "maternal_breast_comfort",
                             ],
+                            "description": "本轮用户原话明确覆盖的奶量分析采集字段。",
                         },
                         "evidence": {
                             "type": "string",
@@ -196,16 +551,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 },
             },
         },
-    },
-    "records_milk_analysis_evaluate": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
-    },
-    "lactation_context_read": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {},
     },
     "plans_current_read": {
         "type": "object",
@@ -396,59 +741,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
             },
         },
     },
-    "plans_milk_schedule_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["plan_id"],
-        "properties": {
-            "plan_id": {"type": "string", "format": "uuid"},
-            "target_date": {"type": "string", "format": "date"},
-            "target_dates": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 7,
-                "uniqueItems": True,
-                "items": {"type": "string", "format": "date"},
-            },
-            "busy_windows": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 21,
-                "description": "已经存在于其它日程、仅用于避让且本轮不重复创建的不可用时段。",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["start_time", "end_time"],
-                    "properties": {
-                        "date": {"type": "string", "format": "date"},
-                        "start_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
-                        "end_time": {"type": "string", "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
-                        "title": {"type": "string", "maxLength": 120},
-                    },
-                },
-            },
-            "calendar_events": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 21,
-                "description": "用户本轮明确新增并希望同步到日程的生活事项；runtime 会同时把它作为不可用时段参与重排。",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["date", "start_time", "end_time", "title"],
-                    "properties": {
-                        "date": {"type": "string", "format": "date"},
-                        "start_time": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
-                        "end_time": {"type": "string", "pattern": "^(?:[01]?\\d|2[0-3]):[0-5]\\d$"},
-                        "title": {"type": "string", "minLength": 1, "maxLength": 120},
-                        "description": {"type": "string", "maxLength": 500},
-                    },
-                },
-            },
-            "min_gap_minutes": {"type": "integer", "minimum": 0, "maximum": 360, "default": 90},
-            "default_duration_minutes": {"type": "integer", "minimum": 1, "maximum": 240, "default": 30},
-        },
-    },
     "pregnancy_plan_workflow": {
         "type": "object",
         "additionalProperties": False,
@@ -580,83 +872,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
                 "type": "object",
                 "additionalProperties": True,
             },
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
-    "records_feeding_record_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["feed_time", "feed_type"],
-        "properties": {
-            "infant_id": {"type": "string", "maxLength": 80},
-            "feed_time": {"type": "string", "minLength": 1, "maxLength": 80},
-            "feed_type": {"type": "string", "minLength": 1, "maxLength": 32},
-            "feed_action": {"type": "string", "maxLength": 32},
-            "volume_ml": {"type": "number", "minimum": 0},
-            "duration_seconds": {"type": "integer", "minimum": 0},
-            "title": {"type": "string", "maxLength": 255},
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
-    "records_pumping_record_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["pump_start_time"],
-        "properties": {
-            "pump_start_time": {"type": "string", "minLength": 1, "maxLength": 80},
-            "pump_end_time": {"type": "string", "maxLength": 80},
-            "milk_volume_ml": {"type": "number", "minimum": 0},
-            "pump_type": {"type": "string", "maxLength": 32},
-            "duration_seconds": {"type": "integer", "minimum": 0},
-            "source": {"type": "string", "maxLength": 32},
-            "title": {"type": "string", "maxLength": 255},
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
-    "records_feeding_record_delete_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["record_id"],
-        "properties": {
-            "record_id": {"type": "string", "minLength": 1, "maxLength": 80},
-            "reason": {"type": "string", "maxLength": 500},
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
-    "records_growth_record_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["measured_at"],
-        "properties": {
-            "infant_id": {"type": "string", "maxLength": 80},
-            "measured_at": {"type": "string", "minLength": 1, "maxLength": 80},
-            "height_cm": {"type": "number", "minimum": 0},
-            "weight_kg": {"type": "number", "minimum": 0},
-            "head_cm": {"type": "number", "minimum": 0},
-            "locale": {"type": "string", "maxLength": 35},
-            "timezone": {"type": "string", "maxLength": 80},
-            "idempotency_key": {"type": "string", "maxLength": 255},
-        },
-    },
-    "records_growth_record_update_propose": {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["record_id"],
-        "properties": {
-            "record_id": {"type": "string", "minLength": 1, "maxLength": 80},
-            "infant_id": {"type": "string", "maxLength": 80},
-            "measured_at": {"type": "string", "maxLength": 80},
-            "height_cm": {"type": "number", "minimum": 0},
-            "weight_kg": {"type": "number", "minimum": 0},
-            "head_cm": {"type": "number", "minimum": 0},
             "locale": {"type": "string", "maxLength": 35},
             "timezone": {"type": "string", "maxLength": 80},
             "idempotency_key": {"type": "string", "maxLength": 255},
@@ -794,12 +1009,6 @@ _TOOL_INPUT_SCHEMAS: dict[str, JsonSchema] = {
     },
 }
 
-
-for _tool_name in ("records_pumping_record_delete_propose", "records_growth_record_delete_propose"):
-    _TOOL_INPUT_SCHEMAS[_tool_name] = _TOOL_INPUT_SCHEMAS["records_feeding_record_delete_propose"]
-
-_TOOL_INPUT_SCHEMAS["plans_milk_task_update_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_update_propose"]
-_TOOL_INPUT_SCHEMAS["plans_milk_task_delete_propose"] = _TOOL_INPUT_SCHEMAS["plans_task_delete_propose"]
 
 _TOOL_INPUT_SCHEMAS["hospital_bag_workflow"] = {
     "type": "object",

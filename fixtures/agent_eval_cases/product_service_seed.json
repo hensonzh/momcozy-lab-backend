@@ -296,11 +296,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "records_milk_status_read",
-          "timing": "before_final_response"
-        },
-        {
-          "contract": "records_milk_summary_read",
+          "contract": "lactation_timeline_read",
           "timing": "before_final_response"
         }
       ]
@@ -369,8 +365,12 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plans_milk_schedule_propose",
-          "timing": "before_action_confirmation"
+          "contract": "lactation_timeline_manage",
+          "timing": "before_action_confirmation",
+          "args_subset": {
+            "operation": "reschedule",
+            "item_type": "schedule"
+          }
         }
       ],
       "expected_events": [
@@ -422,11 +422,17 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "records_milk_analysis_intake",
+          "contract": "milk_analysis",
+          "args_subset": {
+            "operation": "start_or_resume"
+          },
           "timing": "before_analysis"
         },
         {
-          "contract": "records_milk_analysis_evaluate",
+          "contract": "milk_analysis",
+          "args_subset": {
+            "operation": "evaluate"
+          },
           "timing": "after_intake"
         },
         {
@@ -486,14 +492,19 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "records_milk_summary_read",
-          "timing": "before_final_response"
+          "contract": "milk_analysis",
+          "timing": "before_final_response",
+          "args_subset": {
+            "operation": "review",
+            "detail_level": "summary",
+            "days": 14
+          }
         }
       ]
     },
     {
-      "suite": "lactation_context_read",
-      "name": "milk analysis reads compact persisted maternal and multi-infant context",
+      "suite": "maternal_infant_profile_read",
+      "name": "milk analysis reads compact persisted maternal and multi-infant profiles",
       "domain": "milk-management",
       "owner_team": "agent",
       "input": {
@@ -504,6 +515,11 @@
           }
         ],
         "fixtures": {
+          "user_profile": {
+            "preferred_name": "Mai",
+            "age": 32,
+            "estimated_due_date": "2026-05-17"
+          },
           "maternal_profile": {
             "delivery_count": 2,
             "current_delivery_method": "cesarean",
@@ -517,7 +533,10 @@
             {
               "birth_order": 1,
               "infant_profile": {
+                "infant_id": "11111111-1111-4111-8111-111111111111",
+                "name": "Baby A",
                 "sex_at_birth": "female",
+                "birth_date": "2026-05-10",
                 "birth_weight_kg": 2.45,
                 "gestational_age_at_birth_days": 258
               },
@@ -531,7 +550,10 @@
             {
               "birth_order": 2,
               "infant_profile": {
+                "infant_id": "22222222-2222-4222-8222-222222222222",
+                "name": "Baby B",
                 "sex_at_birth": "male",
+                "birth_date": "2026-05-10",
                 "birth_weight_kg": 2.3,
                 "gestational_age_at_birth_days": 258
               },
@@ -546,29 +568,30 @@
         }
       },
       "expected_behavior": {
-        "intent": "lactation_context_read",
+        "intent": "maternal_infant_profile_read",
         "route": "read_only_context",
         "requires_confirmation_before_write": false,
         "service_skill_id": "milk-management",
         "must_include": [
           "derived_postpartum_and_infant_age",
           "separate_context_for_each_birth_order",
+          "stable_infant_id_for_each_infant",
           "sex_at_birth_for_each_infant",
           "birth_gestational_age",
           "latest_growth_measurement",
-          "stable_machine_readable_missing_and_quality_codes"
+          "stable_machine_readable_missing_and_quality_codes",
+          "estimated_due_date_hidden_after_actual_delivery"
         ],
         "must_not": [
           "return_delivery_history",
           "return_growth_history",
-          "expose_internal_infant_id",
           "dynamic_path_strings_in_missing_or_quality_fields"
         ],
         "forbids_side_effects": true
       },
       "expected_tool_calls": [
         {
-          "contract": "lactation_context_read",
+          "contract": "maternal_infant_profile_read",
           "timing": "before_final_response"
         }
       ]
@@ -1427,7 +1450,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "profile_read",
+          "contract": "maternal_infant_profile_read",
           "timing": "before_recovery_guidance"
         },
         {
@@ -1514,7 +1537,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "profile_update"
+          "contract": "maternal_infant_profile_update"
         }
       ]
     },
@@ -1551,7 +1574,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "profile_update"
+          "contract": "maternal_infant_profile_update"
         }
       ]
     },
@@ -1923,10 +1946,12 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "records_feeding_record_delete_propose",
+          "contract": "lactation_timeline_manage",
           "timing": "after_exact_target_resolution",
           "args_subset": {
-            "record_id": "44444444-4444-4444-8444-444444444444"
+            "operation": "delete",
+            "item_type": "feeding",
+            "item_id": "44444444-4444-4444-8444-444444444444"
           }
         }
       ]
@@ -1965,13 +1990,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "records_feeding_record_delete_propose"
-        },
-        {
-          "contract": "records_pumping_record_delete_propose"
-        },
-        {
-          "contract": "records_growth_record_delete_propose"
+          "contract": "lactation_timeline_manage"
         }
       ]
     },
@@ -1990,7 +2009,7 @@
         "fixtures": {
           "context_ledger": {
             "known_information_sources": [
-              "records_milk_status_read",
+              "milk_analysis",
               "devices_guidance"
             ]
           }
@@ -2049,7 +2068,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "records_milk_status_read",
+          "contract": "lactation_timeline_read",
           "timing": "before_final_response"
         }
       ]
@@ -2809,14 +2828,14 @@
           "ordered_context_items": [
             {
               "type": "function_call",
-              "name": "profile_read",
+              "name": "maternal_infant_profile_read",
               "call_id": "call_profile_1",
-              "arguments": "{}"
+              "arguments": "{\"infant_scope\":\"all\"}"
             },
             {
               "type": "function_call_output",
               "call_id": "call_profile_1",
-              "output": "{\"profile\":{\"preferred_name\":\"Mai\"}}"
+              "output": "{\"mother\":{\"preferred_name\":\"Mai\"}}"
             }
           ]
         }
@@ -2831,7 +2850,7 @@
           "preserve_context_item_order"
         ],
         "must_not": [
-          "repeat_profile_read",
+          "repeat_maternal_infant_profile_read",
           "inject_runtime_context_projection"
         ],
         "forbids_side_effects": true

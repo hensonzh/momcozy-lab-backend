@@ -24,7 +24,9 @@ def test_agent_eval_service_creates_draft_case_from_replay_bundle() -> None:
     assert eval_case.source_run_id == run_id
     assert eval_case.input_payload["replay_bundle"]["messages"][0]["content"] == {"redacted": True}
     assert eval_case.expected_behavior["event_types"] == ["run.started", "action.confirmation_required"]
-    assert eval_case.expected_tool_calls == [{"tool_name": "profile_read", "status": "completed"}]
+    assert eval_case.expected_tool_calls == [
+        {"tool_name": "maternal_infant_profile_read", "status": "completed"}
+    ]
 
 
 class FakeEvalRepository:
@@ -54,7 +56,7 @@ class FakeReplayService:
             "run": {"id": str(run_id), "status": "waiting_for_confirmation"},
             "messages": [{"content": {"redacted": True}}],
             "events": [{"type": "run.started"}, {"type": "action.confirmation_required"}],
-            "tool_calls": [{"tool_name": "profile_read", "status": "completed"}],
+            "tool_calls": [{"tool_name": "maternal_infant_profile_read", "status": "completed"}],
             "actions": [{"status": "confirmation_required"}],
             "artifacts": [],
             "checkpoints": [],

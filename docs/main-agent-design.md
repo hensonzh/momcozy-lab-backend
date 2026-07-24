@@ -29,17 +29,17 @@
 | --- | --- |
 | 主智能体 | 通用问答、健康咨询、普通情绪支持、孕期日记、用户资料、通用计划任务、产后恢复问答、范围澄清和多意图汇总 |
 | 产前服务智能体 | 孕期计划、孕期计划任务、待产包、待产包购物车和事项型孕期焦虑 |
-| 泌乳服务智能体 | 奶量摘要与分析、泌乳计划、日程调整、喂养/吸奶/生长记录、吸奶小结、提醒和 IBCLC 衔接 |
+| 泌乳服务智能体 | 奶量状态与分析、泌乳计划、统一日程与喂养/吸奶/生长记录管理、提醒和 IBCLC 衔接 |
 | 设备服务智能体 | 吸奶器选型、开箱使用、清洁消毒、蓝牙与法兰指导、故障排查和售后工单 |
 | 全局能力 | 健康红旗、情绪危机、设备安全、权限、Prompt 防护、上下文账本和 Memory |
 
-## Tool 归属（38）
+## Tool 归属（25）
 
-当前共有 38 个模型可见 Tool Contract。Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Allowlist 暴露给多个智能体。
+当前共有 25 个模型可见 Tool Contract。Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Allowlist 暴露给多个智能体。
 
 ### 主智能体与公共能力（13）
 
-`profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`
+`maternal_infant_profile_read`、`maternal_infant_profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`
 
 ### 产前服务智能体（3）
 
@@ -83,13 +83,30 @@ runtime 每次调用都注入当前线程的 workflow state、当前消息中已
 
 表单提交后的合法续跑由 runtime 在模型调用前确定性执行同一个 `hospital_bag_workflow`，因此不需要第二轮模型来判断或复制表单 JSON。普通旁支对话仍由模型正常回答，活动采集状态保留在 workflow ledger 中；再次进入待产包服务时会重发原 form artifact。该流程使用 `hospital_bag` workflow schema v2。
 
-### 泌乳服务智能体（19）
+### 泌乳服务智能体（8）
 
-`lactation_context_read`、`records_milk_summary_read`、`records_milk_status_read`、`records_milk_analysis_read`、`records_milk_analysis_intake`、`records_milk_analysis_evaluate`、`plans_milk_plan_propose`、`plans_milk_schedule_propose`、`plans_milk_task_update_propose`、`plans_milk_task_delete_propose`、`notifications_milk_reminder_propose`、`records_feeding_record_propose`、`records_feeding_record_delete_propose`、`records_pumping_record_propose`、`records_pumping_record_delete_propose`、`records_growth_record_propose`、`records_growth_record_update_propose`、`records_growth_record_delete_propose`、`ibclc_consult_card_create`。
+`maternal_infant_profile_read`、`maternal_infant_profile_update`、`lactation_timeline_read`、`lactation_timeline_manage`、`milk_analysis`、`plans_milk_plan_propose`、`notifications_milk_reminder_propose`、`ibclc_consult_card_create`。
 
-### 泌乳分析基础信息
+### 泌乳时间线
 
-`lactation_context_read` 只读取影响当前奶量分析的紧凑母婴上下文，不返回历次分娩或完整生长记录历史。
+`lactation_timeline_read` 是过去、当天和未来泌乳日程与实际记录的统一只读入口。它不新增时间线业务表，而是聚合 `plan_tasks`、`feeding_records`、`pumping_records` 和 `growth_records`；喂养或吸奶记录带有 `plan_task_id` 时与对应日程合并，临时记录保持独立。计划时间、实际发生时间和任务完成时间分别返回，未执行计划不得作为奶量事实参与分析。
+
+`lactation_timeline_manage` 是对应的统一写入口，以 `operation=create|update|delete|set_status|reschedule` 和 `item_type=schedule|feeding|pumping|growth` 管理计划日程与实际记录。喂养和吸奶记录可通过 `plan_task_id` 关联并在同一事务中完成对应日程；批量避让重排仍生成预览并走确认边界。底层各类 Record、Plan Task 和重排 Action 保持独立，以保留各自的校验、权限、幂等和审计语义。
+
+### 奶量分析
+
+`milk_analysis` 统一替代分散的奶量摘要、状态、详细分析、问答采集和评估入口：
+
+- `operation=review` 返回确定性快照；`detail_level=summary` 用于轻量状态判断，`detailed` 增加实际喂养、吸奶、宝宝生长、节奏和趋势明细。
+- `operation=start_or_resume` 开始或恢复当前用户的耐久六项信息采集；只有显式 `restart=true` 才重置。
+- `operation=answer` 只接受当前轮用户原话能够支持的 `observed_answers`，并通过 workflow revision 与 step token 防止过期回复推进状态。
+- `operation=evaluate` 仅在采集完成后生成奶量分析卡和计划准入结论；计划仍需由 `plans_milk_plan_propose` 单独提出。
+
+读取与分析只使用实际发生记录，日程的待执行、跳过或仅手动完成状态不计入奶量产出或摄入事实。
+
+### 妈妈和宝宝基础信息
+
+`maternal_infant_profile_read` 与 `maternal_infant_profile_update` 是统一的妈妈和宝宝基础资料读写入口，取代原有的通用 Profile 读写工具。读取工具不返回奶量产出/摄入、历次分娩或完整生长记录历史。
 
 - 通用妈妈档案 `maternal_profiles` 持久化 `delivery_count`、`latest_delivery_method`、`latest_delivery_date`、`has_cesarean_history`；`age` 沿用通用 `user_profiles`。
 - 泌乳专用档案 `lactation_profiles` 只持久化 `current_feeding_mode` 等泌乳场景状态。
@@ -97,8 +114,10 @@ runtime 每次调用都注入当前线程的 workflow state、当前消息中已
 - 通用 `maternal_current_delivery_infants` 关联最近一次分娩的全部宝宝，并用 `birth_order` 提供稳定的非姓名区分；一个宝宝只能归属一个当前分娩摘要。
 - `postpartum_days`、`age_days`、`age_months` 以读取当天和实际分娩/出生日期派生，不在数据库重复持久化。
 - 当前分娩摘要仍是一人一行，不为每次分娩建立历史明细；奶量工具通过字段级投影读取必要列，并批量取得各宝宝最新一条生长记录。
-- Tool 输出使用 `infants[]` 返回全部当前宝宝，不包含妈妈称呼、宝宝姓名、预产期、内部宝宝 ID 等与奶量分析无关的信息。
-- Tool Contract 同时声明空对象 Input Schema 和嵌套 `output_schema`；输出的每个字段都描述单位、枚举、可空和派生语义，Tool Executor 在结果进入模型上下文前执行输出校验。
+- Tool 默认使用 `infant_scope=current_delivery` 返回全部当前宝宝；只有通用资料核对或需要选择其他宝宝 `infant_id` 时才用 `infant_scope=all`，避免较早出生的宝宝干扰奶量分析。
+- Tool 输出包含妈妈称呼、年龄、预产期、当前分娩与喂养信息，以及每个宝宝的稳定 `infant_id`、姓名、当前分娩关系、出生和最近测量信息。已有 `actual_delivery_date` 或当前宝宝 `birth_date` 时，`estimated_due_date` 固定投影为 `null`，数据库原始值不被删除。
+- 更新工具以 `mother`、`infants` 和 `current_infants` 为边界，通过一个 `profile.update` Action 在同一事务中组合现有通用 Profile 与泌乳 Context Service。
+- 读写 Tool Contract 均声明包含字段描述的 Input/Output Schema；Tool Executor 在参数进入 Handler 前和结果进入模型上下文前分别执行校验。
 - `missing_fields` 与 `data_quality_issues` 返回 `{code, birth_order}` 对象；`code` 是固定枚举，妈妈或集合级问题的 `birth_order` 为 `null`，宝宝级问题使用对应出生顺序，不再返回需要解析的动态路径字符串。
 
 ### 设备服务智能体（3）
@@ -133,6 +152,18 @@ runtime 每次调用都注入当前线程的 workflow state、当前消息中已
 工具统一返回 `device-guidance.result.v1`，包含 `status`、`mode`、`device_model`、`document_version`、`guidance` 和 `workflow`。直接查询的 `mode=direct`、`workflow=null`；连续指导的 `mode=walkthrough`，以 `workflow.current_step` 作为唯一当前步骤。
 
 连续指导沿用内部 `device_unboxing` Workflow。`start_or_resume` 必须幂等恢复已有进度，`complete_current` 每次只持久化推进一步；流程中的临时清洗、蓝牙或当前步骤问题使用 `read`，不得改变 `active_step` 或 `completed_steps`。
+
+## Tool Contract 边界
+
+模型可见 `ToolContract` 只保留实际参与工具选择或执行的字段：`name`、`domain`、`description`、`input_schema`、`output_schema`、`effect_scope` 和 `timeout_seconds`。
+
+`action_type`、`blocking_policy`、`result_dependency`、权限、owner scope 和审计策略不放在 Tool Contract 中。原因是一个统一工具可以按 `operation` 路由多个内部 Action，而权限与审计也不能由模型声明决定：
+
+- Tool Executor 始终等待当前工具完成或超时，并校验输入和已声明的输出 Schema。
+- 当前登录用户由 Runtime 注入，模型不能传入或覆盖 owner user id。
+- 用户业务写入由 Action Policy 决定是否需要确认，并由 Action Handler 执行。
+- Repository / Service 负责 owner scope、字段校验、事务、幂等和审计。
+- 启动时对 Action Policy 与 Action Handler 做双向完整性校验，不把内部 Action 绑定复制到模型契约。
 
 ## `propose` 语义
 

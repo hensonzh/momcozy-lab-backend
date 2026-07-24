@@ -63,12 +63,12 @@ def test_after_tool_progress_preserves_status_and_thinking_layers() -> None:
 def test_tool_event_semantic_uses_tool_specific_copy() -> None:
     semantic = tool_event_semantic(
         event_type="tool.started",
-        tool_name="records_milk_status_read",
-        effect_scope="none",
+        tool_name="milk_analysis",
+        effect_scope="agent_internal",
     )
 
-    assert semantic["phase"] == "reading"
-    assert semantic["label"] == "我先看看今天的奶量状态～"
+    assert semantic["phase"] == "evaluating"
+    assert semantic["label"] == "我先核对并分析一下奶量情况～"
     assert semantic["surface"] == "work_item"
     assert semantic["lifecycle"] == "running"
 
@@ -76,13 +76,13 @@ def test_tool_event_semantic_uses_tool_specific_copy() -> None:
 def test_tool_event_semantic_uses_one_merge_key_for_the_whole_call() -> None:
     started = tool_event_semantic(
         event_type="tool.started",
-        tool_name="records_milk_status_read",
+        tool_name="milk_analysis",
         tool_call_id="call-1",
         effect_scope="none",
     )
     completed = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="records_milk_status_read",
+        tool_name="milk_analysis",
         tool_call_id="call-1",
         safe_output={"status": "completed"},
         effect_scope="none",

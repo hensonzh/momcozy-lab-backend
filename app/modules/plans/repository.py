@@ -228,6 +228,32 @@ class PlansRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def list_milk_timeline_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+        limit: int,
+    ) -> list[PlanTask]:
+        statement = (
+            select(PlanTask)
+            .join(Plan, Plan.id == PlanTask.plan_id)
+            .where(
+                PlanTask.owner_user_id == owner_user_id,
+                PlanTask.deleted_at.is_(None),
+                PlanTask.task_date >= start_date,
+                PlanTask.task_date <= end_date,
+                Plan.owner_user_id == owner_user_id,
+                Plan.plan_type == "milk_management",
+                Plan.deleted_at.is_(None),
+            )
+            .order_by(PlanTask.task_date.asc(), PlanTask.task_time.asc(), PlanTask.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
     async def set_task_completed(
         self,
         *,

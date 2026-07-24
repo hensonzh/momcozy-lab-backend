@@ -8,14 +8,18 @@ from app.agent_runtime.runs.models import AgentAction
 from app.agents.cozymate.actions.records import (
     FEEDING_RECORD_CREATE_ACTION,
     FEEDING_RECORD_DELETE_ACTION,
+    FEEDING_RECORD_UPDATE_ACTION,
     GROWTH_RECORD_CREATE_ACTION,
     GROWTH_RECORD_UPDATE_ACTION,
     PUMPING_RECORD_CREATE_ACTION,
+    PUMPING_RECORD_UPDATE_ACTION,
     FeedingRecordCreateActionHandler,
     FeedingRecordDeleteActionHandler,
+    FeedingRecordUpdateActionHandler,
     GrowthRecordCreateActionHandler,
     GrowthRecordUpdateActionHandler,
     PumpingRecordCreateActionHandler,
+    PumpingRecordUpdateActionHandler,
 )
 from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from app.agent_runtime.actions.errors import PermanentActionError
@@ -23,12 +27,14 @@ from app.agent_runtime.actions.errors import PermanentActionError
 
 def test_feeding_record_create_action_handler_creates_record_through_service() -> None:
     infant_id = uuid4()
+    plan_task_id = uuid4()
     service = FakeRecordsService()
     action = _action(
         action_type=FEEDING_RECORD_CREATE_ACTION,
         target_type="feeding_record",
         apply_payload={
             "infant_id": str(infant_id),
+            "plan_task_id": str(plan_task_id),
             "feed_time": "2026-07-04T08:30:00Z",
             "feed_type": "bottle",
             "feed_action": "left",
@@ -44,6 +50,7 @@ def test_feeding_record_create_action_handler_creates_record_through_service() -
     assert result.details == {"agent_action_id": str(action.id), "agent_run_id": str(action.run_id)}
     assert service.feeding_kwargs["owner_user_id"] == action.actor_user_id
     assert service.feeding_kwargs["infant_id"] == infant_id
+    assert service.feeding_kwargs["plan_task_id"] == plan_task_id
     assert service.feeding_kwargs["feed_time"] == datetime(2026, 7, 4, 8, 30, tzinfo=timezone.utc)
     assert service.feeding_kwargs["feed_type"] == "bottle"
     assert service.feeding_kwargs["volume_ml"] == 90.0
@@ -86,10 +93,12 @@ def test_feeding_record_create_action_handler_rejects_invalid_infant_id() -> Non
 
 def test_pumping_record_create_action_handler_creates_record_through_service() -> None:
     service = FakeRecordsService()
+    plan_task_id = uuid4()
     action = _action(
         action_type=PUMPING_RECORD_CREATE_ACTION,
         target_type="pumping_record",
         apply_payload={
+            "plan_task_id": str(plan_task_id),
             "pump_start_time": "2026-07-04T09:00:00+00:00",
             "pump_end_time": "2026-07-04T09:20:00+00:00",
             "milk_volume_ml": 120.5,
@@ -105,6 +114,7 @@ def test_pumping_record_create_action_handler_creates_record_through_service() -
     assert result.resource_id == str(service.pumping_record.id)
     assert result.details == {"agent_action_id": str(action.id), "agent_run_id": str(action.run_id)}
     assert service.pumping_kwargs["owner_user_id"] == action.actor_user_id
+    assert service.pumping_kwargs["plan_task_id"] == plan_task_id
     assert service.pumping_kwargs["pump_start_time"] == datetime(2026, 7, 4, 9, 0, tzinfo=timezone.utc)
     assert service.pumping_kwargs["pump_end_time"] == datetime(2026, 7, 4, 9, 20, tzinfo=timezone.utc)
     assert service.pumping_kwargs["milk_volume_ml"] == 120.5
@@ -159,6 +169,40 @@ def test_feeding_record_delete_action_handler_deletes_record_through_service() -
     assert result.resource_id == str(record_id)
     assert service.delete_feeding_kwargs["owner_user_id"] == action.actor_user_id
     assert service.delete_feeding_kwargs["record_id"] == record_id
+
+
+def test_feeding_and_pumping_update_action_handlers_preserve_explicit_fields() -> None:
+    service = FakeRecordsService()
+    feeding_id = uuid4()
+    pumping_id = uuid4()
+    feeding_action = _action(
+        action_type=FEEDING_RECORD_UPDATE_ACTION,
+        target_type="feeding_record",
+        apply_payload={
+            "record_id": str(feeding_id),
+            "volume_ml": 105,
+        },
+    )
+    pumping_action = _action(
+        action_type=PUMPING_RECORD_UPDATE_ACTION,
+        target_type="pumping_record",
+        apply_payload={
+            "record_id": str(pumping_id),
+            "duration_seconds": 900,
+        },
+    )
+
+    feeding_result = asyncio.run(FeedingRecordUpdateActionHandler(service=service)(feeding_action))
+    pumping_result = asyncio.run(PumpingRecordUpdateActionHandler(service=service)(pumping_action))
+
+    assert feeding_result.resource_type == "feeding_record"
+    assert feeding_result.details["fields"] == ["volume_ml"]
+    assert service.update_feeding_kwargs["record_id"] == feeding_id
+    assert service.update_feeding_kwargs["updates"] == {"volume_ml": 105.0}
+    assert pumping_result.resource_type == "pumping_record"
+    assert pumping_result.details["fields"] == ["duration_seconds"]
+    assert service.update_pumping_kwargs["record_id"] == pumping_id
+    assert service.update_pumping_kwargs["updates"] == {"duration_seconds": 900}
 
 
 def test_growth_record_create_action_handler_creates_growth_through_service() -> None:
@@ -257,6 +301,8 @@ class FakeRecordsService:
         self.feeding_kwargs = {}
         self.pumping_kwargs = {}
         self.delete_feeding_kwargs = {}
+        self.update_feeding_kwargs = {}
+        self.update_pumping_kwargs = {}
         self.create_growth_kwargs = {}
         self.update_growth_kwargs = {}
 
@@ -286,6 +332,18 @@ class FakeRecordsService:
 
     async def delete_feeding(self, **kwargs):
         self.delete_feeding_kwargs = kwargs
+
+    async def update_feeding(self, **kwargs):
+        self.update_feeding_kwargs = kwargs
+        for key, value in kwargs["updates"].items():
+            setattr(self.feeding_record, key, value)
+        return self.feeding_record
+
+    async def update_pumping(self, **kwargs):
+        self.update_pumping_kwargs = kwargs
+        for key, value in kwargs["updates"].items():
+            setattr(self.pumping_record, key, value)
+        return self.pumping_record
 
     async def create_growth(self, **kwargs):
         self.create_growth_kwargs = kwargs

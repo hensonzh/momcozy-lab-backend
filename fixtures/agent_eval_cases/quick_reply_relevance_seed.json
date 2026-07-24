@@ -12,7 +12,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "records_milk_analysis_intake",
+              "name": "milk_analysis",
               "execution_status": "completed",
               "result": {
                 "status": "milk_analysis_intake_collecting"
@@ -28,7 +28,7 @@
               "name": "maternal_red_flags",
               "visible_question": "最近有没有发热、寒战或乳房红肿硬块？"
             },
-            "allowed_actions": [
+            "allowed_operations": [
               "answer"
             ]
           }

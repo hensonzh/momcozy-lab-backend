@@ -5,19 +5,28 @@ from uuid import uuid4
 import pytest
 
 from app.agent_runtime.runs.models import AgentAction
-from app.agents.cozymate.actions.profiles import PROFILE_UPDATE_ACTION, ProfileUpdateActionHandler
+from app.agents.cozymate.actions.profiles import (
+    PROFILE_UPDATE_ACTION,
+    MaternalInfantProfileUpdateActionHandler,
+)
 from app.agent_runtime.actions.errors import PermanentActionError
 
 
-def test_profile_update_action_handler_updates_profile_through_service() -> None:
-    service = FakeProfileService()
+def test_maternal_infant_profile_update_action_composes_profile_services() -> None:
+    profile_service = FakeProfileService()
+    lactation_service = FakeLactationContextService()
     infant_id = uuid4()
     action = _action(
         {
-            "user": {
+            "mother": {
                 "preferred_name": "Mai",
                 "age": 31,
                 "estimated_due_date": "2026-09-20",
+                "delivery_count": 2,
+                "current_delivery_method": "cesarean",
+                "actual_delivery_date": "2026-01-10",
+                "has_cesarean_history": True,
+                "current_feeding_mode": "mixed_feeding",
             },
             "infants": [
                 {
@@ -29,12 +38,31 @@ def test_profile_update_action_handler_updates_profile_through_service() -> None
                     "gestational_age_at_birth_days": 258,
                 }
             ],
+            "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
         }
     )
 
-    result = asyncio.run(ProfileUpdateActionHandler(service=service)(action))
+    result = asyncio.run(
+        MaternalInfantProfileUpdateActionHandler(
+            profile_service=profile_service,
+            lactation_context_service=lactation_service,
+        )(action)
+    )
 
-    assert service.kwargs == {
+    assert lactation_service.kwargs == {
+        "owner_user_id": action.actor_user_id,
+        "values": {
+            "delivery_count": 2,
+            "current_delivery_method": "cesarean",
+            "actual_delivery_date": date(2026, 1, 10),
+            "has_cesarean_history": True,
+            "current_feeding_mode": "mixed_feeding",
+            "current_infants": [{"infant_id": infant_id, "birth_order": 1}],
+        },
+        "anticipated_infant_birth_dates": {infant_id: date(2026, 1, 10)},
+        "request_id": f"agent-action:{action.id}",
+    }
+    assert profile_service.kwargs == {
         "user_id": action.actor_user_id,
         "user_values": {
             "preferred_name": "Mai",
@@ -58,7 +86,16 @@ def test_profile_update_action_handler_updates_profile_through_service() -> None
     assert result.resource_type == "profile"
     assert result.resource_id == str(action.actor_user_id)
     assert result.details == {
-        "user_fields": ["age", "estimated_due_date", "preferred_name"],
+        "mother_fields": [
+            "actual_delivery_date",
+            "age",
+            "current_delivery_method",
+            "current_feeding_mode",
+            "delivery_count",
+            "estimated_due_date",
+            "has_cesarean_history",
+            "preferred_name",
+        ],
         "infants": [
             {
                 "infant_id": str(infant_id),
@@ -71,12 +108,18 @@ def test_profile_update_action_handler_updates_profile_through_service() -> None
                 ],
             }
         ],
+        "current_infants_updated": True,
     }
 
 
-def test_profile_update_action_handler_rejects_empty_values() -> None:
+def test_maternal_infant_profile_update_action_rejects_empty_values() -> None:
     with pytest.raises(PermanentActionError) as exc_info:
-        asyncio.run(ProfileUpdateActionHandler(service=FakeProfileService())(_action({})))
+        asyncio.run(
+            MaternalInfantProfileUpdateActionHandler(
+                profile_service=FakeProfileService(),
+                lactation_context_service=FakeLactationContextService(),
+            )(_action({}))
+        )
 
     assert exc_info.value.code == "missing_profile_updates"
 
@@ -86,6 +129,15 @@ class FakeProfileService:
         self.kwargs: dict = {}
 
     async def update_profile(self, **kwargs):
+        self.kwargs = kwargs
+        return None, []
+
+
+class FakeLactationContextService:
+    def __init__(self) -> None:
+        self.kwargs: dict = {}
+
+    async def update_maternal_profile(self, **kwargs):
         self.kwargs = kwargs
         return None, []
 

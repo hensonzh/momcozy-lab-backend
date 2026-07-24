@@ -9,7 +9,9 @@ def test_sanitize_agent_response_text_removes_tool_output_json() -> None:
 
 
 def test_sanitize_agent_response_text_removes_tool_json_after_text() -> None:
-    result = sanitize_agent_response_text('我先帮你看一下。\n{"tool_name":"profile_read","safe_output":{"preferred_name":"Mai"}}')
+    result = sanitize_agent_response_text(
+        '我先帮你看一下。\n{"tool_name":"maternal_infant_profile_read","safe_output":{"preferred_name":"Mai"}}'
+    )
 
     assert result.text == "我先帮你看一下。"
     assert result.quick_replies == []
@@ -61,7 +63,7 @@ def test_append_only_projector_hides_partial_tool_json_after_visible_text() -> N
     projector = AppendOnlyAgentResponseProjector()
 
     assert projector.push('我先帮你看一下。\n{"tool_name":') == "我先帮你看一下。"
-    assert projector.push('"profile_read","safe_output":{"preferred_name":"Mai"}}') == ""
+    assert projector.push('"maternal_infant_profile_read","safe_output":{"preferred_name":"Mai"}}') == ""
     assert projector.finalize() == ""
     assert projector.text == "我先帮你看一下。"
 

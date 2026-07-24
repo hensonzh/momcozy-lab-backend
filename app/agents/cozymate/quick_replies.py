@@ -15,7 +15,7 @@ QUICK_REPLY_FINALIZER_INSTRUCTIONS = """
 
 判断优先级：
 1. 当前轮次 assistant_final_text 结尾提出的明确问题、选择或下一步。
-2. turn_outcome.active_workflow 中当前问题、reply_options 和 allowed_actions。
+2. turn_outcome.active_workflow 中当前问题、reply_options、allowed_actions 和 allowed_operations。
 3. 本轮已完成工具和 artifact 的真实结果。
 4. recent_history 只用于理解指代和连续上下文；与当前轮冲突时忽略旧话题。
 
@@ -280,6 +280,9 @@ def _workflow_outcome_payload(workflow: dict[str, Any]) -> dict[str, Any]:
         allowed_actions = _bounded_signal_value(next_transition.get("allowed_actions"))
         if allowed_actions not in (None, "", []):
             projected["allowed_actions"] = allowed_actions
+        allowed_operations = _bounded_signal_value(next_transition.get("allowed_operations"))
+        if allowed_operations not in (None, "", []):
+            projected["allowed_operations"] = allowed_operations
     return projected
 
 

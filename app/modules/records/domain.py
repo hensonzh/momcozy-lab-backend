@@ -12,6 +12,30 @@ MAX_LIST_LIMIT = 100
 MIN_TREND_DAYS = 1
 MAX_TREND_DAYS = 90
 GROWTH_UPDATE_FIELDS = frozenset({"infant_id", "measured_at", "height_cm", "weight_kg", "head_cm"})
+FEEDING_UPDATE_FIELDS = frozenset(
+    {
+        "plan_task_id",
+        "infant_id",
+        "feed_time",
+        "feed_type",
+        "feed_action",
+        "volume_ml",
+        "duration_seconds",
+        "title",
+    }
+)
+PUMPING_UPDATE_FIELDS = frozenset(
+    {
+        "plan_task_id",
+        "pump_start_time",
+        "pump_end_time",
+        "milk_volume_ml",
+        "pump_type",
+        "duration_seconds",
+        "source",
+        "title",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +67,14 @@ def has_growth_measurement(*, height_cm: float | None, weight_kg: float | None, 
 
 def unsupported_growth_update_fields(updates: dict[str, Any]) -> set[str]:
     return set(updates) - GROWTH_UPDATE_FIELDS
+
+
+def unsupported_feeding_update_fields(updates: dict[str, Any]) -> set[str]:
+    return set(updates) - FEEDING_UPDATE_FIELDS
+
+
+def unsupported_pumping_update_fields(updates: dict[str, Any]) -> set[str]:
+    return set(updates) - PUMPING_UPDATE_FIELDS
 
 
 def growth_measurements_after_update(

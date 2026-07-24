@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -15,6 +16,7 @@ FeedingMode = Literal[
     "unknown",
 ]
 SexAtBirth = Literal["female", "male", "intersex", "unknown", "undisclosed"]
+InfantScope = Literal["current_delivery", "all"]
 LactationMissingFieldCode = Literal[
     "mother_age_missing",
     "mother_delivery_count_missing",
@@ -46,10 +48,21 @@ class _StrictOutputModel(BaseModel):
 class LactationMotherContextOutput(_StrictOutputModel):
     """影响当前奶量分析的妈妈侧紧凑基础信息。"""
 
+    preferred_name: str | None = Field(
+        max_length=120,
+        description="妈妈登记的称呼；未登记时为 null。",
+    )
     age: int | None = Field(
         ge=12,
         le=70,
         description="妈妈登记的当前周岁，单位为岁；未知或未登记时为 null，不由分娩日期推算。",
+    )
+    estimated_due_date: date | None = Field(
+        description=(
+            "妈妈登记的预产期，格式为 YYYY-MM-DD；仅在尚无当前实际分娩日期和宝宝实际出生日期时返回。"
+            "一旦任一实际日期已存在，本字段固定投影为 null，避免产后奶量分析误用旧预产期；"
+            "这不会删除数据库中保留的原始值。"
+        ),
     )
     delivery_count: int | None = Field(
         ge=1,
@@ -131,18 +144,35 @@ class LatestInfantMeasurementOutput(_StrictOutputModel):
 
 
 class LactationInfantContextOutput(_StrictOutputModel):
-    """当前这次分娩中一个宝宝的奶量分析基础信息。"""
+    """一个宝宝的基础信息及其与当前这次分娩的关系。"""
 
-    birth_order: int = Field(
+    infant_id: UUID = Field(
+        description="宝宝档案的稳定 UUID；更新指定宝宝资料或 current_infants 关系时必须使用该值。",
+    )
+    name: str = Field(
+        min_length=1,
+        max_length=120,
+        description="宝宝档案中登记的姓名或称呼。",
+    )
+    is_current_delivery: bool = Field(
+        description="是否属于妈妈当前这次分娩；奶量分析只使用 true 的宝宝。",
+    )
+    birth_order: int | None = Field(
         ge=1,
         le=10,
-        description="宝宝在当前这次多宝宝分娩中的出生顺序，从 1 开始；用于稳定区分每个宝宝。",
+        description=(
+            "宝宝属于当前这次分娩时，为多宝宝分娩中的出生顺序，从 1 开始；"
+            "不属于当前这次分娩时为 null。"
+        ),
     )
     sex_at_birth: SexAtBirth | None = Field(
         description=(
             "宝宝出生时登记的生理性别，不表示性别认同；female=女，male=男，intersex=间性，"
             "unknown=已明确记录为未知，undisclosed=不披露；未登记时为 null。"
         ),
+    )
+    birth_date: date | None = Field(
+        description="宝宝实际出生日期，格式为 YYYY-MM-DD；未登记时为 null。",
     )
     age_days: int | None = Field(
         ge=0,
@@ -204,22 +234,99 @@ class LactationDataQualityIssueOutput(_StrictOutputModel):
     )
 
 
-class LactationContextReadOutput(_StrictOutputModel):
-    """lactation_context_read 返回给模型的完整、紧凑、数据库支持的母婴上下文。"""
+class MaternalInfantProfileReadOutput(_StrictOutputModel):
+    """maternal_infant_profile_read 返回给模型的紧凑妈妈与宝宝基础资料。"""
 
     as_of_date: date = Field(
         description="可信运行时提供的本地基准日期，格式为 YYYY-MM-DD；所有产后天数和宝宝年龄均以此日期派生。",
+    )
+    infant_scope: InfantScope = Field(
+        description=(
+            "本次返回的宝宝范围；current_delivery=仅当前这次分娩宝宝，"
+            "all=当前用户全部宝宝。奶量分析必须使用 current_delivery。"
+        ),
     )
     mother: LactationMotherContextOutput = Field(
         description="影响当前奶量分析的妈妈侧基础信息。",
     )
     infants: list[LactationInfantContextOutput] = Field(
-        max_length=10,
-        description="当前这次分娩的宝宝列表，按 birth_order 升序返回；没有可用当前宝宝时为空数组。",
+        description=(
+            "符合 infant_scope 的宝宝列表；current_delivery 按 birth_order 升序，"
+            "all 按档案创建顺序返回。"
+        ),
     )
     missing_fields: list[LactationMissingFieldOutput] = Field(
         description="当前上下文中不可用的关键字段；使用稳定 code，不解析展示文本。",
     )
     data_quality_issues: list[LactationDataQualityIssueOutput] = Field(
         description="已发现但不阻断读取的数据质量问题；空数组表示未发现已知问题。",
+    )
+
+
+class InfantProfileUpdateSummary(_StrictOutputModel):
+    """一个宝宝实际提交更新的字段摘要。"""
+
+    infant_id: UUID = Field(
+        description="被更新宝宝的稳定 UUID。",
+    )
+    fields: list[str] = Field(
+        description="该宝宝实际提交更新的字段名，按字母顺序返回。",
+    )
+
+
+class MaternalInfantProfileUpdateSummary(_StrictOutputModel):
+    """本次妈妈与宝宝基础资料更新的字段摘要。"""
+
+    mother_fields: list[str] = Field(
+        default_factory=list,
+        description="妈妈侧实际提交更新的字段名，按字母顺序返回。",
+    )
+    infants: list[InfantProfileUpdateSummary] = Field(
+        default_factory=list,
+        description="按宝宝列出的实际提交字段；未更新宝宝资料时为空数组。",
+    )
+    current_infants_updated: bool = Field(
+        default=False,
+        description="本次是否完整替换了当前分娩宝宝及其出生顺序关联。",
+    )
+
+
+class MaternalInfantProfileUpdateOutput(_StrictOutputModel):
+    """maternal_infant_profile_update 的 Action 提交或执行结果。"""
+
+    action_id: UUID = Field(
+        description="本次持久化 Action 的稳定 UUID。",
+    )
+    action_type: Literal["profile.update"] = Field(
+        description="固定为 profile.update，表示受保护的基础资料更新 Action。",
+    )
+    action_status: str = Field(
+        description="Action 当前状态，例如 applied、confirmation_required 或 failed。",
+    )
+    requires_confirmation: bool = Field(
+        description="当前 Action 是否仍需用户确认后才能执行。",
+    )
+    confirmation_policy: Literal["always", "explicit_intent"] = Field(
+        description="确认策略；always=必须再次确认，explicit_intent=明确更新意图即可执行。",
+    )
+    user_visible: bool = Field(
+        description="是否需要向用户展示确认界面。",
+    )
+    write_succeeded: bool = Field(
+        description="本次资料写入是否已经成功应用。",
+    )
+    preview_payload: dict[str, object] = Field(
+        description="执行前生成的结构化更新摘要，不代表写入已经成功。",
+    )
+    status: Literal["maternal_infant_profile_updated", "action_failed"] | None = Field(
+        default=None,
+        description="工具级结果；写入成功、失败时分别返回固定状态，尚待确认时为 null 或省略。",
+    )
+    error_code: str | None = Field(
+        default=None,
+        description="Action 失败时的稳定错误码；未失败时为 null 或省略。",
+    )
+    updated: MaternalInfantProfileUpdateSummary | None = Field(
+        default=None,
+        description="写入成功后的字段摘要；未成功应用时为 null 或省略。",
     )

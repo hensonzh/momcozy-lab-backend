@@ -19,7 +19,7 @@ def test_agent_event_sink_appends_event_and_updates_stream_cursor() -> None:
             thread_id=uuid4(),
             run_id=run_id,
             event_type="tool.completed",
-            payload={"tool_name": "profile_read"},
+            payload={"tool_name": "maternal_infant_profile_read"},
         )
     )
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from ...core.errors import ApiError
@@ -13,7 +13,7 @@ from .models import (
     LactationProfile,
     MaternalProfile,
 )
-from .lactation_context_schema import LactationContextReadOutput
+from .lactation_context_schema import MaternalInfantProfileReadOutput
 from .repository import (
     LactationInfantContext,
     ProfileRepository,
@@ -86,29 +86,74 @@ class LactationContextService:
         *,
         owner_user_id: UUID,
         as_of_date: date | None = None,
+        infant_scope: Literal["current_delivery", "all"] = "current_delivery",
     ) -> dict[str, Any]:
+        if infant_scope not in {"current_delivery", "all"}:
+            raise ApiError(
+                code="validation_failed",
+                message="infant_scope must be current_delivery or all.",
+                status=422,
+            )
         today = as_of_date or date.today()
         maternal = await self.profile_repository.get_lactation_mother_context(owner_user_id=owner_user_id)
         current_infants, infant_issues = await self._current_infants(
             owner_user_id=owner_user_id,
         )
+        current_by_id = {
+            infant.infant_id: birth_order
+            for birth_order, infant in current_infants
+        }
+        selected_infants: list[tuple[int | None, LactationInfantContext, bool]]
+        if infant_scope == "all":
+            all_infants = await self.profile_repository.list_all_infant_contexts(
+                owner_user_id=owner_user_id,
+            )
+            selected_infants = [
+                (
+                    current_by_id.get(infant.infant_id),
+                    infant,
+                    infant.infant_id in current_by_id,
+                )
+                for infant in all_infants
+            ]
+        else:
+            selected_infants = [
+                (birth_order, infant, True)
+                for birth_order, infant in current_infants
+            ]
 
         delivery_date = maternal.latest_delivery_date
+        has_actual_birth_date = any(
+            infant.birth_date is not None
+            for _, infant in current_infants
+        )
         postpartum_days = _elapsed_days(delivery_date, today=today)
         infant_contexts: list[dict[str, Any]] = []
         issues = list(infant_issues)
         latest_growth_by_infant = await self.records_service.list_latest_growth_by_infant_ids(
             owner_user_id=owner_user_id,
-            infant_ids=[infant.infant_id for _, infant in current_infants],
+            infant_ids=[infant.infant_id for _, infant, _ in selected_infants],
         )
-        for birth_order, infant in current_infants:
+        for birth_order, infant, is_current_delivery in selected_infants:
             infant_birth_date = infant.birth_date
-            infant_age_reference = delivery_date or infant_birth_date
+            infant_age_reference = (
+                delivery_date or infant_birth_date
+                if is_current_delivery
+                else infant_birth_date
+            )
             latest_growth = latest_growth_by_infant.get(infant.infant_id)
             infant_contexts.append(
                 {
+                    "infant_id": str(infant.infant_id),
+                    "name": infant.name,
+                    "is_current_delivery": is_current_delivery,
                     "birth_order": birth_order,
                     "sex_at_birth": infant.sex_at_birth,
+                    "birth_date": (
+                        infant_birth_date.isoformat()
+                        if infant_birth_date is not None
+                        else None
+                    ),
                     "age_days": _elapsed_days(infant_age_reference, today=today),
                     "age_months": _elapsed_calendar_months(
                         infant_age_reference,
@@ -119,7 +164,12 @@ class LactationContextService:
                     "latest_measurement": _latest_measurement(latest_growth),
                 }
             )
-            if delivery_date is not None and infant_birth_date is not None and delivery_date != infant_birth_date:
+            if (
+                is_current_delivery
+                and delivery_date is not None
+                and infant_birth_date is not None
+                and delivery_date != infant_birth_date
+            ):
                 issues.append(
                     {
                         "code": "infant_birth_date_mismatch",
@@ -135,7 +185,17 @@ class LactationContextService:
                 )
 
         mother = {
+            "preferred_name": maternal.preferred_name,
             "age": maternal.age,
+            "estimated_due_date": (
+                maternal.estimated_due_date.isoformat()
+                if (
+                    delivery_date is None
+                    and not has_actual_birth_date
+                    and maternal.estimated_due_date is not None
+                )
+                else None
+            ),
             "delivery_count": maternal.delivery_count,
             "current_delivery_method": maternal.latest_delivery_method,
             "actual_delivery_date": (delivery_date.isoformat() if delivery_date is not None else None),
@@ -151,14 +211,19 @@ class LactationContextService:
                 }
             )
 
-        return LactationContextReadOutput.model_validate(
+        return MaternalInfantProfileReadOutput.model_validate(
             {
                 "as_of_date": today,
+                "infant_scope": infant_scope,
                 "mother": mother,
                 "infants": infant_contexts,
                 "missing_fields": _missing_fields(
                     mother=mother,
-                    infants=infant_contexts,
+                    infants=[
+                        infant
+                        for infant in infant_contexts
+                        if infant["is_current_delivery"]
+                    ],
                 ),
                 "data_quality_issues": issues,
             }
@@ -169,6 +234,7 @@ class LactationContextService:
         *,
         owner_user_id: UUID,
         values: dict[str, Any],
+        anticipated_infant_birth_dates: dict[UUID, date | None] | None = None,
         request_id: str = "",
     ) -> tuple[MaternalLactationProfileView, list[dict[str, Any]]]:
         normalized = _normalize_maternal_update(values)
@@ -206,8 +272,18 @@ class LactationContextService:
             if existing_maternal is not None
             else None
         )
+        anticipated_birth_dates = anticipated_infant_birth_dates or {}
         for infant in resolved_infants:
-            if delivery_date is not None and infant.birth_date is not None and delivery_date != infant.birth_date:
+            infant_birth_date = (
+                anticipated_birth_dates[infant.id]
+                if infant.id in anticipated_birth_dates
+                else infant.birth_date
+            )
+            if (
+                delivery_date is not None
+                and infant_birth_date is not None
+                and delivery_date != infant_birth_date
+            ):
                 raise ApiError(
                     code="validation_failed",
                     message="actual_delivery_date must match the current infant birth_date.",
@@ -473,11 +549,11 @@ def _missing_fields(
     }
     missing = [
         {
-            "code": mother_codes[field],
+            "code": code,
             "birth_order": None,
         }
-        for field, value in mother.items()
-        if value is None
+        for field, code in mother_codes.items()
+        if mother[field] is None
     ]
     if not infants:
         missing.append(

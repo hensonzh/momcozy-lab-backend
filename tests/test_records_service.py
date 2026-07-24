@@ -253,6 +253,80 @@ def test_records_service_lists_and_deletes_pumpings() -> None:
     assert audit_service.record_kwargs["action"] == "records.pumping.delete"
 
 
+def test_records_service_updates_feeding_and_completes_new_linked_task() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    feeding = _feeding(owner_user_id=owner_user_id)
+    repository = FakeRecordsRepository(
+        feeding=feeding,
+        plan_task_kind="feeding",
+    )
+    audit_service = FakeAuditService()
+    service = RecordsService(repository=repository, audit_service=audit_service)
+
+    updated = asyncio.run(
+        service.update_feeding(
+            owner_user_id=owner_user_id,
+            record_id=feeding.id,
+            updates={
+                "plan_task_id": task_id,
+                "volume_ml": 110.0,
+            },
+            request_id="req_feeding_update",
+        )
+    )
+
+    assert updated.plan_task_id == task_id
+    assert updated.volume_ml == 110.0
+    assert repository.update_feeding_kwargs["updates"] == {
+        "plan_task_id": task_id,
+        "volume_ml": 110.0,
+    }
+    assert repository.completed_plan_task_id == task_id
+    assert audit_service.record_kwargs["action"] == "records.feeding.update"
+
+
+def test_records_service_rejects_feeding_update_that_removes_all_measurements() -> None:
+    owner_user_id = uuid4()
+    feeding = _feeding(owner_user_id=owner_user_id)
+    repository = FakeRecordsRepository(feeding=feeding)
+    service = RecordsService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_feeding(
+                owner_user_id=owner_user_id,
+                record_id=feeding.id,
+                updates={"volume_ml": None},
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert repository.update_feeding_kwargs == {}
+
+
+def test_records_service_updates_pumping_preserving_omitted_fields() -> None:
+    owner_user_id = uuid4()
+    pumping = _pumping(owner_user_id=owner_user_id)
+    repository = FakeRecordsRepository(pumping=pumping)
+    audit_service = FakeAuditService()
+    service = RecordsService(repository=repository, audit_service=audit_service)
+
+    updated = asyncio.run(
+        service.update_pumping(
+            owner_user_id=owner_user_id,
+            record_id=pumping.id,
+            updates={"duration_seconds": 900},
+            request_id="req_pumping_update",
+        )
+    )
+
+    assert updated.duration_seconds == 900
+    assert updated.milk_volume_ml == 120
+    assert repository.update_pumping_kwargs["updates"] == {"duration_seconds": 900}
+    assert audit_service.record_kwargs["action"] == "records.pumping.update"
+
+
 def test_records_service_builds_measured_milk_trends_from_pumping_records() -> None:
     owner_user_id = uuid4()
     first = _pumping(owner_user_id=owner_user_id)
@@ -323,6 +397,32 @@ def test_records_service_lists_and_deletes_growth() -> None:
     assert repository.list_growth_kwargs["limit"] == 10
     assert repository.deleted_growth.status == "deleted"
     assert audit_service.record_kwargs["action"] == "records.growth.delete"
+
+
+def test_records_service_lists_growth_inside_timeline_window() -> None:
+    owner_user_id = uuid4()
+    growth = _growth(owner_user_id=owner_user_id)
+    repository = FakeRecordsRepository(growths=[growth])
+    service = RecordsService(repository=repository)
+    start_at = datetime(2026, 7, 1, tzinfo=timezone.utc)
+    end_at = datetime(2026, 7, 3, tzinfo=timezone.utc)
+
+    records = asyncio.run(
+        service.list_growth_in_range(
+            owner_user_id=owner_user_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=20,
+        )
+    )
+
+    assert records == [growth]
+    assert repository.list_growth_in_range_kwargs == {
+        "owner_user_id": owner_user_id,
+        "start_at": start_at,
+        "end_at": end_at,
+        "limit": 20,
+    }
 
 
 def test_records_service_updates_growth_preserving_omitted_fields_and_audit() -> None:
@@ -448,10 +548,13 @@ class FakeRecordsRepository:
         self.create_feeding_kwargs = {}
         self.create_pumping_kwargs = {}
         self.create_growth_kwargs = {}
+        self.update_feeding_kwargs = {}
+        self.update_pumping_kwargs = {}
         self.update_growth_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
         self.list_growth_kwargs = {}
+        self.list_growth_in_range_kwargs = {}
         self.deleted_feeding = None
         self.deleted_pumping = None
         self.deleted_growth = None
@@ -484,6 +587,14 @@ class FakeRecordsRepository:
         self.list_feedings_kwargs = kwargs
         return self.feedings
 
+    async def update_feeding(self, **kwargs):
+        self.update_feeding_kwargs = kwargs
+        if self.feeding is None:
+            return None
+        for field, value in kwargs["updates"].items():
+            setattr(self.feeding, field, value)
+        return self.feeding
+
     async def soft_delete_feeding(self, **kwargs):
         if self.feeding is None:
             return None
@@ -503,6 +614,14 @@ class FakeRecordsRepository:
     async def list_pumpings(self, **kwargs):
         self.list_pumpings_kwargs = kwargs
         return self.pumpings
+
+    async def update_pumping(self, **kwargs):
+        self.update_pumping_kwargs = kwargs
+        if self.pumping is None:
+            return None
+        for field, value in kwargs["updates"].items():
+            setattr(self.pumping, field, value)
+        return self.pumping
 
     async def soft_delete_pumping(self, **kwargs):
         if self.pumping is None:
@@ -531,6 +650,10 @@ class FakeRecordsRepository:
 
     async def list_growth(self, **kwargs):
         self.list_growth_kwargs = kwargs
+        return self.growths
+
+    async def list_growth_in_range(self, **kwargs):
+        self.list_growth_in_range_kwargs = kwargs
         return self.growths
 
     async def soft_delete_growth(self, **kwargs):

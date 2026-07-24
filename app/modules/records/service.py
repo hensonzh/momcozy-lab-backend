@@ -130,6 +130,64 @@ class RecordsService:
             limit=limit,
         )
 
+    async def update_feeding(
+        self,
+        *,
+        owner_user_id: UUID,
+        record_id: UUID,
+        updates: dict[str, Any],
+        request_id: str = "",
+    ) -> FeedingRecord:
+        if domain.unsupported_feeding_update_fields(updates):
+            raise ApiError(code="validation_failed", message="Unsupported feeding update fields.", status=422)
+        if not updates:
+            raise ApiError(code="validation_failed", message="At least one feeding field is required.", status=422)
+        record = await self.repository.get_feeding_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            raise ApiError(code="not_found", message="Feeding record not found.", status=404)
+        infant_id = updates.get("infant_id", record.infant_id)
+        if infant_id is not None and not await self.repository.infant_belongs_to_owner(
+            infant_id=infant_id,
+            owner_user_id=owner_user_id,
+        ):
+            raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
+        plan_task_id = updates.get("plan_task_id", record.plan_task_id)
+        if "plan_task_id" in updates:
+            await self._validate_plan_task_owner(
+                plan_task_id=plan_task_id,
+                owner_user_id=owner_user_id,
+                expected_record_kind="feeding",
+            )
+        if not domain.has_feeding_measurement(
+            volume_ml=updates.get("volume_ml", record.volume_ml),
+            duration_seconds=updates.get("duration_seconds", record.duration_seconds),
+        ):
+            raise ApiError(code="validation_failed", message="volume_ml or duration_seconds is required.", status=422)
+        updated = await self.repository.update_feeding(
+            owner_user_id=owner_user_id,
+            record_id=record_id,
+            updates=updates,
+        )
+        if updated is None:
+            raise ApiError(code="not_found", message="Feeding record not found.", status=404)
+        if "plan_task_id" in updates:
+            await self._complete_linked_plan_task(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
+            await self._audit_linked_plan_task(
+                plan_task_id=plan_task_id,
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="records.feeding.update",
+                resource_type="feeding_record",
+                resource_id=str(record_id),
+                request_id=request_id,
+                details={"fields": sorted(updates)},
+            )
+        return updated
+
     async def delete_feeding(self, *, owner_user_id: UUID, record_id: UUID, request_id: str = "") -> None:
         deleted = await self.repository.soft_delete_feeding(
             owner_user_id=owner_user_id,
@@ -297,6 +355,58 @@ class RecordsService:
             limit=limit,
         )
 
+    async def update_pumping(
+        self,
+        *,
+        owner_user_id: UUID,
+        record_id: UUID,
+        updates: dict[str, Any],
+        request_id: str = "",
+    ) -> PumpingRecord:
+        if domain.unsupported_pumping_update_fields(updates):
+            raise ApiError(code="validation_failed", message="Unsupported pumping update fields.", status=422)
+        if not updates:
+            raise ApiError(code="validation_failed", message="At least one pumping field is required.", status=422)
+        record = await self.repository.get_pumping_for_owner(record_id=record_id, owner_user_id=owner_user_id)
+        if record is None:
+            raise ApiError(code="not_found", message="Pumping record not found.", status=404)
+        plan_task_id = updates.get("plan_task_id", record.plan_task_id)
+        if "plan_task_id" in updates:
+            await self._validate_plan_task_owner(
+                plan_task_id=plan_task_id,
+                owner_user_id=owner_user_id,
+                expected_record_kind="pumping",
+            )
+        if not domain.has_pumping_measurement(
+            milk_volume_ml=updates.get("milk_volume_ml", record.milk_volume_ml),
+            duration_seconds=updates.get("duration_seconds", record.duration_seconds),
+        ):
+            raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
+        updated = await self.repository.update_pumping(
+            owner_user_id=owner_user_id,
+            record_id=record_id,
+            updates=updates,
+        )
+        if updated is None:
+            raise ApiError(code="not_found", message="Pumping record not found.", status=404)
+        if "plan_task_id" in updates:
+            await self._complete_linked_plan_task(plan_task_id=plan_task_id, owner_user_id=owner_user_id)
+            await self._audit_linked_plan_task(
+                plan_task_id=plan_task_id,
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="records.pumping.update",
+                resource_type="pumping_record",
+                resource_id=str(record_id),
+                request_id=request_id,
+                details={"fields": sorted(updates)},
+            )
+        return updated
+
     async def get_milk_trends(
         self,
         *,
@@ -422,6 +532,25 @@ class RecordsService:
         ):
             raise ApiError(code="owner_scope_violation", message="Infant profile is outside the current user scope.", status=403)
         return await self.repository.list_growth(owner_user_id=owner_user_id, infant_id=infant_id, limit=limit)
+
+    async def list_growth_in_range(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_at: datetime,
+        end_at: datetime,
+        limit: int,
+    ) -> list[GrowthRecord]:
+        if not domain.is_valid_list_limit(limit):
+            raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
+        if end_at <= start_at:
+            raise ApiError(code="validation_failed", message="end_at must be later than start_at.", status=422)
+        return await self.repository.list_growth_in_range(
+            owner_user_id=owner_user_id,
+            start_at=start_at,
+            end_at=end_at,
+            limit=limit,
+        )
 
     async def list_latest_growth_by_infant_ids(
         self,

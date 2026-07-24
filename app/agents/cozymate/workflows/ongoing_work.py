@@ -231,14 +231,17 @@ def _project_milk_analysis_context(workflow: AgentWorkflowState) -> dict[str, An
         "current_step": current_step,
     }
     if phase == "ready_to_evaluate":
-        projected["next_transition"] = {"tool": "records_milk_analysis_evaluate"}
+        projected["next_transition"] = {
+            "tool": "milk_analysis",
+            "allowed_operations": ["evaluate"],
+        }
         projected["instruction"] = (
             "The persisted milk-analysis intake is complete. Evaluate it without restarting intake or repeating questions."
         )
     else:
         projected["next_transition"] = {
-            "tool": "records_milk_analysis_intake",
-            "allowed_actions": ["answer"],
+            "tool": "milk_analysis",
+            "allowed_operations": ["answer"],
         }
         projected["instruction"] = (
             "Treat a relevant current user message as the answer to current_step.visible_question and continue only this "

@@ -30,9 +30,9 @@ def test_pregnancy_plan_uses_one_model_visible_workflow_contract() -> None:
     contract = registry.get(PREGNANCY_PLAN_WORKFLOW_TOOL)
     assert contract.domain == "birth_prep"
     assert contract.effect_scope == "user_resource"
-    assert contract.action_type == "pregnancy.plan.create"
-    assert contract.blocking_policy == "must_wait"
-    assert contract.result_dependency == "final_response"
+    assert "action_type" not in type(contract).model_fields
+    assert "blocking_policy" not in type(contract).model_fields
+    assert "result_dependency" not in type(contract).model_fields
 
 
 def test_pregnancy_plan_workflow_contract_exposes_state_machine_commands() -> None:

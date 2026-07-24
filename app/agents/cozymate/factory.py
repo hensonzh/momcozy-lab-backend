@@ -115,6 +115,7 @@ def build_cozymate_runtime(
         notifications_service=notifications_service,
         plans_service=plans_service,
         profile_service=profile_service,
+        lactation_context_service=lactation_context_service,
         records_service=records_service,
         diary_service=diary_service,
         support_service=support_service,

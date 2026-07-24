@@ -9,6 +9,7 @@ import pytest
 from app.core.errors import ApiError
 from app.agent_runtime.runs.models import AgentAction, AgentArtifact, AgentWorkflowState
 from app.agent_runtime.tools.result import ToolResult
+from app.agent_runtime.tools.validation import validate_tool_output
 from app.agents.cozymate.tools import (
     ConversationHistoryImageLoadToolHandler,
     DeviceGuidanceToolHandler,
@@ -18,21 +19,22 @@ from app.agents.cozymate.tools import (
     GrowthRecordDeleteProposeToolHandler,
     GrowthRecordProposeToolHandler,
     GrowthRecordUpdateProposeToolHandler,
-    LactationContextReadToolHandler,
+    MaternalInfantProfileReadToolHandler,
     HospitalBagCardCreateToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagFormCreateToolHandler,
     HospitalBagWorkflowToolHandler,
     IbclcConsultCardCreateToolHandler,
     BirthPreparationArtifactToolHandler,
+    MilkAnalysisToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
     MilkAnalysisReadToolHandler,
     MilkPlanProposeToolHandler,
     MilkScheduleRescheduleProposeToolHandler,
     MilkReminderProposeToolHandler,
-    MilkSummaryReadToolHandler,
     MilkStatusReadToolHandler,
+    MaternalInfantProfileUpdateToolHandler,
     PlanDeleteProposeToolHandler,
     PlanTaskCompleteProposeToolHandler,
     PlanTaskCreateProposeToolHandler,
@@ -43,8 +45,6 @@ from app.agents.cozymate.tools import (
     PregnancyDiaryDeleteToolHandler,
     PregnancyDiaryQueryToolHandler,
     PregnancyDiarySaveToolHandler,
-    ProfileReadToolHandler,
-    ProfileUpdateToolHandler,
     PumpingRecordProposeToolHandler,
     PregnancyPlanIntakeAdvanceToolHandler,
     PregnancyPlanIntakeAnalyzeToolHandler,
@@ -53,6 +53,7 @@ from app.agents.cozymate.tools import (
     SupportTicketProposeToolHandler,
     ToolHandlerContext,
     build_default_tool_handlers,
+    default_tool_registry,
 )
 from app.modules.auth import CurrentUser
 from app.modules.assets.models import ProductAsset
@@ -90,55 +91,26 @@ from app.agents.cozymate.tools.pump_models import (
 )
 
 
-def test_profile_read_tool_handler_returns_safe_context_projection() -> None:
-    actor = _user()
-    profile = UserProfile(
-        user_id=actor.user_id,
-        preferred_name="Mai",
-        age=31,
-        estimated_due_date=date(2026, 9, 20),
-    )
-    infant = InfantProfile(
-        id=uuid4(),
-        owner_user_id=actor.user_id,
-        name="Nori",
-        sex_at_birth="female",
-        birth_date=date(2026, 1, 10),
-    )
-    handler = ProfileReadToolHandler(service=FakeProfileService(profile=profile, infants=[infant]))
-
-    result = asyncio.run(handler.execute(_context(actor=actor, args={})))
-
-    assert result["user"] == {
-        "preferred_name": "Mai",
-        "age": 31,
-        "estimated_due_date": "2026-09-20",
-    }
-    assert result["infants"] == [
-        {
-            "infant_id": str(infant.id),
-            "name": "Nori",
-            "sex_at_birth": "female",
-            "birth_date": "2026-01-10",
-        }
-    ]
-
-
-def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> None:
+def test_maternal_infant_profile_update_tool_updates_mother_and_infant_in_one_action() -> None:
     actor = _user()
     infant_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
-    handler = ProfileUpdateToolHandler(runtime_service=runtime_service)
+    handler = MaternalInfantProfileUpdateToolHandler(runtime_service=runtime_service)
 
     result = asyncio.run(
         handler.execute(
             _context(
                 actor=actor,
                 args={
-                    "user": {
+                    "mother": {
                         "preferred_name": " Mai ",
                         "age": 31,
                         "estimated_due_date": "2026-09-20",
+                        "delivery_count": 2,
+                        "current_delivery_method": "cesarean",
+                        "actual_delivery_date": "2026-01-10",
+                        "has_cesarean_history": True,
+                        "current_feeding_mode": "mixed_feeding",
                     },
                     "infants": [
                         {
@@ -150,14 +122,24 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                             "gestational_age_at_birth_days": 258,
                         }
                     ],
+                    "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
                 },
             )
         )
     )
 
-    assert result["status"] == "profile_updated"
+    assert result["status"] == "maternal_infant_profile_updated"
     assert result["updated"] == {
-        "user_fields": ["age", "estimated_due_date", "preferred_name"],
+        "mother_fields": [
+            "actual_delivery_date",
+            "age",
+            "current_delivery_method",
+            "current_feeding_mode",
+            "delivery_count",
+            "estimated_due_date",
+            "has_cesarean_history",
+            "preferred_name",
+        ],
         "infants": [
             {
                 "infant_id": str(infant_id),
@@ -170,16 +152,22 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                 ],
             }
         ],
+        "current_infants_updated": True,
     }
     action_call = runtime_service.calls[0]
     assert action_call["owner_user_id"] == actor.user_id
     assert action_call["action_type"] == "profile.update"
     assert action_call["target_type"] == "profile"
     assert action_call["apply_payload"] == {
-        "user": {
+        "mother": {
             "preferred_name": "Mai",
             "age": 31,
             "estimated_due_date": "2026-09-20",
+            "delivery_count": 2,
+            "current_delivery_method": "cesarean",
+            "actual_delivery_date": "2026-01-10",
+            "has_cesarean_history": True,
+            "current_feeding_mode": "mixed_feeding",
         },
         "infants": [
             {
@@ -191,11 +179,16 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                 "gestational_age_at_birth_days": 258,
             }
         ],
+        "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
     }
+    validate_tool_output(
+        schema=default_tool_registry().get("maternal_infant_profile_update").output_schema,
+        value=result,
+    )
 
 
-def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
-    handler = ProfileUpdateToolHandler(runtime_service=FakeAgentRuntimeService())
+def test_maternal_infant_profile_update_tool_requires_at_least_one_field() -> None:
+    handler = MaternalInfantProfileUpdateToolHandler(runtime_service=FakeAgentRuntimeService())
 
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(handler.execute(_context(args={})))
@@ -203,15 +196,15 @@ def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
-def test_profile_update_tool_handler_preserves_explicit_nulls() -> None:
+def test_maternal_infant_profile_update_tool_preserves_explicit_nulls() -> None:
     runtime_service = FakeAgentRuntimeService()
-    handler = ProfileUpdateToolHandler(runtime_service=runtime_service)
+    handler = MaternalInfantProfileUpdateToolHandler(runtime_service=runtime_service)
 
     result = asyncio.run(
         handler.execute(
             _context(
                 args={
-                    "user": {
+                    "mother": {
                         "preferred_name": None,
                         "age": None,
                         "estimated_due_date": None,
@@ -221,9 +214,9 @@ def test_profile_update_tool_handler_preserves_explicit_nulls() -> None:
         )
     )
 
-    assert result["status"] == "profile_updated"
+    assert result["status"] == "maternal_infant_profile_updated"
     assert runtime_service.calls[0]["apply_payload"] == {
-        "user": {
+        "mother": {
             "preferred_name": None,
             "age": None,
             "estimated_due_date": None,
@@ -1043,56 +1036,6 @@ def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
     assert budget_result["cart_update"]["totals"]["itemCount"] < budget_result["cart_update"]["before_totals"]["itemCount"]
 
 
-def test_milk_summary_read_tool_handler_returns_bounded_owner_scoped_summary() -> None:
-    actor = _user()
-    records_service = FakeRecordsService(owner_user_id=actor.user_id)
-    infant = InfantProfile(
-        id=uuid4(),
-        owner_user_id=actor.user_id,
-        name="Nori",
-        sex_at_birth="female",
-        birth_date=date(2026, 1, 10),
-    )
-    profile_service = FakeProfileService(profile=None, infants=[infant])
-    handler = MilkSummaryReadToolHandler(records_service=records_service, profile_service=profile_service)
-
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"days": 3, "limit": 2, "owner_user_id": str(uuid4())})))
-
-    assert records_service.owner_user_id == actor.user_id
-    assert profile_service.infant_owner_user_id == actor.user_id
-    assert result["window"] == {"days": 3, "include_today": True}
-    assert result["infants"] == [
-        {
-            "infant_id": str(infant.id),
-            "name": "Nori",
-            "sex_at_birth": "female",
-            "birth_date": "2026-01-10",
-        }
-    ]
-    assert result["recent_feedings"][0]["volume_ml"] == 60
-    assert result["recent_pumpings"][0]["milk_volume_ml"] == 80
-    assert result["pumping_trends"] == [
-        {
-            "date": "2026-07-01",
-            "pumped_milk_volume_ml": 80,
-            "pumping_count": 1,
-            "measured_only": True,
-        },
-        {
-            "date": "2026-07-02",
-            "pumped_milk_volume_ml": 90,
-            "pumping_count": 2,
-            "measured_only": True,
-        },
-    ]
-    assert result["totals"] == {
-        "recent_feeding_volume_ml": 60.0,
-        "recent_pumped_volume_ml": 80.0,
-        "trend_pumped_volume_ml": 170.0,
-        "trend_pumping_count": 3,
-    }
-
-
 def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -> None:
     actor = _user()
     records_service = FakeRecordsService(owner_user_id=actor.user_id)
@@ -1205,6 +1148,49 @@ def test_milk_analysis_reader_summarizes_rhythm_from_full_window_not_display_sli
         "representative_date": "2026-07-01",
         "representative_times": ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"],
     }
+
+
+@pytest.mark.parametrize("detail_level", ["summary", "detailed"])
+def test_unified_milk_analysis_review_matches_its_described_output_schema(detail_level: str) -> None:
+    actor = _user()
+    records_service = FakeRecordsService(owner_user_id=actor.user_id)
+    profile_service = FakeProfileService(profile=None, infants=[])
+    handler = MilkAnalysisToolHandler(
+        summary_handler=MilkStatusReadToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+        ),
+        detailed_handler=MilkAnalysisReadToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+        ),
+        intake_handler=MilkAnalysisIntakeToolHandler(
+            records_service=records_service,
+            profile_service=profile_service,
+            runtime_service=FakeAgentRuntimeService(),
+        ),
+        evaluate_handler=MilkAnalysisEvaluateToolHandler(runtime_service=FakeAgentRuntimeService()),
+    )
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={
+                    "operation": "review",
+                    "detail_level": detail_level,
+                    "days": 3,
+                    "limit": 2,
+                    "runtime_timezone": "UTC",
+                },
+            )
+        )
+    )
+
+    validate_tool_output(
+        schema=default_tool_registry().get("milk_analysis").output_schema,
+        value=result,
+    )
 
 
 def test_milk_analysis_intake_is_durable_and_evaluation_emits_an_analysis_card() -> None:
@@ -1364,10 +1350,10 @@ def test_milk_plan_proposal_rejects_missing_durable_analysis_even_with_valid_pla
     assert exc_info.value.code == "milk_analysis_required_before_plan"
 
 
-def test_lactation_context_read_tool_handler_returns_owner_scoped_context() -> None:
+def test_maternal_infant_profile_read_tool_handler_returns_owner_scoped_context() -> None:
     actor = _user()
     service = FakeLactationContextService()
-    handler = LactationContextReadToolHandler(service=service)
+    handler = MaternalInfantProfileReadToolHandler(service=service)
 
     result = asyncio.run(
         handler.execute(
@@ -1381,6 +1367,7 @@ def test_lactation_context_read_tool_handler_returns_owner_scoped_context() -> N
     assert service.query == {
         "owner_user_id": actor.user_id,
         "as_of_date": date(2026, 7, 23),
+        "infant_scope": "current_delivery",
     }
     assert result["mother"]["postpartum_days"] == 74
     assert result["infants"][0]["latest_measurement"]["height_cm"] == 62
@@ -3872,20 +3859,12 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "hospital_bag_workflow",
         "hospital_bag_cart_update",
         "pump_models_read",
-        "profile_read",
-        "profile_update",
         "ibclc_consult_card_create",
-        "lactation_context_read",
-        "records_growth_record_propose",
-        "records_growth_record_delete_propose",
-        "records_growth_record_update_propose",
-        "records_feeding_record_delete_propose",
-        "records_milk_summary_read",
-        "records_milk_status_read",
-        "records_milk_analysis_read",
-        "records_milk_analysis_intake",
-        "records_milk_analysis_evaluate",
-        "records_pumping_record_delete_propose",
+        "lactation_timeline_manage",
+        "lactation_timeline_read",
+        "milk_analysis",
+        "maternal_infant_profile_read",
+        "maternal_infant_profile_update",
         "plans_calendar_read",
         "plans_current_read",
         "pregnancy_diary_query",
@@ -3895,17 +3874,12 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "conversation_history_image_load",
         "notifications_milk_reminder_propose",
         "plans_milk_plan_propose",
-        "plans_milk_schedule_propose",
-        "plans_milk_task_update_propose",
-        "plans_milk_task_delete_propose",
         "plans_task_complete_propose",
         "plans_task_create_propose",
         "plans_task_delete_propose",
         "plans_task_update_propose",
         "plans_plan_delete_propose",
         "pregnancy_plan_workflow",
-        "records_feeding_record_propose",
-        "records_pumping_record_propose",
         "support_ticket_propose",
     }
     assert all(callable(handler) for handler in handlers.values())

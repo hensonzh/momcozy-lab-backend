@@ -1157,14 +1157,17 @@ class CozymateAgentExecutor:
             if local_date:
                 diary_trusted_args["runtime_local_date"] = local_date
             return diary_trusted_args
-        if contract_name == "records_milk_analysis_intake":
+        if contract_name == "milk_analysis":
             return {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name == "lactation_context_read":
+        if contract_name in {"maternal_infant_profile_read", "lactation_timeline_read"}:
             local_date = self._turn_state(run.id).local_date
-            return {"runtime_local_date": local_date} if local_date else {}
+            read_context_args = {"runtime_timezone": self._turn_state(run.id).timezone}
+            if local_date:
+                read_context_args["runtime_local_date"] = local_date
+            return read_context_args
         if contract_name == "plans_milk_plan_propose":
             return {
                 "runtime_local_date": self._turn_state(run.id).local_date,
