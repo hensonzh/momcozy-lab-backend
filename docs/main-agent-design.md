@@ -33,19 +33,21 @@
 | 设备服务智能体 | 吸奶器选型、开箱使用、清洁消毒、蓝牙与法兰指导、故障排查和售后工单 |
 | 全局能力 | 健康红旗、情绪危机、设备安全、权限、Prompt 防护、上下文账本和 Memory |
 
-## Tool 归属（39）
+## Tool 归属（38）
 
-当前共有 39 个模型可见 Tool Contract。Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Allowlist 暴露给多个智能体。
+当前共有 38 个模型可见 Tool Contract。Tool 只有一个领域归属，但公共 Tool 和有界专业能力可以按 Allowlist 暴露给多个智能体。
 
 ### 主智能体与公共能力（13）
 
 `profile_read`、`profile_update`、`plans_current_read`、`plans_calendar_read`、`plans_task_create_propose`、`plans_task_complete_propose`、`plans_task_update_propose`、`plans_task_delete_propose`、`plans_plan_delete_propose`、`pregnancy_diary_query`、`pregnancy_diary_save`、`pregnancy_diary_delete`、`conversation_history_image_load`
 
-### 产前服务智能体（4）
+### 产前服务智能体（3）
 
-`pregnancy_plan_workflow`、`hospital_bag_form_create`、`hospital_bag_card_create`、`hospital_bag_cart_update`。
+`pregnancy_plan_workflow`、`hospital_bag_workflow`、`hospital_bag_cart_update`。
 
 其中 `pregnancy_plan_workflow` 是唯一对模型和 App 暴露的孕期计划流程入口，孕期计划采集、表单分析、追问推进和计划生成由该工作流内部 Handler 执行。
+
+`hospital_bag_workflow` 是唯一对模型暴露的待产包采集与生成入口。它优先恢复活动表单；没有活动采集时，仅在已验证事实完整的情况下直接生成，否则创建表单。表单提交后由 runtime 校验 artifact 血缘并确定性续跑同一工具，不增加第二轮模型调用。
 
 ## 孕期计划 Workflow Contract
 
@@ -67,6 +69,19 @@ App 的选项点击、表单提交、暂停、恢复和历史修改通过 `pregn
 检测到需要优先处理的医疗安全信号时，安全回复覆盖普通计划回复，workflow 保留当前步骤并进入暂停态；用户后续显式恢复时继续原步骤，不把已采集内容标成失败或清空。
 
 最终 `generate_plan` 仍经过 `pregnancy.plan.create` Action 边界；只有 `write_succeeded=true` 才能声称已生成并同步。
+
+## 待产包 Workflow Contract
+
+`hospital_bag_workflow` 是待产包采集与清单生成的唯一模型可见入口，公开参数只有可选的 `generation_mode` 和 `restart`。原表单创建、表单血缘校验和清单 artifact 生成逻辑保留为内部操作，不再注册为独立 Tool Contract。
+
+runtime 每次调用都注入当前线程的 workflow state、当前消息中已验证的 `hospital_bag_intake` 提交、可用于预填的默认值，以及仅由 verified facts 映射出的已确认值。对话候选事实可以预填，但不参与“信息已完整”的判断。分流规则如下：
+
+- 已有 collecting_intake：优先恢复并重新发送原表单；只有当前提交的 artifact ID 与活动流程一致，且 9 个必填字段完整、有效、无急症信号时才生成清单。
+- 没有活动采集：verified facts 完整时直接生成；否则创建表单。
+- 已完成：重复调用返回原结果引用，不重复创建清单；用户明确传 `restart=true` 时才重新采集。
+- 检测到明确描述为当前症状的急症信号：停止生成，workflow 进入 safety_interruption 暂停态并返回固定就医提示；未来担忧、风险提示和既往病史本身不视为当前急症。
+
+表单提交后的合法续跑由 runtime 在模型调用前确定性执行同一个 `hospital_bag_workflow`，因此不需要第二轮模型来判断或复制表单 JSON。普通旁支对话仍由模型正常回答，活动采集状态保留在 workflow ledger 中；再次进入待产包服务时会重发原 form artifact。该流程使用 `hospital_bag` workflow schema v2。
 
 ### 泌乳服务智能体（19）
 

@@ -157,12 +157,12 @@ Step3：推荐孕期计划服务
 采集生成待产包清单所需的关键信息
 
 [DO]
-用户确认开始后，直接调用 `hospital_bag_form_create`，不要先用自然对话收集 3 个字段，不要先用聊天追问三项基础信息。
-要求：不要在调用 `hospital_bag_form_create` 之前输出用户可见的过渡说明。表单创建后，最终回复只需简短说明表单已打开；用户提交后，再按确认的信息整理待产包清单和可参考的购物车资源。
+用户确认开始后，直接调用 `hospital_bag_workflow`，不要先用自然对话收集字段，也不要先用聊天追问三项基础信息。
+要求：不要在调用 `hospital_bag_workflow` 之前输出用户可见的过渡说明。该工具会统一判断可信信息是否完整：完整则直接生成待产包，不完整则创建或恢复信息采集表单。表单返回后，最终回复只需简短说明表单已打开。
 
 待产包服务通过表单固定确认 9 项信息：预产期或当前孕周、是否第一胎、胎数、医生提示过的特殊情况、分娩方式、喂养意向、产后多久返工、产后前两周支持情况、最焦虑的三件事。入口邀约可以不逐项展开，但不要在聊天里逐项追问。
 
-`hospital_bag_form_create` 会自动合并当前会话、用户 profile 和已有 active 孕期计划里的产前准备共享信息。`default_values` 只放当前对话中新确认的可靠字段；不要为了“搬运”已保存字段而重复读取或复述。共享字段包括：`age`、`due_date_or_week`、`ivf`、`first_birth`、`fetus_count`、`multiple_pregnancy_type`、`previous_birth_method`、`previous_c_section_count`、`prior_birth_history`、`city_or_country`、`birth_hospital`、`pregnancy_history_or_notes`、`medical_notes`、`doctor_notes`、`birth_path`、`feeding_intention`、`return_to_work_timing`、`support_person`、`top_worries`。
+`hospital_bag_workflow` 会由 runtime 合并可信表单事实、当前会话中的可靠预填值和已有流程状态。对话候选信息只用于表单预填，不能单独作为“信息完整”的依据；只有应用侧验证过的表单提交或已保存的 verified facts 齐全时才允许直接生成。不要为了“搬运”已保存字段而重复读取或复述。
 
 工具会把已知字段继续放在表单里并预填答案，供用户确认或修改；不要把它们从表单里剔除。缺少的字段留空，让用户在表单里补。
 
@@ -172,9 +172,9 @@ Step3：推荐孕期计划服务
 
 ## STATE_C: 生成待产包清单
 
-看到 `confirmed_form_data form_id="hospital_bag_intake"` 后，除非必填答案明显冲突或存在急症信号，直接调用 `hospital_bag_card_create`。
+应用提交 `hospital_bag_intake` 表单后，runtime 会校验它是否属于当前活动流程，并确定性地再次执行同一个 `hospital_bag_workflow`；这一步不经过模型，也不需要模型发起第二次工具调用。信息完整时生成清单，仍不完整时返回带已有答案的表单继续补充。
 
-当前用户消息已经包含完整 `confirmed_form_data` 时，工具参数传 `{}` 即可，不要把表单 JSON 复制进工具参数。没有应用侧注入时，不要调用清单生成工具，应先引导用户完成并提交对应表单。
+不要把表单 JSON 复制进工具参数，也不要根据普通聊天文本自行判断表单已经完整。用户明确要求丢弃当前采集结果并重新填写时，才调用 `hospital_bag_workflow` 并传 `restart=true`。
 
 `generation_mode`：
 
@@ -182,7 +182,7 @@ Step3：推荐孕期计划服务
 - `quick`：用户只要轻量版、快速版或简单版；仍然先提交表单确认必要字段，再由工具生成待产包清单。
 - `immediate`：用户 37 周以后、马上去医院、快生了，且安全确认后适合生成即时可拿取版本。
 
-不要让 LLM 自己生成待产包 `card_json`。`hospital_bag_card_create` 会生成：
+不要让 LLM 自己生成待产包 `card_json`。`hospital_bag_workflow` 在信息完整时会生成：
 
 - `hospital_bag_card` artifact。
 - 按场景分包的 `packing_groups`。
@@ -195,7 +195,7 @@ Step3：推荐孕期计划服务
 
 工具返回 `assistant_followup` 时，最终普通回复自然包含其中的特殊物品取舍逻辑和购物车资源提示。不要把购物车链接写进 `card_json`。
 
-调用 `hospital_bag_card_create` 后，最终普通回复只保留简短成果交付、非通用物品推荐逻辑总结和购物车提示。不要复述表单字段、用户画像、设计思路、住院天数、医院确认逻辑、结构化生成策略或逐项物品的影响来源。
+`hospital_bag_workflow` 返回 card_created 或 hospital_bag_card_already_created 后，最终普通回复只保留简短成果交付、非通用物品推荐逻辑总结和购物车提示。不要复述表单字段、用户画像、设计思路、住院天数、医院确认逻辑、结构化生成策略或逐项物品的影响来源。
 
 调用 `hospital_bag_cart_update` 后，如果工具已经完成购物车更新或确认没有变化，最终普通回复必须简短说明处理结果，并在最后一行给出 Markdown 购物车入口：`**[打开待产包购物车](/hospital-bag-cart)**`。如果工具状态是 `needs_clarification`，只补问用户需要调整的具体内容，不强行给购物车链接。
 

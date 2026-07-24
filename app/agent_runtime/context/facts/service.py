@@ -79,6 +79,22 @@ class AgentFactService:
     async def form_defaults(self, *, owner_user_id: UUID, form_id: str) -> dict[str, Any]:
         return facts_to_form_defaults(form_id=form_id, facts=await self.values(owner_user_id=owner_user_id))
 
+    async def verified_form_defaults(
+        self,
+        *,
+        owner_user_id: UUID,
+        form_id: str,
+    ) -> dict[str, Any]:
+        if not await self.is_capture_enabled(owner_user_id=owner_user_id):
+            return {}
+        records = await self.repository.list_active(owner_user_id=owner_user_id)
+        facts = {
+            record.fact_key: record.value
+            for record in records
+            if record.fact_kind == FACT_KIND_VERIFIED and record.value is not None
+        }
+        return facts_to_form_defaults(form_id=form_id, facts=facts)
+
     async def list_facts(
         self,
         *,

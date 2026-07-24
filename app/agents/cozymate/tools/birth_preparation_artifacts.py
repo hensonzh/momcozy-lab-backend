@@ -424,36 +424,119 @@ def hospital_bag_form_result(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def hospital_bag_card_result(args: dict[str, Any]) -> dict[str, Any]:
+    result_tool_name = _text(args.get("runtime_result_tool_name")) or "hospital_bag_card_create"
     form_data = _confirmed_form_data(args)
     if not form_data:
         return _needs_context_result(
-            "hospital_bag_card_create",
+            result_tool_name,
             "needs_confirmed_form_data",
             "生成待产包清单前，需要先提交待产包信息采集表单。",
             list(HOSPITAL_BAG_REQUIRED_LABELS),
             "请先完成并提交待产包信息采集表单，我再根据确认后的信息整理待产包清单。",
         )
-    missing = [field_id for field_id in HOSPITAL_BAG_REQUIRED_LABELS if not _has_value(form_data.get(field_id))]
+    missing = missing_hospital_bag_required_fields(form_data)
     if missing:
         labels = [HOSPITAL_BAG_REQUIRED_LABELS[field_id] for field_id in missing[:3]]
         return _needs_context_result(
-            "hospital_bag_card_create",
+            result_tool_name,
             "needs_required_form_fields",
             "生成待产包清单前，需要先补全待产包表单必填信息。",
             missing,
             f"待产包清单还不能生成，表单里还差{'、'.join(labels)}。请先补全并提交待产包信息采集表单。",
+        )
+    invalid = invalid_hospital_bag_required_fields(form_data)
+    if invalid:
+        labels = [HOSPITAL_BAG_REQUIRED_LABELS[field_id] for field_id in invalid[:3]]
+        return _needs_context_result(
+            result_tool_name,
+            "needs_valid_form_fields",
+            "生成待产包清单前，需要修正待产包表单中的无效信息。",
+            invalid,
+            f"待产包清单还不能生成，请重新确认{'、'.join(labels)}。",
         )
     card_json = _hospital_bag_card_json(
         form_data,
         generation_mode=_text(args.get("generation_mode")) or "standard",
     )
     return {
-        "tool_name": "hospital_bag_card_create",
+        "tool_name": result_tool_name,
         "status": "card_created",
         "card": {"card_type": "hospital_bag_card", "schema_version": "1.0", "card_json": card_json},
         "source_form_submission_id": _text(args.get("form_submission_id")),
         "assistant_followup": build_hospital_bag_followup(card_json),
     }
+
+
+def missing_hospital_bag_required_fields(form_data: dict[str, Any]) -> list[str]:
+    return [
+        field_id
+        for field_id in HOSPITAL_BAG_REQUIRED_LABELS
+        if not _has_value(form_data.get(field_id))
+    ]
+
+
+def invalid_hospital_bag_required_fields(
+    form_data: dict[str, Any],
+) -> list[str]:
+    fields_by_id = {
+        str(field.get("id") or ""): field
+        for field in HOSPITAL_BAG_FORM_FIELDS
+    }
+    invalid: list[str] = []
+    for field_id in HOSPITAL_BAG_REQUIRED_LABELS:
+        value = form_data.get(field_id)
+        if not _has_value(value):
+            continue
+        field = fields_by_id[field_id]
+        field_type = str(field.get("type") or "")
+        if field_type == "text":
+            valid = isinstance(value, str) and len(value.strip()) <= 500
+        elif field_type == "select":
+            valid = (
+                isinstance(value, str)
+                and value.strip() in set(field.get("options") or [])
+            )
+        elif field_type == "multi_select":
+            valid = _valid_hospital_bag_multi_select(
+                value,
+                options=field.get("options"),
+                allow_other=field.get("allow_other_input") is True,
+            )
+        else:
+            valid = False
+        if not valid:
+            invalid.append(field_id)
+    return invalid
+
+
+def _valid_hospital_bag_multi_select(
+    value: Any,
+    *,
+    options: Any,
+    allow_other: bool,
+) -> bool:
+    if not isinstance(value, list) or not value or len(value) > 12:
+        return False
+    allowed = {
+        str(item).strip()
+        for item in options
+        if isinstance(item, str) and item.strip()
+    } if isinstance(options, list) else set()
+    for item in value:
+        if not isinstance(item, str):
+            return False
+        normalized = item.strip()
+        if not normalized or len(normalized) > 500:
+            return False
+        if normalized in allowed and normalized not in {"其它", "其他"}:
+            continue
+        if allow_other and any(
+            normalized.startswith(prefix) and normalized[len(prefix):].strip()
+            for prefix in ("其它：", "其他：")
+        ):
+            continue
+        return False
+    return True
 
 
 def build_birth_journey_plan_result(plan_context: dict[str, Any]) -> dict[str, Any]:

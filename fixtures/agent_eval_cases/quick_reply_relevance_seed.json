@@ -97,7 +97,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "hospital_bag_card_create",
+              "name": "hospital_bag_workflow",
               "execution_status": "completed",
               "result": {
                 "status": "card_created",

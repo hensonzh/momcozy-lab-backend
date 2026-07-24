@@ -196,6 +196,53 @@ def test_fact_service_conversation_candidate_never_overrides_verified_form_even_
     assert repository.values["pregnancy.birth_path"] == "剖宫产"
 
 
+def test_fact_service_verified_form_defaults_exclude_conversation_candidates() -> None:
+    owner_user_id = uuid4()
+    repository = FakeFactRepository()
+    service = AgentFactService(repository=repository)
+    observed_at = datetime(2026, 7, 12, 8, 0, tzinfo=timezone.utc)
+
+    asyncio.run(
+        service.apply_inputs(
+            owner_user_id=owner_user_id,
+            inputs=[
+                FactInput(
+                    "pregnancy.due_date_or_week",
+                    "36周",
+                    "explicit",
+                    "我现在36周",
+                    "current_pregnancy",
+                )
+            ],
+            source_type="conversation",
+            source_id="message-1",
+            observed_at=observed_at,
+        )
+    )
+    asyncio.run(
+        service.sync_form_submission(
+            owner_user_id=owner_user_id,
+            form_id="hospital_bag_intake",
+            values={"first_birth": "是"},
+            submission_id="submission-1",
+            observed_at=observed_at + timedelta(minutes=1),
+        )
+    )
+
+    assert asyncio.run(
+        service.form_defaults(
+            owner_user_id=owner_user_id,
+            form_id="hospital_bag_intake",
+        )
+    ) == {"due_date_or_week": "36周", "first_birth": "是"}
+    assert asyncio.run(
+        service.verified_form_defaults(
+            owner_user_id=owner_user_id,
+            form_id="hospital_bag_intake",
+        )
+    ) == {"first_birth": "是"}
+
+
 def test_fact_service_rejects_wrong_subject_even_if_candidate_key_and_value_are_valid() -> None:
     repository = FakeFactRepository()
     service = AgentFactService(repository=repository)

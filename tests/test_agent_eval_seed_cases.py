@@ -321,8 +321,7 @@ def test_product_agent_eval_seed_uses_current_birth_prep_artifact_contracts() ->
 
     birth_prep_contracts = {tool_call["contract"] for tool_call in by_suite["birth_prep"]["expected_tool_calls"]}
 
-    assert "hospital_bag_form_create" in birth_prep_contracts
-    assert "hospital_bag_card_create" in birth_prep_contracts
+    assert birth_prep_contracts == {"hospital_bag_workflow"}
     assert "birth_prep_intake" not in birth_prep_contracts
 
 
@@ -381,9 +380,10 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
 
     hospital_bag = by_suite["hospital_bag_form_to_card_workflow"]
     assert [call["contract"] for call in hospital_bag["expected_tool_calls"]] == [
-        "hospital_bag_form_create",
-        "hospital_bag_card_create",
+        "hospital_bag_workflow",
+        "hospital_bag_workflow",
     ]
+    assert "deterministic_continuation_without_model" in hospital_bag["expected_behavior"]["must_include"]
 
     pregnancy = by_suite["pregnancy_plan_end_to_end_workflow"]
     assert [call["contract"] for call in pregnancy["expected_tool_calls"]] == [

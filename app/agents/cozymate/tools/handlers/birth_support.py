@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -14,8 +15,13 @@ from app.agents.cozymate.tools.birth_preparation_artifacts import (
     artifact_record_from_birth_preparation_result,
     create_birth_preparation_artifact_result,
     hospital_bag_cart_update_result,
+    invalid_hospital_bag_required_fields,
+    missing_hospital_bag_required_fields,
 )
-from app.agents.cozymate.tools.hospital_bag_flow import HOSPITAL_BAG_FORM_ID
+from app.agents.cozymate.tools.hospital_bag_flow import (
+    HOSPITAL_BAG_FORM_ID,
+    HOSPITAL_BAG_URGENT_RESPONSE,
+)
 from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_INTAKE_FORM_ID,
     PregnancyPlanPhase,
@@ -328,11 +334,58 @@ class HospitalBagFormCreateToolHandler(_StandardToolHandler):
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         _require_hospital_bag_thread_id(context)
         workflow = _dict(context.args, "runtime_workflow_context")
-        if _text(workflow, "phase") == "collecting_intake":
-            return {
-                "status": "hospital_bag_intake_already_started",
-                "form_artifact_id": _text(workflow, "source_form_artifact_id"),
-            }
+        generation_mode = _hospital_bag_generation_mode(context.args, workflow=workflow)
+        if (
+            _text(workflow, "phase") == "collecting_intake"
+            and context.args.get("runtime_force_new_form") is not True
+        ):
+            raw_artifact_id = _text(workflow, "source_form_artifact_id")
+            try:
+                artifact_id = UUID(raw_artifact_id)
+            except ValueError:
+                artifact_id = None
+            form_artifact = (
+                await self.runtime_service.get_artifact_for_owner(
+                    owner_user_id=context.actor.user_id,
+                    artifact_id=artifact_id,
+                )
+                if artifact_id is not None
+                else None
+            )
+            artifact_payload = (
+                form_artifact.payload
+                if form_artifact is not None and isinstance(form_artifact.payload, dict)
+                else {}
+            )
+            form = artifact_payload.get("form")
+            if (
+                form_artifact is not None
+                and form_artifact.status != "deleted"
+                and form_artifact.artifact_type == "form"
+                and isinstance(form, dict)
+                and form.get("id") == HOSPITAL_BAG_FORM_ID
+            ):
+                await _upsert_hospital_bag_workflow(
+                    runtime_service=self.runtime_service,
+                    context=context,
+                    status="collecting",
+                    state={
+                        **workflow,
+                        "generation_mode": generation_mode,
+                    },
+                    active_step="collecting_intake",
+                )
+                return {
+                    "tool_name": "ui_form_create",
+                    "status": "hospital_bag_intake_already_started",
+                    "form": form,
+                    "artifact_id": str(form_artifact.id),
+                    "artifact_type": form_artifact.artifact_type,
+                    "schema_version": form_artifact.schema_version,
+                    DEFERRED_AGENT_EVENTS_KEY: [
+                        _deferred_artifact_created_event(form_artifact)
+                    ],
+                }
         result = await self.artifact_handler.execute(context)
         if _text(result, "status") != "form_created":
             return result
@@ -344,6 +397,7 @@ class HospitalBagFormCreateToolHandler(_StandardToolHandler):
                 "phase": "collecting_intake",
                 "form_id": HOSPITAL_BAG_FORM_ID,
                 "source_form_artifact_id": _text(result, "artifact_id"),
+                "generation_mode": generation_mode,
             },
             active_step="collecting_intake",
         )
@@ -363,10 +417,19 @@ class HospitalBagCardCreateToolHandler(_StandardToolHandler):
         workflow = _dict(context.args, "runtime_workflow_context")
         form_artifact_id = _text(context.args, "form_artifact_id")
         form_submission_id = _text(context.args, "form_submission_id")
+        verified_fact_generation = (
+            context.args.get("runtime_verified_fact_generation") is True
+        )
+        generation_mode = _hospital_bag_generation_mode(context.args, workflow=workflow)
         if (
             _text(workflow, "phase") == "completed"
-            and _text(workflow, "source_form_artifact_id") == form_artifact_id
-            and _text(workflow, "source_form_submission_id") == form_submission_id
+            and (
+                verified_fact_generation
+                or (
+                    _text(workflow, "source_form_artifact_id") == form_artifact_id
+                    and _text(workflow, "source_form_submission_id") == form_submission_id
+                )
+            )
         ):
             return {
                 "status": "hospital_bag_card_already_created",
@@ -374,32 +437,446 @@ class HospitalBagCardCreateToolHandler(_StandardToolHandler):
                 "artifact_type": "hospital_bag_card",
             }
         if (
-            _text(workflow, "phase") != "collecting_intake"
-            or not form_artifact_id
-            or _text(workflow, "source_form_artifact_id") != form_artifact_id
+            not verified_fact_generation
+            and (
+                _text(workflow, "phase") != "collecting_intake"
+                or not form_artifact_id
+                or _text(workflow, "source_form_artifact_id") != form_artifact_id
+            )
         ):
             raise ApiError(
                 code="stale_hospital_bag_intake",
                 message="This hospital bag form is no longer the active intake.",
                 status=409,
             )
-        result = await self.artifact_handler.execute(context)
+        artifact_context = _hospital_bag_context_with_args(
+            context,
+            {
+                **context.args,
+                "generation_mode": generation_mode,
+            },
+        )
+        result = await self.artifact_handler.execute(artifact_context)
         if _text(result, "status") != "card_created":
             return result
+        state = {
+            "phase": "completed",
+            "form_id": HOSPITAL_BAG_FORM_ID,
+            "result_artifact_id": _text(result, "artifact_id"),
+            "generation_mode": generation_mode,
+            "data_source": (
+                "verified_facts"
+                if verified_fact_generation
+                else "verified_form_submission"
+            ),
+        }
+        if form_artifact_id:
+            state["source_form_artifact_id"] = form_artifact_id
+        if form_submission_id:
+            state["source_form_submission_id"] = form_submission_id
         await _upsert_hospital_bag_workflow(
             runtime_service=self.runtime_service,
             context=context,
             status="completed",
-            state={
-                "phase": "completed",
-                "form_id": HOSPITAL_BAG_FORM_ID,
-                "source_form_artifact_id": form_artifact_id,
-                "source_form_submission_id": form_submission_id,
-                "result_artifact_id": _text(result, "artifact_id"),
-            },
+            state=state,
             active_step="",
         )
         return result
+
+
+class HospitalBagWorkflowToolHandler(_StandardToolHandler):
+    """Single model-facing entry point backed by the existing form/card operations."""
+
+    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+        self.runtime_service = runtime_service
+        self.form_handler = HospitalBagFormCreateToolHandler(
+            runtime_service=runtime_service
+        )
+        self.card_handler = HospitalBagCardCreateToolHandler(
+            runtime_service=runtime_service
+        )
+
+    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        _require_hospital_bag_thread_id(context)
+        workflow = _dict(context.args, "runtime_workflow_context")
+        phase = _text(workflow, "phase")
+        generation_mode = _hospital_bag_generation_mode(
+            context.args,
+            workflow=workflow,
+        )
+        restart = context.args.get("restart") is True
+        current_submission = _dict(context.args, "confirmed_form_data")
+        verified_facts = _dict(context.args, "runtime_verified_form_data")
+        default_values = {
+            **verified_facts,
+            **_dict(context.args, "default_values"),
+            **current_submission,
+        }
+
+        if phase == "completed" and not restart:
+            return {
+                "tool_name": "hospital_bag_workflow",
+                "status": "hospital_bag_card_already_created",
+                "artifact_id": _text(workflow, "result_artifact_id"),
+                "artifact_type": "hospital_bag_card",
+                "workflow_context": _hospital_bag_public_workflow_context(
+                    phase="completed",
+                    generation_mode=generation_mode,
+                    information_complete=True,
+                    data_source=_text(workflow, "data_source"),
+                ),
+            }
+
+        if _has_hospital_bag_form_submission(context.args):
+            _require_active_hospital_bag_form_submission(
+                args=context.args,
+                workflow=workflow,
+            )
+
+        if phase == "collecting_intake" and not restart:
+            if current_submission:
+                urgent_signal_ids = _hospital_bag_urgent_signal_ids(
+                    current_submission
+                )
+                if urgent_signal_ids:
+                    return await self._interrupt_for_safety(
+                        context,
+                        workflow=workflow,
+                        signal_ids=urgent_signal_ids,
+                    )
+                missing = missing_hospital_bag_required_fields(current_submission)
+                invalid = invalid_hospital_bag_required_fields(
+                    current_submission
+                )
+                if not missing and not invalid:
+                    return await self._generate_card(
+                        context,
+                        form_data=current_submission,
+                        generation_mode=generation_mode,
+                        verified_fact_generation=False,
+                    )
+                return await self._create_form(
+                    context,
+                    default_values=_without_hospital_bag_fields(
+                        default_values,
+                        invalid,
+                    ),
+                    generation_mode=generation_mode,
+                    missing_fields=missing,
+                    invalid_fields=invalid,
+                    force_new=True,
+                )
+            missing = missing_hospital_bag_required_fields(verified_facts)
+            invalid = invalid_hospital_bag_required_fields(verified_facts)
+            return await self._create_form(
+                context,
+                default_values=_without_hospital_bag_fields(
+                    default_values,
+                    invalid,
+                ),
+                generation_mode=generation_mode,
+                missing_fields=missing,
+                invalid_fields=invalid,
+                force_new=False,
+            )
+
+        if restart:
+            invalid = invalid_hospital_bag_required_fields(verified_facts)
+            return await self._create_form(
+                context,
+                default_values=_without_hospital_bag_fields(
+                    default_values,
+                    invalid,
+                ),
+                generation_mode=generation_mode,
+                missing_fields=missing_hospital_bag_required_fields(
+                    verified_facts
+                ),
+                invalid_fields=invalid,
+                force_new=True,
+            )
+
+        missing = missing_hospital_bag_required_fields(verified_facts)
+        invalid = invalid_hospital_bag_required_fields(verified_facts)
+        if verified_facts and not missing and not invalid:
+            urgent_signal_ids = _hospital_bag_urgent_signal_ids(
+                verified_facts
+            )
+            if urgent_signal_ids:
+                return await self._interrupt_for_safety(
+                    context,
+                    workflow=workflow,
+                    signal_ids=urgent_signal_ids,
+                )
+            return await self._generate_card(
+                context,
+                form_data=verified_facts,
+                generation_mode=generation_mode,
+                verified_fact_generation=True,
+            )
+        return await self._create_form(
+            context,
+            default_values=_without_hospital_bag_fields(
+                default_values,
+                invalid,
+            ),
+            generation_mode=generation_mode,
+            missing_fields=missing,
+            invalid_fields=invalid,
+            force_new=False,
+        )
+
+    async def _interrupt_for_safety(
+        self,
+        context: ToolHandlerContext,
+        *,
+        workflow: dict[str, Any],
+        signal_ids: list[str],
+    ) -> dict[str, Any]:
+        interrupted = {
+            **workflow,
+            "phase": "safety_interruption",
+            "form_id": HOSPITAL_BAG_FORM_ID,
+            "interrupted_by_safety_signal": True,
+            "paused": True,
+            "resume_phase": "collecting_intake",
+            "safety_signal_ids": list(dict.fromkeys(signal_ids)),
+            "interrupted_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            ),
+        }
+        await _upsert_hospital_bag_workflow(
+            runtime_service=self.runtime_service,
+            context=context,
+            status="paused",
+            state=interrupted,
+            active_step="safety_interruption",
+        )
+        return {
+            "tool_name": "hospital_bag_workflow",
+            "status": "urgent_care_required",
+            "signal_ids": list(dict.fromkeys(signal_ids)),
+            "blocks_hospital_bag_flow": True,
+            "required_response": HOSPITAL_BAG_URGENT_RESPONSE,
+            "workflow_context": _hospital_bag_public_workflow_context(
+                phase="safety_interruption",
+                generation_mode=_hospital_bag_generation_mode(
+                    context.args,
+                    workflow=workflow,
+                ),
+                information_complete=False,
+            ),
+        }
+
+    async def _create_form(
+        self,
+        context: ToolHandlerContext,
+        *,
+        default_values: dict[str, Any],
+        generation_mode: str,
+        missing_fields: list[str],
+        force_new: bool,
+        invalid_fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        result = await self.form_handler.execute(
+            _hospital_bag_context_with_args(
+                context,
+                {
+                    **context.args,
+                    "default_values": default_values,
+                    "generation_mode": generation_mode,
+                    "runtime_force_new_form": force_new,
+                },
+            )
+        )
+        return {
+            **result,
+            "tool_name": "hospital_bag_workflow",
+            "workflow_context": _hospital_bag_public_workflow_context(
+                phase="collecting_intake",
+                generation_mode=generation_mode,
+                information_complete=False,
+                missing_fields=missing_fields,
+                invalid_fields=invalid_fields,
+            ),
+        }
+
+    async def _generate_card(
+        self,
+        context: ToolHandlerContext,
+        *,
+        form_data: dict[str, Any],
+        generation_mode: str,
+        verified_fact_generation: bool,
+    ) -> dict[str, Any]:
+        result = await self.card_handler.execute(
+            _hospital_bag_context_with_args(
+                context,
+                {
+                    **context.args,
+                    "confirmed_form_data": form_data,
+                    "generation_mode": generation_mode,
+                    "runtime_result_tool_name": "hospital_bag_workflow",
+                    "runtime_verified_fact_generation": verified_fact_generation,
+                },
+            )
+        )
+        if _text(result, "status") != "card_created":
+            return result
+        return {
+            **result,
+            "workflow_context": _hospital_bag_public_workflow_context(
+                phase="completed",
+                generation_mode=generation_mode,
+                information_complete=True,
+                data_source=(
+                    "verified_facts"
+                    if verified_fact_generation
+                    else "verified_form_submission"
+                ),
+            ),
+        }
+
+
+def _hospital_bag_generation_mode(
+    args: dict[str, Any],
+    *,
+    workflow: dict[str, Any],
+) -> str:
+    mode = _text(args, "generation_mode") or _text(workflow, "generation_mode")
+    return mode if mode in {"standard", "quick", "immediate"} else "standard"
+
+
+def _hospital_bag_context_with_args(
+    context: ToolHandlerContext,
+    args: dict[str, Any],
+) -> ToolHandlerContext:
+    return ToolHandlerContext(
+        actor=context.actor,
+        run_id=context.run_id,
+        tool_name=context.tool_name,
+        call_id=context.call_id,
+        args=args,
+        thread_id=context.thread_id,
+    )
+
+
+def _hospital_bag_public_workflow_context(
+    *,
+    phase: str,
+    generation_mode: str,
+    information_complete: bool,
+    missing_fields: list[str] | None = None,
+    invalid_fields: list[str] | None = None,
+    data_source: str = "",
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "workflow_type": "hospital_bag",
+        "phase": phase,
+        "information_complete": information_complete,
+        "generation_mode": generation_mode,
+        "next_action": (
+            "seek_urgent_care"
+            if phase == "safety_interruption"
+            else (
+                "none"
+                if information_complete
+                else "submit_hospital_bag_intake"
+            )
+        ),
+    }
+    if missing_fields:
+        context["missing_fields"] = list(missing_fields)
+    if invalid_fields:
+        context["invalid_fields"] = list(invalid_fields)
+    if data_source:
+        context["data_source"] = data_source
+    return context
+
+
+def _without_hospital_bag_fields(
+    values: dict[str, Any],
+    field_ids: list[str],
+) -> dict[str, Any]:
+    excluded = set(field_ids)
+    return {
+        key: value
+        for key, value in values.items()
+        if key not in excluded
+    }
+
+
+def _has_hospital_bag_form_submission(args: dict[str, Any]) -> bool:
+    return any(
+        key in args
+        for key in (
+            "confirmed_form_data",
+            "form_artifact_id",
+            "form_submission_id",
+        )
+    )
+
+
+def _require_active_hospital_bag_form_submission(
+    *,
+    args: dict[str, Any],
+    workflow: dict[str, Any],
+) -> None:
+    form_artifact_id = _text(args, "form_artifact_id")
+    if (
+        _text(workflow, "phase") != "collecting_intake"
+        or not form_artifact_id
+        or not _text(args, "form_submission_id")
+        or _text(workflow, "source_form_artifact_id") != form_artifact_id
+    ):
+        raise ApiError(
+            code="stale_hospital_bag_intake",
+            message="This hospital bag form is no longer the active intake.",
+            status=409,
+        )
+
+
+_HOSPITAL_BAG_CURRENT_SYMPTOM_CUES = (
+    "现在",
+    "目前",
+    "刚刚",
+    "今天",
+    "此刻",
+    "正在",
+)
+_HOSPITAL_BAG_WORRY_OR_RISK_CUES = (
+    "担心",
+    "害怕",
+    "怕",
+    "风险",
+    "可能",
+    "生产时",
+    "分娩时",
+    "产后",
+    "以后",
+    "将来",
+    "预防",
+)
+
+
+def _hospital_bag_urgent_signal_ids(values: dict[str, Any]) -> list[str]:
+    safety_text = "；".join(
+        clause.strip()
+        for raw_value in (
+            values.get("pregnancy_history_or_notes"),
+            values.get("top_worries"),
+        )
+        for item in (raw_value if isinstance(raw_value, list) else [raw_value])
+        for clause in re.split(
+            r"[，,。；;！？!?]|但|不过",
+            str(item or ""),
+        )
+        if any(cue in clause for cue in _HOSPITAL_BAG_CURRENT_SYMPTOM_CUES)
+        and not any(cue in clause for cue in _HOSPITAL_BAG_WORRY_OR_RISK_CUES)
+    )
+    return pregnancy_plan_urgent_signal_ids(
+        {"medical_notes": safety_text}
+    )
 
 
 class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):

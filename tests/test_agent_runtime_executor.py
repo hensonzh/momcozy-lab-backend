@@ -1193,12 +1193,15 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     contracts = {contract.name: contract for contract in default_tool_registry().list()}
     assert backend.tool_descriptions_by_contract == {contract_name: contract.description for contract_name, contract in contracts.items()}
     assert backend.tool_schemas_by_contract == {contract_name: contract.input_schema for contract_name, contract in contracts.items()}
-    assert backend.tool_schemas["hospital_bag_card_create"]["additionalProperties"] is False
-    assert backend.tool_schemas["hospital_bag_card_create"]["properties"]["generation_mode"]["enum"] == [
+    assert backend.tool_schemas["hospital_bag_workflow"]["additionalProperties"] is False
+    assert backend.tool_schemas["hospital_bag_workflow"]["properties"]["generation_mode"]["enum"] == [
         "standard",
         "quick",
         "immediate",
     ]
+    assert backend.tool_schemas["hospital_bag_workflow"]["properties"]["restart"]["type"] == "boolean"
+    assert "hospital_bag_form_create" not in backend.tool_schemas
+    assert "hospital_bag_card_create" not in backend.tool_schemas
     assert backend.tool_schemas["hospital_bag_cart_update"]["required"] == ["action"]
     assert backend.tool_schemas["devices_guidance"]["required"] == ["model", "operation"]
     assert backend.tool_schemas["devices_guidance"]["properties"]["operation"]["enum"] == [
@@ -2091,7 +2094,7 @@ def test_agent_runtime_executor_real_tool_executor_uses_run_actor_role_permissio
     assert repository.run_summaries == []
 
 
-def test_agent_runtime_executor_injects_verified_form_submission_as_non_persistent_trusted_tool_args() -> None:
+def test_agent_runtime_executor_auto_continues_verified_hospital_bag_form_without_model_round_trip() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     form_artifact_id = uuid4()
@@ -2108,7 +2111,17 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
                     "submission_id": str(uuid4()),
                     "artifact_id": str(form_artifact_id),
                     "form_id": "hospital_bag_intake",
-                    "values": {"due_date_or_week": "32周", "birth_path": "顺产"},
+                    "values": {
+                        "due_date_or_week": "32周",
+                        "first_birth": "是",
+                        "fetus_count": "单胎",
+                        "pregnancy_history_or_notes": ["没有"],
+                        "birth_path": "顺产",
+                        "feeding_intention": "亲喂母乳",
+                        "return_to_work_timing": "3个月后",
+                        "support_person": "有人全天帮忙",
+                        "top_worries": ["怕漏买"],
+                    },
                     "verified": True,
                 }
             ]
@@ -2138,17 +2151,11 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"hospital_bag_card_create": capture_handler},
+        handlers={"hospital_bag_workflow": capture_handler},
     )
     transient_stream = FakeTransientStream()
-    backend = ScriptedSdkBackend(
-        [
-            scripted_sdk_response(
-                final_text="待产包清单已生成。",
-                text_deltas=("待产包清单已生成。",),
-                tool_invocations=(scripted_tool_invocation("hospital_bag_card_create", {}),),
-            )
-        ]
+    backend = CapturingSdkBackend(
+        result=SdkNodeResult(final_text="不应调用模型。")
     )
 
     result = asyncio.run(
@@ -2168,13 +2175,10 @@ def test_agent_runtime_executor_injects_verified_form_submission_as_non_persiste
     assert "不用一次买完" in result.final_text
     assert result.final_text.endswith("**[打开待产包购物车](/hospital-bag-cart)**")
     assert result.final_text.index("不用一次买完") < result.final_text.index("/hospital-bag-cart")
-    assert [item["delta"] for item in transient_stream.deltas] == [
-        "待产包清单已生成。",
-        result.final_text[len("待产包清单已生成。") :],
-    ]
+    assert backend.requests == []
     assert repository.tool_call.safe_args == {}
     assert captured_args == {
-        "confirmed_form_data": {"due_date_or_week": "32周", "birth_path": "顺产"},
+        "confirmed_form_data": attachment["values"],
         "form_submission_id": attachment["submission_id"],
         "form_artifact_id": str(form_artifact_id),
         "runtime_workflow_context": workflow.state,
@@ -3046,7 +3050,7 @@ def test_agent_runtime_executor_prefills_form_without_birth_prep_business_projec
     tool_executor = CozymateToolExecutor(
         registry=registry,
         repository=repository,
-        handlers={"hospital_bag_form_create": capture_handler},
+        handlers={"hospital_bag_workflow": capture_handler},
     )
     business_facts_projector = FakeBusinessFactsProjector(facts={"pregnancy": {"profile": {"estimated_due_date": "2026-09-18"}}})
     fact_service = FakeFactService(defaults={"due_date_or_week": "30周", "age": 34, "first_birth": "否", "feeding_intention": "混合喂养"})
@@ -3054,7 +3058,7 @@ def test_agent_runtime_executor_prefills_form_without_birth_prep_business_projec
         [
             scripted_sdk_response(
                 final_text="信息采集表已准备好。",
-                tool_invocations=(scripted_tool_invocation("hospital_bag_form_create", {}),),
+                tool_invocations=(scripted_tool_invocation("hospital_bag_workflow", {}),),
             )
         ]
     )
@@ -3082,6 +3086,9 @@ def test_agent_runtime_executor_prefills_form_without_birth_prep_business_projec
     }
     assert business_facts_projector.calls == []
     assert fact_service.requested_form_ids == ["hospital_bag_intake"]
+    assert fact_service.requested_verified_form_ids == [
+        "hospital_bag_intake"
+    ]
 
 
 def test_agent_runtime_executor_prefills_pregnancy_form_from_reliable_same_turn_week_and_age() -> None:
@@ -3942,14 +3949,20 @@ class FakeToolExecutor:
 
 
 class FakeFactService:
-    def __init__(self, *, defaults=None, values=None) -> None:
+    def __init__(self, *, defaults=None, verified_defaults=None, values=None) -> None:
         self.defaults = defaults or {}
+        self.verified_defaults = verified_defaults or {}
         self.fact_values = values or {}
         self.requested_form_ids = []
+        self.requested_verified_form_ids = []
 
     async def form_defaults(self, *, owner_user_id, form_id):
         self.requested_form_ids.append(form_id)
         return dict(self.defaults)
+
+    async def verified_form_defaults(self, *, owner_user_id, form_id):
+        self.requested_verified_form_ids.append(form_id)
+        return dict(self.verified_defaults)
 
     async def values(self, *, owner_user_id):
         return dict(self.fact_values)
@@ -4073,7 +4086,7 @@ def _hospital_bag_workflow(*, run: AgentRun, state: dict[str, Any], status: str 
         run_id=run.id,
         workflow_type="hospital_bag",
         status=status,
-        schema_version="v1",
+        schema_version="v2",
         state=state,
         active_step=str(state.get("phase") or ""),
     )

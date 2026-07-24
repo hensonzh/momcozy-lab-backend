@@ -26,7 +26,9 @@
         "service_skill_id": "birth-prep",
         "must_include": [
           "trusted_form",
-          "verified_submission_before_card"
+          "verified_submission_before_card",
+          "single_model_visible_workflow_tool",
+          "deterministic_continuation_without_model"
         ],
         "must_not": [
           "create_card_before_verified_submission",
@@ -35,11 +37,11 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "hospital_bag_form_create",
+          "contract": "hospital_bag_workflow",
           "timing": "after_user_intent"
         },
         {
-          "contract": "hospital_bag_card_create",
+          "contract": "hospital_bag_workflow",
           "timing": "after_verified_submission"
         }
       ],
@@ -2183,7 +2185,9 @@
         "must_include": [
           "single_form",
           "verified_submission",
-          "workflow_completed_after_card"
+          "workflow_completed_after_card",
+          "single_model_visible_workflow_tool",
+          "deterministic_continuation_without_model"
         ],
         "must_not": [
           "duplicate_form",
@@ -2193,11 +2197,11 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "hospital_bag_form_create",
+          "contract": "hospital_bag_workflow",
           "timing": "after_user_intent"
         },
         {
-          "contract": "hospital_bag_card_create",
+          "contract": "hospital_bag_workflow",
           "timing": "after_verified_submission"
         }
       ],

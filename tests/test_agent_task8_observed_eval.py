@@ -15,9 +15,8 @@ from app.agents.cozymate.health_guidance import (
 )
 from app.agents.cozymate.tools import (
     DeviceGuidanceToolHandler,
-    HospitalBagCardCreateToolHandler,
     HospitalBagCartUpdateProposeToolHandler,
-    HospitalBagFormCreateToolHandler,
+    HospitalBagWorkflowToolHandler,
     IbclcConsultCardCreateToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
@@ -31,6 +30,9 @@ from app.agents.cozymate.tools import (
 )
 from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_URGENT_RESPONSE,
+)
+from app.agents.cozymate.tools.hospital_bag_flow import (
+    HOSPITAL_BAG_URGENT_RESPONSE,
 )
 from app.agent_runtime.evals.service import (
     AgentEvalRuntimeClient,
@@ -228,11 +230,11 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
         text="帮我准备待产包。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("hospital_bag_form_create", {}),
+            scripted_tool_invocation("hospital_bag_workflow", {}),
         ),
         final_text="请填写待产包信息。",
     )
-    _assert_tools(form.trace, "hospital_bag_form_create")
+    _assert_tools(form.trace, "hospital_bag_workflow")
     _assert_artifact_events(form.trace, "form")
     workflow = scenario.workflow("hospital_bag")
     form_artifact_id = workflow.state["source_form_artifact_id"]
@@ -260,10 +262,9 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
                 "verified": True,
             }
         ],
-        tool_invocations=(scripted_tool_invocation("hospital_bag_card_create", {}),),
         final_text="待产包清单已生成。",
     )
-    _assert_tools(card.trace, "hospital_bag_card_create")
+    _assert_tools(card.trace, "hospital_bag_workflow")
     _assert_artifact_events(card.trace, "hospital_bag_card")
     assert scenario.workflow("hospital_bag").status == "completed"
     assert card.trace.actions == []
@@ -283,6 +284,103 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
     _assert_actions(cart.trace, ("hospital_bag.cart.update", "applied", "hospital_bag_cart"))
     _assert_event_types(cart.trace, required={"action.applied", "hospital_bag.cart.changed"})
     _assert_event_types(cart.trace, forbidden={"action.confirmation_required"})
+
+
+def test_observed_hospital_bag_verified_submission_stops_for_urgent_signal() -> None:
+    scenario = ObservedScenario()
+    handlers = scenario.hospital_bag_handlers()
+    scenario.run_turn(
+        text="帮我准备待产包。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation("hospital_bag_workflow", {}),
+        ),
+        final_text="请填写待产包信息。",
+    )
+    workflow = scenario.workflow("hospital_bag")
+
+    result = scenario.run_turn(
+        text="表单已提交。",
+        handlers=handlers,
+        attachments=[
+            {
+                "type": "form_submission",
+                "submission_id": "hospital-submission-urgent",
+                "artifact_id": workflow.state["source_form_artifact_id"],
+                "form_id": "hospital_bag_intake",
+                "values": {
+                    "due_date_or_week": "36周",
+                    "first_birth": "是",
+                    "fetus_count": "单胎",
+                    "pregnancy_history_or_notes": ["其它：我现在大量出血"],
+                    "birth_path": "顺产",
+                    "feeding_intention": "亲喂母乳",
+                    "return_to_work_timing": "3个月后",
+                    "support_person": "有人全天帮忙",
+                    "top_worries": ["怕漏买"],
+                },
+                "verified": True,
+            }
+        ],
+        final_text="不应调用模型。",
+    )
+
+    assert result.execution_result.final_text == HOSPITAL_BAG_URGENT_RESPONSE
+    _assert_tools(result.trace, "hospital_bag_workflow")
+    _assert_event_types(result.trace, forbidden={"artifact.created"})
+    assert not [
+        artifact
+        for artifact in scenario.repository.artifacts
+        if artifact.artifact_type == "hospital_bag_card"
+    ]
+    assert scenario.workflow("hospital_bag").status == "paused"
+
+
+def test_observed_hospital_bag_worry_and_history_do_not_trigger_current_emergency() -> None:
+    scenario = ObservedScenario()
+    handlers = scenario.hospital_bag_handlers()
+    scenario.run_turn(
+        text="帮我准备待产包。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation("hospital_bag_workflow", {}),
+        ),
+        final_text="请填写待产包信息。",
+    )
+    workflow = scenario.workflow("hospital_bag")
+
+    result = scenario.run_turn(
+        text="表单已提交。",
+        handlers=handlers,
+        attachments=[
+            {
+                "type": "form_submission",
+                "submission_id": "hospital-submission-future-risk",
+                "artifact_id": workflow.state["source_form_artifact_id"],
+                "form_id": "hospital_bag_intake",
+                "values": {
+                    "due_date_or_week": "36周",
+                    "first_birth": "是",
+                    "fetus_count": "单胎",
+                    "pregnancy_history_or_notes": [
+                        "其它：有产后大出血风险"
+                    ],
+                    "birth_path": "顺产",
+                    "feeding_intention": "亲喂母乳",
+                    "return_to_work_timing": "3个月后",
+                    "support_person": "有人全天帮忙",
+                    "top_worries": ["其它：怕生产时大出血"],
+                },
+                "verified": True,
+            }
+        ],
+        final_text="待产包清单已生成。",
+    )
+
+    assert result.execution_result.final_text != HOSPITAL_BAG_URGENT_RESPONSE
+    _assert_tools(result.trace, "hospital_bag_workflow")
+    _assert_artifact_events(result.trace, "hospital_bag_card")
+    assert scenario.workflow("hospital_bag").status == "completed"
 
 
 def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles() -> None:
@@ -883,8 +981,9 @@ class ObservedScenario:
 
     def hospital_bag_handlers(self) -> dict[str, Any]:
         return {
-            "hospital_bag_form_create": HospitalBagFormCreateToolHandler(runtime_service=self.runtime_service),
-            "hospital_bag_card_create": HospitalBagCardCreateToolHandler(runtime_service=self.runtime_service),
+            "hospital_bag_workflow": HospitalBagWorkflowToolHandler(
+                runtime_service=self.runtime_service
+            ),
             "hospital_bag_cart_update": HospitalBagCartUpdateProposeToolHandler(runtime_service=self.runtime_service),
         }
 

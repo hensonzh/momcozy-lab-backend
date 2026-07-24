@@ -107,14 +107,14 @@ def test_tool_executor_excludes_trusted_confirmed_form_data_from_audit_payloads(
     executor = CozymateToolExecutor(
         registry=default_tool_registry(),
         repository=repository,
-        handlers={"hospital_bag_card_create": handler},
+        handlers={"hospital_bag_workflow": handler},
     )
 
     asyncio.run(
         executor.execute(
             actor=actor,
             run_id=uuid4(),
-            tool_name="hospital_bag_card_create",
+            tool_name="hospital_bag_workflow",
             call_id="call-confirmed-form",
             args={},
             trusted_args={
