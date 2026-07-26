@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
-from app.modules.diary.models import PregnancyDiaryEntry
+from app.modules.diary.models import DiaryEntry
 from app.modules.diary.repository import DiaryEntryMutation, DiaryRepository
 from app.modules.diary.service import DiaryService
 
@@ -20,14 +20,14 @@ def test_diary_service_creates_entry_and_records_audit() -> None:
         service.create_entry(
             owner_user_id=owner_user_id,
             entry_date=date(2026, 7, 2),
-            values={"mood": "calm", "content": "A good day"},
+            values={"attributes": {"mood": "calm"}, "content": "A good day"},
             request_id="req_diary",
         )
     )
 
     assert entry.owner_user_id == owner_user_id
-    assert entry.mood == "calm"
-    assert audit_service.record_kwargs["action"] == "pregnancy_diary.entry.create"
+    assert entry.attributes["mood"] == "calm"
+    assert audit_service.record_kwargs["action"] == "diary.entry.create"
 
 
 def test_diary_service_lists_and_deletes_entries() -> None:
@@ -37,12 +37,23 @@ def test_diary_service_lists_and_deletes_entries() -> None:
     audit_service = FakeAuditService()
     service = DiaryService(repository=repository, audit_service=audit_service)
 
-    entries = asyncio.run(service.list_entries(owner_user_id=owner_user_id, limit=10))
-    asyncio.run(service.delete_entry(owner_user_id=owner_user_id, entry_date=entry.entry_date, request_id="req_delete"))
+    entries = asyncio.run(
+        service.list_entries(
+            owner_user_id=owner_user_id,
+            limit=10,
+        )
+    )
+    asyncio.run(
+        service.delete_entry(
+            owner_user_id=owner_user_id,
+            entry_date=entry.entry_date,
+            request_id="req_delete",
+        )
+    )
 
     assert entries == [entry]
     assert entry.status == "deleted"
-    assert audit_service.record_kwargs["action"] == "pregnancy_diary.entry.delete"
+    assert audit_service.record_kwargs["action"] == "diary.entry.delete"
 
 
 def test_diary_service_replaces_content_and_preserves_unmodified_fields() -> None:
@@ -61,7 +72,7 @@ def test_diary_service_replaces_content_and_preserves_unmodified_fields() -> Non
     )
 
     assert updated.content == "Existing fact rewritten together with the new fact"
-    assert updated.mood == "calm"
+    assert updated.attributes["mood"] == "calm"
 
 
 def test_diary_service_full_replacement_is_idempotent_for_identical_content() -> None:
@@ -92,7 +103,7 @@ def test_diary_repository_create_restores_soft_deleted_entry_without_stale_value
     deleted_entry.entry_date = entry_date
     deleted_entry.status = "deleted"
     deleted_entry.deleted_at = datetime(2026, 7, 3, tzinfo=timezone.utc)
-    deleted_entry.appointment_note = "old question"
+    deleted_entry.attributes = {"appointment_note": "old question"}
     session = FakeDiarySession(entry=deleted_entry)
     repository = DiaryRepository(session=session)  # type: ignore[arg-type]
 
@@ -100,15 +111,14 @@ def test_diary_repository_create_restores_soft_deleted_entry_without_stale_value
         repository.create_entry(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
-            values={"mood": "calm again", "content": "Restored entry"},
+            values={"attributes": {"mood": "calm again"}, "content": "Restored entry"},
         )
     )
 
     assert entry is deleted_entry
     assert entry.status == "active"
     assert entry.deleted_at is None
-    assert entry.mood == "calm again"
-    assert entry.appointment_note == ""
+    assert entry.attributes == {"mood": "calm again"}
     assert session.added == []
     assert session.flushed is True
     assert session.refreshed == [(deleted_entry, ("updated_at",))]
@@ -126,13 +136,13 @@ def test_diary_repository_update_refreshes_server_generated_updated_at() -> None
         repository.update_entry_with_status(
             owner_user_id=owner_user_id,
             entry_date=entry.entry_date,
-            values={"mood": "hopeful"},
+            values={"attributes": {"mood": "hopeful"}},
         )
     )
 
     assert mutation is not None
     assert mutation.changed is True
-    assert mutation.entry.mood == "hopeful"
+    assert mutation.entry.attributes["mood"] == "hopeful"
     assert session.refreshed == [(entry, ("updated_at",))]
 
 
@@ -172,14 +182,13 @@ def test_diary_repository_contains_concurrent_create_conflict_in_savepoint() -> 
     assert session.nested_transactions == 1
 
 
-def _entry(*, owner_user_id: UUID) -> PregnancyDiaryEntry:
-    return PregnancyDiaryEntry(
+def _entry(*, owner_user_id: UUID) -> DiaryEntry:
+    return DiaryEntry(
         id=uuid4(),
         owner_user_id=owner_user_id,
         entry_date=date(2026, 7, 2),
-        mood="calm",
+        attributes={"mood": "calm"},
         status="active",
-        symptom_tags=[],
         attachments=[],
     )
 
@@ -227,7 +236,7 @@ class FakeDiaryRepository:
 
 
 class FakeDiarySession:
-    def __init__(self, *, entry: PregnancyDiaryEntry | None, flush_error: Exception | None = None) -> None:
+    def __init__(self, *, entry: DiaryEntry | None, flush_error: Exception | None = None) -> None:
         self.entry = entry
         self.flush_error = flush_error
         self.added = []

@@ -11,7 +11,7 @@ from ...infrastructure.db import get_session
 from ..audit import AuditService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
-from .models import PregnancyDiaryEntry
+from .models import DiaryEntry
 from .repository import DiaryRepository
 from .schemas import (
     PregnancyDiaryEntryCreate,
@@ -27,7 +27,6 @@ router = SurfaceAPIRouter(
     tags=["pregnancy-diary"],
     api_surface_metadata=api_surface("public_app_api", owner="pregnancy-diary", clients=["flutter"]),
 )
-
 
 def get_diary_service(session: AsyncSession = Depends(get_session)) -> DiaryService:
     return DiaryService(
@@ -59,7 +58,10 @@ async def get_entry(
     current_user: CurrentUser = Depends(require_current_user),
     service: DiaryService = Depends(get_diary_service),
 ) -> PregnancyDiaryEntryRead:
-    entry = await service.get_entry(owner_user_id=current_user.user_id, entry_date=entry_date)
+    entry = await service.get_entry(
+        owner_user_id=current_user.user_id,
+        entry_date=entry_date,
+    )
     return _entry_read(entry)
 
 
@@ -70,7 +72,9 @@ async def create_entry(
     current_user: CurrentUser = Depends(require_current_user),
     service: DiaryService = Depends(get_diary_service),
 ) -> PregnancyDiaryEntryRead:
-    values = payload.model_dump(exclude={"entry_date"}, exclude_unset=True)
+    values = _pregnancy_values(
+        payload.model_dump(exclude={"entry_date"}, exclude_unset=True)
+    )
     entry = await service.create_entry(
         owner_user_id=current_user.user_id,
         entry_date=payload.entry_date,
@@ -91,7 +95,7 @@ async def update_entry(
     entry = await service.update_entry(
         owner_user_id=current_user.user_id,
         entry_date=entry_date,
-        values=payload.model_dump(exclude_unset=True),
+        values=_pregnancy_values(payload.model_dump(exclude_unset=True)),
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
     return _entry_read(entry)
@@ -112,22 +116,41 @@ async def delete_entry(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _entry_read(entry: PregnancyDiaryEntry) -> PregnancyDiaryEntryRead:
+def _entry_read(entry: DiaryEntry) -> PregnancyDiaryEntryRead:
+    attributes = dict(entry.attributes or {})
     return PregnancyDiaryEntryRead(
         id=entry.id,
         owner_user_id=entry.owner_user_id,
         entry_date=entry.entry_date,
-        gestational_week=entry.gestational_week or "",
-        mood=entry.mood or "",
-        energy_level=entry.energy_level or "",
-        sleep_summary=entry.sleep_summary or "",
-        fetal_movement=entry.fetal_movement or "",
-        symptom_tags=entry.symptom_tags or [],
-        appointment_note=entry.appointment_note or "",
-        nutrition_note=entry.nutrition_note or "",
+        gestational_week=str(attributes.get("gestational_week") or ""),
+        mood=str(attributes.get("mood") or ""),
+        energy_level=str(attributes.get("energy_level") or ""),
+        sleep_summary=str(attributes.get("sleep_summary") or ""),
+        fetal_movement=str(attributes.get("fetal_movement") or ""),
+        symptom_tags=_list_value(attributes.get("symptom_tags")),
+        appointment_note=str(attributes.get("appointment_note") or ""),
+        nutrition_note=str(attributes.get("nutrition_note") or ""),
         content=entry.content or "",
         attachments=entry.attachments or [],
         status=entry.status or "active",
         created_at=entry.created_at,
         updated_at=entry.updated_at,
     )
+
+
+def _pregnancy_values(values: dict[str, object]) -> dict[str, object]:
+    normalized = dict(values)
+    content = normalized.pop("content", None)
+    attachments = normalized.pop("attachments", None)
+    result: dict[str, object] = {}
+    if "content" in values:
+        result["content"] = str(content or "")
+    if "attachments" in values:
+        result["attachments"] = _list_value(attachments)
+    if normalized:
+        result["attributes"] = normalized
+    return result
+
+
+def _list_value(value: object) -> list[object]:
+    return list(value) if isinstance(value, list) else []

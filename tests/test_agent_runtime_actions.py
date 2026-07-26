@@ -10,6 +10,7 @@ from app.agent_runtime.actions.executor import (
     AgentActionApplyResult,
     AgentActionExecutor,
 )
+from app.agent_runtime.actions.policy import AgentActionPolicy, AgentActionPolicyRule
 from app.agent_runtime.runs.models import AgentAction
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agents.cozymate.actions.plans import (
@@ -24,19 +25,29 @@ from tests.test_agent_runtime_service import FakeAgentRuntimeRepository
 
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 ACTION_POLICY = cozymate_action_policy()
+CONFIRMABLE_TEST_ACTION = "test.confirmable.create"
+CONFIRMABLE_ACTION_POLICY = AgentActionPolicy(
+    rules={
+        CONFIRMABLE_TEST_ACTION: AgentActionPolicyRule(
+            action_type=CONFIRMABLE_TEST_ACTION,
+            target_type="test_resource",
+            side_effect_level="medium",
+        )
+    }
+)
 
 
 def test_confirmation_only_authorizes_and_requeues_same_run_without_domain_apply() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
+    service = AgentRuntimeService(action_policy=CONFIRMABLE_ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
     action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type="notifications.milk_reminder.create",
-            target_type="notification",
+            action_type=CONFIRMABLE_TEST_ACTION,
+            target_type="test_resource",
             preview_payload={"summary": "Pump does not turn on"},
             apply_payload={"issue_summary": "Pump does not turn on"},
         )
@@ -80,10 +91,10 @@ def test_confirmation_only_authorizes_and_requeues_same_run_without_domain_apply
 def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
+    service = AgentRuntimeService(action_policy=CONFIRMABLE_ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
     action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="notifications.milk_reminder.create")
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type=CONFIRMABLE_TEST_ACTION)
     )
     run.status = "waiting_for_confirmation"
 
@@ -134,10 +145,10 @@ def test_milk_actions_reject_confirmation_payload_edits(action_type: str) -> Non
 def test_cross_owner_cannot_read_or_confirm_action() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
+    service = AgentRuntimeService(action_policy=CONFIRMABLE_ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
     action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="notifications.milk_reminder.create")
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type=CONFIRMABLE_TEST_ACTION)
     )
     run.status = "waiting_for_confirmation"
 
@@ -151,10 +162,10 @@ def test_cross_owner_cannot_read_or_confirm_action() -> None:
 def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
-    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
+    service = AgentRuntimeService(action_policy=CONFIRMABLE_ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create ticket"))
     rejected_action = asyncio.run(
-        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type="notifications.milk_reminder.create")
+        service.propose_action(owner_user_id=owner_user_id, run_id=run.id, action_type=CONFIRMABLE_TEST_ACTION)
     )
     run.status = "waiting_for_confirmation"
     rejected = asyncio.run(service.reject_action(owner_user_id=owner_user_id, action_id=rejected_action.id, reason="not now"))
@@ -174,7 +185,7 @@ def test_reject_and_expire_finish_waiting_run_without_apply() -> None:
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=second_run.id,
-            action_type="notifications.milk_reminder.create",
+            action_type=CONFIRMABLE_TEST_ACTION,
             expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
         )
     )
@@ -263,14 +274,7 @@ def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
     assert applied.payload["user_visible"] is False
 
 
-@pytest.mark.parametrize(
-    ("action_type", "target_type"),
-    [
-        ("plans.milk_plan.create", "plan"),
-        ("notifications.milk_reminder.create", "notification"),
-    ],
-)
-def test_value_bearing_preview_actions_still_require_one_confirmation(action_type: str, target_type: str) -> None:
+def test_value_bearing_preview_action_still_requires_one_confirmation() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
@@ -280,8 +284,8 @@ def test_value_bearing_preview_actions_still_require_one_confirmation(action_typ
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type=action_type,
-            target_type=target_type,
+            action_type="plans.milk_plan.create",
+            target_type="plan",
             side_effect_level="medium",
         )
     )

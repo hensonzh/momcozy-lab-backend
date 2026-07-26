@@ -292,7 +292,7 @@ class MaternalInfantProfileUpdateSummary(_StrictOutputModel):
 
 
 class MaternalInfantProfileUpdateOutput(_StrictOutputModel):
-    """profile_write 的 Action 提交或执行结果。"""
+    """profile_update 的 Action 提交或执行结果。"""
 
     action_id: UUID = Field(
         description="本次持久化 Action 的稳定 UUID。",

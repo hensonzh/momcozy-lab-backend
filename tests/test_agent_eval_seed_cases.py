@@ -68,12 +68,12 @@ def test_product_agent_eval_seed_references_only_registered_tool_contracts() -> 
     assert referenced <= registered
 
 
-def test_product_agent_eval_seed_write_calls_always_assert_operation() -> None:
+def test_product_agent_eval_seed_mutation_calls_always_assert_operation() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
 
     for case in cases:
         for tool_call in case["expected_tool_calls"]:
-            if tool_call["contract"].endswith("_write"):
+            if tool_call["contract"].endswith(("_mutate", "_create", "_update", "_delete")):
                 assert "operation" in tool_call.get("args_subset", {}), (
                     case["suite"],
                     tool_call["contract"],
@@ -86,7 +86,7 @@ def test_product_agent_eval_seed_separates_timeline_facts_from_milk_analysis() -
 
     assert set(milk_cases) == {"milk_daily_summary", "milk_trend_analysis"}
     assert {call["contract"] for call in milk_cases["milk_daily_summary"]["expected_tool_calls"]} == {
-        "lactation_timeline_read"
+        "schedule_timeline_read"
     }
     assert milk_cases["milk_trend_analysis"]["expected_tool_calls"] == [
         {
@@ -101,6 +101,33 @@ def test_product_agent_eval_seed_separates_timeline_facts_from_milk_analysis() -
     ]
 
 
+def test_product_agent_eval_seed_requires_measured_lactation_task_completion() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    measured = by_suite["milk_task_completion_measured"]
+    missing = by_suite["milk_task_completion_missing_volume"]
+
+    assert measured["expected_tool_calls"] == [
+        {
+            "contract": "schedule_timeline_mutate",
+            "timing": "after_exact_target_resolution",
+            "args_subset": {
+                "operation": "set_status",
+                "entry_type": "schedule",
+                "task_id": "55555555-5555-4555-8555-555555555555",
+                "completed": True,
+                "occurred_at": "2026-07-24T08:55:00+08:00",
+                "milk_volume_ml": 105,
+            },
+        }
+    ]
+    assert "single_record_action" in measured["expected_behavior"]["must_include"]
+    assert missing["expected_tool_calls"] == []
+    assert missing["forbidden_tool_calls"] == [{"contract": "schedule_timeline_mutate"}]
+    assert "ask_actual_milk_volume" in missing["expected_behavior"]["must_include"]
+
+
 def test_product_agent_eval_seed_keeps_pump_recommendation_read_only_and_model_owned() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     case = next(case for case in cases if case["suite"] == "device_pump_recommendation")
@@ -112,7 +139,7 @@ def test_product_agent_eval_seed_keeps_pump_recommendation_read_only_and_model_o
             "args_subset": {},
         }
     ]
-    assert case["forbidden_tool_calls"] == [{"contract": "hospital_bag_cart_write"}]
+    assert case["forbidden_tool_calls"] == [{"contract": "hospital_bag_cart_mutate"}]
     assert "model_selected_recommendation" in case["expected_behavior"]["must_include"]
     assert "tool_selected_recommendation" in case["expected_behavior"]["must_not"]
 
@@ -124,13 +151,13 @@ def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
     schedule_contracts = {tool_call["contract"] for tool_call in by_suite["milk_schedule_management"]["expected_tool_calls"]}
     plan_contracts = {tool_call["contract"] for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]}
 
-    assert schedule_contracts == {"lactation_timeline_write"}
+    assert schedule_contracts == {"schedule_timeline_mutate"}
     assert by_suite["milk_schedule_management"]["expected_tool_calls"][0]["args_subset"] == {
+        "entry_type": "schedule",
         "operation": "reschedule",
-        "item_type": "schedule",
     }
     assert "plan_task_update_proposal" not in schedule_contracts
-    assert plan_contracts == {"milk_analysis_manage", "plans_milk_plan_write"}
+    assert plan_contracts == {"milk_analysis_manage", "plan_mutate"}
     analysis_calls = [
         tool_call
         for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]
@@ -142,7 +169,8 @@ def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
     ]
     assert "milk_plan_proposal" not in plan_contracts
     assert by_suite["milk_plan_creation"]["expected_tool_calls"][-1]["args_subset"] == {
-        "operation": "create"
+        "operation": "create",
+        "plan_type": "milk_management",
     }
 
 
@@ -175,21 +203,22 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
     diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
 
-    assert "pregnancy_plan_manage" in plan_contracts
+    assert plan_contracts == {"plan_mutate"}
     assert by_suite["pregnancy_plan_creation"]["expected_tool_calls"][-1]["args_subset"] == {
-        "command": "generate_plan"
+        "operation": "create",
+        "plan_type": "pregnancy",
     }
     assert by_suite["pregnancy_plan_creation"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "confirmation_card" in by_suite["pregnancy_plan_creation"]["expected_behavior"]["must_not"]
-    assert intake_contracts == {"pregnancy_plan_manage"}
+    assert intake_contracts == {"pregnancy_intake_manage"}
     assert by_suite["pregnancy_plan_intake_start"]["expected_tool_calls"][-1]["args_subset"] == {
         "command": "start_or_resume"
     }
-    assert analysis_contracts == {"pregnancy_plan_manage"}
+    assert analysis_contracts == {"pregnancy_intake_manage"}
     assert by_suite["pregnancy_plan_intake_analysis"]["expected_tool_calls"][0]["args_subset"] == {
         "command": "submit_form"
     }
-    assert followup_contracts == {"pregnancy_plan_manage"}
+    assert followup_contracts == {"pregnancy_intake_manage"}
     assert by_suite["pregnancy_plan_personalized_followup"]["expected_tool_calls"][0]["args_subset"] == {
         "command": "answer_current"
     }
@@ -207,12 +236,12 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "compound_followup_question" in by_suite["pregnancy_plan_personalized_followup"]["expected_behavior"]["must_not"]
     assert by_suite["pregnancy_plan_personalized_followup"]["forbidden_tool_calls"] == [
         {
-            "contract": "pregnancy_plan_manage",
+            "contract": "pregnancy_intake_manage",
             "args_subset": {"command": "submit_form"},
         },
         {
-            "contract": "pregnancy_plan_manage",
-            "args_subset": {"command": "generate_plan"},
+            "contract": "plan_mutate",
+            "args_subset": {"operation": "create", "plan_type": "pregnancy"},
         },
     ]
     attachment_guard = by_suite["pregnancy_plan_checkup_attachment_guard"]
@@ -220,32 +249,41 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "mark_uploaded_from_text_only" in attachment_guard["expected_behavior"]["must_not"]
     assert by_suite["pregnancy_plan_intake_start"]["forbidden_tool_calls"] == [
         {
-            "contract": "pregnancy_plan_manage",
-            "args_subset": {"command": "generate_plan"},
+            "contract": "plan_mutate",
+            "args_subset": {"operation": "create", "plan_type": "pregnancy"},
         }
     ]
     assert by_suite["pregnancy_plan_intake_analysis"]["forbidden_tool_calls"] == [
         {
-            "contract": "pregnancy_plan_manage",
-            "args_subset": {"command": "generate_plan"},
+            "contract": "plan_mutate",
+            "args_subset": {"operation": "create", "plan_type": "pregnancy"},
         }
     ]
-    assert "plans_task_write" in task_contracts
-    assert diary_contracts == {"pregnancy_diary_write"}
+    assert "schedule_timeline_mutate" in task_contracts
+    assert diary_contracts == {"diary_mutate"}
     assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert by_suite["general_diary_entry"]["expected_tool_calls"] == [
+        {
+            "contract": "diary_mutate",
+            "timing": "after_user_record_intent",
+            "args_subset": {
+                "operation": "create",
+            },
+        }
+    ]
     assert "pregnancy_plan_proposal" not in plan_contracts
     assert "plan_task_update_proposal" not in task_contracts
     assert "diary_entry_upsert_proposal" not in diary_contracts
 
-    diary_delete = by_suite["pregnancy_diary_write_exact"]
+    diary_delete = by_suite["pregnancy_diary_mutate_exact"]
     assert diary_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
     assert diary_delete["input"]["fixtures"]["explicit_delete_intent"] is True
     assert "oral_confirmation_complete" not in diary_delete["input"]["fixtures"]
     assert "redundant_confirmation_question" in diary_delete["expected_behavior"]["must_not"]
     assert diary_delete["expected_tool_calls"] == [
         {
-            "contract": "pregnancy_diary_write",
+            "contract": "diary_mutate",
             "timing": "on_explicit_intent_and_exact_target",
             "args_subset": {
                 "operation": "delete",
@@ -254,8 +292,8 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
             },
         }
     ]
-    assert by_suite["pregnancy_diary_write_ambiguous"]["expected_tool_calls"] == []
-    assert by_suite["pregnancy_diary_write_ambiguous"]["forbidden_tool_calls"] == [{"contract": "pregnancy_diary_write"}]
+    assert by_suite["pregnancy_diary_mutate_ambiguous"]["expected_tool_calls"] == []
+    assert by_suite["pregnancy_diary_mutate_ambiguous"]["forbidden_tool_calls"] == [{"contract": "diary_mutate"}]
 
     plan_delete = by_suite["pregnancy_plan_delete_exact"]
     assert plan_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
@@ -265,7 +303,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "redundant_confirmation_question" in plan_delete["expected_behavior"]["must_not"]
     assert plan_delete["expected_tool_calls"] == [
         {
-            "contract": "plans_plan_write",
+            "contract": "plan_mutate",
             "timing": "on_explicit_intent_and_exact_target",
             "args_subset": {
                 "operation": "delete",
@@ -274,16 +312,16 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
         }
     ]
     assert by_suite["pregnancy_plan_delete_ambiguous"]["expected_tool_calls"] == []
-    assert by_suite["pregnancy_plan_delete_ambiguous"]["forbidden_tool_calls"] == [{"contract": "plans_plan_write"}]
+    assert by_suite["pregnancy_plan_delete_ambiguous"]["forbidden_tool_calls"] == [{"contract": "plan_mutate"}]
 
     task_exact = by_suite["pregnancy_task_completion"]
     assert task_exact["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
     assert task_exact["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "confirmation_card" in task_exact["expected_behavior"]["must_not"]
-    assert task_exact["expected_tool_calls"][0]["args_subset"]["operation"] == "update"
+    assert task_exact["expected_tool_calls"][0]["args_subset"]["operation"] == "set_status"
     assert by_suite["pregnancy_task_ambiguous"]["expected_tool_calls"] == []
     assert by_suite["pregnancy_task_ambiguous"]["forbidden_tool_calls"] == [
-        {"contract": "plans_task_write"}
+        {"contract": "schedule_timeline_mutate"}
     ]
 
     record_exact = by_suite["feeding_record_delete_exact"]
@@ -306,7 +344,7 @@ def test_product_agent_eval_seed_covers_resumable_pregnancy_workflow_controls() 
     assert side_question["input"]["fixtures"]["workflow_cursor_attached"] is False
     assert "preserve_workflow_revision" in side_question["expected_behavior"]["must_include"]
     assert side_question["forbidden_tool_calls"] == [
-        {"contract": "pregnancy_plan_manage"}
+        {"contract": "pregnancy_intake_manage"}
     ]
 
     assert [call["args_subset"] for call in pause_resume["expected_tool_calls"]] == [
@@ -320,7 +358,7 @@ def test_product_agent_eval_seed_covers_resumable_pregnancy_workflow_controls() 
 
     assert edit_history["expected_tool_calls"] == [
         {
-            "contract": "pregnancy_plan_manage",
+            "contract": "pregnancy_intake_manage",
             "timing": "on_historical_choice",
             "args_subset": {
                 "command": "edit_answer",
@@ -335,14 +373,14 @@ def test_product_agent_eval_seed_covers_resumable_pregnancy_workflow_controls() 
     assert stale_command["input"]["fixtures"]["workflow_cursor_is_stale"] is True
     assert "no_state_mutation" in stale_command["expected_behavior"]["must_include"]
     assert stale_command["forbidden_tool_calls"] == [
-        {"contract": "pregnancy_plan_manage"}
+        {"contract": "pregnancy_intake_manage"}
     ]
 
 
 def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mixed_diary_parity() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
-    diary_save = "pregnancy_diary_write"
+    diary_save = "diary_mutate"
 
     implicit = by_suite["pregnancy_diary_implicit_entry"]
     assert {call["contract"] for call in implicit["expected_tool_calls"]} == {diary_save}
@@ -356,7 +394,7 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     existing = by_suite["pregnancy_diary_existing_entry"]
     assert [call["contract"] for call in existing["expected_tool_calls"]] == [
         diary_save,
-        "pregnancy_diary_read",
+        "diary_read",
         diary_save,
     ]
     assert [call["args_subset"] for call in existing["expected_tool_calls"]] == [
@@ -364,6 +402,10 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
         {},
         {"operation": "update"},
     ]
+    for case in cases:
+        for call in case["expected_tool_calls"]:
+            if call["contract"] in {"diary_read", "diary_mutate"}:
+                assert "diary_type" not in call.get("args_subset", {})
     assert "complete_rewrite_preserving_existing_user_facts" in existing["expected_behavior"]["must_include"]
     assert "append_increment_or_supplement" in existing["expected_behavior"]["must_not"]
     assert existing["expected_behavior"]["requires_final_response_after_tools"] is True
@@ -396,15 +438,15 @@ def test_product_agent_eval_seed_uses_current_hospital_bag_action_contract() -> 
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
-    cart_contracts = {tool_call["contract"] for tool_call in by_suite["hospital_bag_cart_write"]["expected_tool_calls"]}
+    cart_contracts = {tool_call["contract"] for tool_call in by_suite["hospital_bag_cart_mutate"]["expected_tool_calls"]}
 
-    assert "hospital_bag_cart_write" in cart_contracts
-    assert by_suite["hospital_bag_cart_write"]["expected_tool_calls"][0]["args_subset"] == {
+    assert "hospital_bag_cart_mutate" in cart_contracts
+    assert by_suite["hospital_bag_cart_mutate"]["expected_tool_calls"][0]["args_subset"] == {
         "operation": "reset_cart"
     }
-    assert by_suite["hospital_bag_cart_write"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert by_suite["hospital_bag_cart_write"]["expected_behavior"]["service_skill_id"] == "birth-prep"
-    assert "hospital_bag_cart_write_proposal" not in cart_contracts
+    assert by_suite["hospital_bag_cart_mutate"]["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert by_suite["hospital_bag_cart_mutate"]["expected_behavior"]["service_skill_id"] == "birth-prep"
+    assert "hospital_bag_cart_mutate_proposal" not in cart_contracts
 
 
 def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -> None:
@@ -416,7 +458,7 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
     assert continuity["forbidden_tool_calls"] == []
 
     refresh = by_suite["ledger_latest_fact_refresh"]
-    assert [call["contract"] for call in refresh["expected_tool_calls"]] == ["lactation_timeline_read"]
+    assert [call["contract"] for call in refresh["expected_tool_calls"]] == ["schedule_timeline_read"]
     assert refresh["input"]["fixtures"]["context_ledger_available"] is True
 
     device = by_suite["device_unboxing_step_continuation"]
@@ -457,16 +499,16 @@ def test_product_agent_eval_seed_covers_ordered_ledger_and_durable_workflows() -
 
     pregnancy = by_suite["pregnancy_plan_end_to_end_workflow"]
     assert [call["contract"] for call in pregnancy["expected_tool_calls"]] == [
-        "pregnancy_plan_manage",
-        "pregnancy_plan_manage",
-        "pregnancy_plan_manage",
-        "pregnancy_plan_manage",
+        "pregnancy_intake_manage",
+        "pregnancy_intake_manage",
+        "pregnancy_intake_manage",
+        "plan_mutate",
     ]
     assert [call.get("args_subset") for call in pregnancy["expected_tool_calls"]] == [
         {"command": "start_or_resume"},
         {"command": "submit_form"},
         {"command": "answer_current"},
-        {"command": "generate_plan"},
+        {"operation": "create", "plan_type": "pregnancy"},
     ]
     assert "internal_workflow_artifact" in pregnancy["expected_behavior"]["must_not"]
 
@@ -481,14 +523,14 @@ def test_product_agent_eval_seed_splits_device_hazard_from_ibclc_artifact_contra
     assert support_contracts == set()
     assert {call["contract"] for call in by_suite["device_support_handoff"]["forbidden_tool_calls"]} == {
         "devices_guidance_manage",
-        "support_ticket_write",
+        "support_ticket_create",
     }
-    assert ibclc_contracts == {"ibclc_consult_card_write"}
+    assert ibclc_contracts == {"ibclc_consult_card_create"}
     assert by_suite["ibclc_consult"]["expected_tool_calls"][0]["args_subset"] == {
         "operation": "create"
     }
     assert by_suite["ibclc_consult"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert by_suite["ibclc_consult"]["forbidden_tool_calls"] == [{"contract": "support_ticket_write"}]
+    assert by_suite["ibclc_consult"]["forbidden_tool_calls"] == [{"contract": "support_ticket_create"}]
 
 
 def test_product_agent_eval_seed_uses_only_supported_device_guidance_contracts() -> None:
@@ -513,11 +555,11 @@ def test_product_agent_eval_seed_keeps_memory_writes_off_live_run_contract() -> 
     forbidden_sensitive_contracts = {tool_call["contract"] for tool_call in by_suite["memory_sensitive_rejection"]["forbidden_tool_calls"]}
 
     assert memory_contracts == set()
-    assert "profile_write" in forbidden_preference_contracts
+    assert "profile_update" in forbidden_preference_contracts
     assert by_suite["memory_preference_capture"]["expected_behavior"]["route"] == "async_memory_consolidation"
     assert by_suite["memory_preference_capture"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert by_suite["memory_sensitive_rejection"]["expected_tool_calls"] == []
-    assert "profile_write" in forbidden_sensitive_contracts
+    assert "profile_update" in forbidden_sensitive_contracts
     assert by_suite["memory_sensitive_rejection"]["expected_behavior"]["requires_confirmation_before_write"] is False
 
 
@@ -530,14 +572,16 @@ def test_product_agent_eval_seed_covers_postpartum_recovery_main_agent_capabilit
 
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["postpartum_recovery_checkin"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert {"profile_read", "plans_current_read"} <= checkin_contracts
-    assert "pregnancy_diary_write" not in checkin_contracts
+    assert {"profile_read", "schedule_timeline_read"} <= checkin_contracts
+    assert "diary_mutate" not in checkin_contracts
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert by_suite["postpartum_recovery_task"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert "confirmation_card" in by_suite["postpartum_recovery_task"]["expected_behavior"]["must_not"]
-    assert "plans_task_write" in task_contracts
+    assert "schedule_timeline_mutate" in task_contracts
     assert by_suite["postpartum_recovery_task"]["expected_tool_calls"][-1]["args_subset"] == {
-        "operation": "create"
+        "entry_type": "schedule",
+        "operation": "create",
+        "domain": "postpartum_recovery",
     }
 
 

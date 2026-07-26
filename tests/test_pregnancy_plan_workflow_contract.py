@@ -6,12 +6,12 @@ import pytest
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.core.errors import ApiError
 from app.agents.cozymate.tools import default_tool_registry
-from app.agents.cozymate.tools.handlers.pregnancy_plan import PregnancyPlanWorkflowToolHandler
+from app.agents.cozymate.tools.handlers.pregnancy_plan import PregnancyIntakeWorkflowToolHandler
 from app.agents.cozymate.tools.policy import CozymateToolExecutionPolicy
 from app.modules.auth import CurrentUser
 
 
-PREGNANCY_PLAN_WORKFLOW_TOOL = "pregnancy_plan_manage"
+PREGNANCY_PLAN_WORKFLOW_TOOL = "pregnancy_intake_manage"
 LEGACY_PREGNANCY_PLAN_TOOLS = {
     "pregnancy_plan_intake_start",
     "pregnancy_plan_intake_analyze",
@@ -28,14 +28,14 @@ def test_pregnancy_plan_uses_one_model_visible_workflow_contract() -> None:
     assert LEGACY_PREGNANCY_PLAN_TOOLS.isdisjoint(names)
 
     contract = registry.get(PREGNANCY_PLAN_WORKFLOW_TOOL)
-    assert contract.domain == "birth_prep"
-    assert contract.effect_scope == "user_resource"
-    assert contract.action_types == ("pregnancy.plan.create",)
+    assert contract.domain == "pregnancy_intake"
+    assert contract.effect_scope == "agent_internal"
+    assert contract.action_types == ()
     assert contract.blocking_policy == "must_wait"
-    assert contract.result_dependency == "final_response"
+    assert contract.result_dependency == "next_tool_call"
 
 
-def test_pregnancy_plan_manage_contract_exposes_state_machine_commands() -> None:
+def test_pregnancy_intake_manage_contract_exposes_state_machine_commands() -> None:
     schema = default_tool_registry().get(PREGNANCY_PLAN_WORKFLOW_TOOL).input_schema
     command = schema["properties"]["command"]
 
@@ -48,12 +48,11 @@ def test_pregnancy_plan_manage_contract_exposes_state_machine_commands() -> None
         "pause",
         "resume",
         "abandon",
-        "generate_plan",
     }
     assert {"choice_id", "answer", "step_id", "restart"} <= set(schema["properties"])
 
 
-def test_pregnancy_plan_manage_is_the_only_model_visible_intake_contract() -> None:
+def test_pregnancy_intake_manage_is_the_only_model_visible_intake_contract() -> None:
     names = set(default_tool_registry().names_for_sdk())
 
     assert PREGNANCY_PLAN_WORKFLOW_TOOL in names
@@ -61,7 +60,7 @@ def test_pregnancy_plan_manage_is_the_only_model_visible_intake_contract() -> No
     assert "pregnancy_plan_todo_propose" not in names
 
 
-def test_pregnancy_plan_manage_effect_is_dynamic_but_action_binding_remains_static() -> None:
+def test_pregnancy_intake_manage_is_internal_and_plan_mutate_owns_creation() -> None:
     policy = CozymateToolExecutionPolicy()
 
     for command in {
@@ -74,22 +73,17 @@ def test_pregnancy_plan_manage_effect_is_dynamic_but_action_binding_remains_stat
         "abandon",
     }:
         assert (
-            policy.effective_effect_scope(
-                tool_name=PREGNANCY_PLAN_WORKFLOW_TOOL,
-                args={"command": command},
-                default="user_resource",
-            )
+                policy.effective_effect_scope(
+                    tool_name=PREGNANCY_PLAN_WORKFLOW_TOOL,
+                    args={"command": command},
+                    default="agent_internal",
+                )
             == "agent_internal"
         )
 
-    assert (
-        policy.effective_effect_scope(
-            tool_name=PREGNANCY_PLAN_WORKFLOW_TOOL,
-            args={"command": "generate_plan"},
-            default="user_resource",
-        )
-        == "user_resource"
-    )
+    plan_mutate = default_tool_registry().get("plan_mutate")
+    assert plan_mutate.effect_scope == "user_resource"
+    assert "pregnancy.plan.create" in plan_mutate.action_types
 
 
 @pytest.mark.parametrize(
@@ -99,20 +93,18 @@ def test_pregnancy_plan_manage_effect_is_dynamic_but_action_binding_remains_stat
         ("submit_form", "analyze"),
         ("answer_current", "advance"),
         ("abandon", "advance"),
-        ("generate_plan", "generate"),
     ],
 )
-def test_pregnancy_plan_manage_facade_dispatches_to_internal_operations(
+def test_pregnancy_intake_manage_facade_dispatches_to_internal_operations(
     command: str,
     expected_delegate: str,
 ) -> None:
     calls: list[tuple[str, dict]] = []
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=object(),
         start_handler=_SpyDelegate("start", calls),
         analyze_handler=_SpyDelegate("analyze", calls),
         advance_handler=_SpyDelegate("advance", calls),
-        generate_handler=_SpyDelegate("generate", calls),
     )
     args = {
         "command": command,
@@ -135,13 +127,12 @@ def test_pregnancy_plan_manage_facade_dispatches_to_internal_operations(
         assert delegated_args["action"] == "abandon"
 
 
-def test_pregnancy_plan_manage_facade_rejects_a_choice_not_valid_for_current_phase() -> None:
-    handler = PregnancyPlanWorkflowToolHandler(
+def test_pregnancy_intake_manage_facade_rejects_a_choice_not_valid_for_current_phase() -> None:
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=object(),
         start_handler=_SpyDelegate("start", []),
         analyze_handler=_SpyDelegate("analyze", []),
         advance_handler=_SpyDelegate("advance", []),
-        generate_handler=_SpyDelegate("generate", []),
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -160,14 +151,13 @@ def test_pregnancy_plan_manage_facade_rejects_a_choice_not_valid_for_current_pha
     assert exc_info.value.code == "invalid_pregnancy_plan_choice"
 
 
-def test_pregnancy_plan_manage_facade_pauses_and_resumes_without_advancing() -> None:
+def test_pregnancy_intake_manage_facade_pauses_and_resumes_without_advancing() -> None:
     runtime = _WorkflowRuntime()
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=runtime,
         start_handler=_SpyDelegate("start", []),
         analyze_handler=_SpyDelegate("analyze", []),
         advance_handler=_SpyDelegate("advance", []),
-        generate_handler=_SpyDelegate("generate", []),
     )
     active = {
         "phase": "checkup_records_upload",
@@ -190,15 +180,14 @@ def test_pregnancy_plan_manage_facade_pauses_and_resumes_without_advancing() -> 
     assert "paused" not in runtime.persisted[-1]
 
 
-def test_pregnancy_plan_manage_facade_resumes_a_safety_pause_without_restarting() -> None:
+def test_pregnancy_intake_manage_facade_resumes_a_safety_pause_without_restarting() -> None:
     runtime = _WorkflowRuntime()
     start_calls: list[tuple[str, dict]] = []
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=runtime,
         start_handler=_SpyDelegate("start", start_calls),
         analyze_handler=_SpyDelegate("analyze", []),
         advance_handler=_SpyDelegate("advance", []),
-        generate_handler=_SpyDelegate("generate", []),
     )
     interrupted = {
         "phase": "checkup_records_upload",
@@ -228,14 +217,13 @@ def test_pregnancy_plan_manage_facade_resumes_a_safety_pause_without_restarting(
     assert runtime.persisted[-1]["safety_signal_ids"] == ["heavy_bleeding"]
 
 
-def test_pregnancy_plan_manage_facade_honors_an_explicit_restart() -> None:
+def test_pregnancy_intake_manage_facade_honors_an_explicit_restart() -> None:
     start_calls: list[tuple[str, dict]] = []
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=object(),
         start_handler=_SpyDelegate("start", start_calls),
         analyze_handler=_SpyDelegate("analyze", []),
         advance_handler=_SpyDelegate("advance", []),
-        generate_handler=_SpyDelegate("generate", []),
     )
 
     result = asyncio.run(
@@ -257,14 +245,13 @@ def test_pregnancy_plan_manage_facade_honors_an_explicit_restart() -> None:
     assert start_calls[0][1]["restart"] is True
 
 
-def test_pregnancy_plan_manage_facade_delegates_collecting_intake_resume_to_form_handler() -> None:
+def test_pregnancy_intake_manage_facade_delegates_collecting_intake_resume_to_form_handler() -> None:
     start_calls: list[tuple[str, dict]] = []
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=_WorkflowRuntime(),
         start_handler=_SpyDelegate("start", start_calls),
         analyze_handler=_SpyDelegate("analyze", []),
         advance_handler=_SpyDelegate("advance", []),
-        generate_handler=_SpyDelegate("generate", []),
     )
     workflow = {
         "phase": "collecting_intake",
@@ -286,14 +273,13 @@ def test_pregnancy_plan_manage_facade_delegates_collecting_intake_resume_to_form
     assert start_calls[0][1]["runtime_workflow_context"] == workflow
 
 
-def test_pregnancy_plan_manage_facade_reopens_the_form_for_basic_info_edit() -> None:
+def test_pregnancy_intake_manage_facade_reopens_the_form_for_basic_info_edit() -> None:
     calls: list[tuple[str, dict]] = []
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=object(),
         start_handler=_SpyDelegate("start", calls),
         analyze_handler=_SpyDelegate("analyze", calls),
         advance_handler=_SpyDelegate("advance", calls),
-        generate_handler=_SpyDelegate("generate", calls),
     )
     prior = {
         "phase": "final_plan_confirmation",
@@ -319,14 +305,13 @@ def test_pregnancy_plan_manage_facade_reopens_the_form_for_basic_info_edit() -> 
     assert calls[0][1]["prior_workflow_context"] == prior
 
 
-def test_pregnancy_plan_manage_facade_interrupts_an_urgent_historical_text_edit() -> None:
+def test_pregnancy_intake_manage_facade_interrupts_an_urgent_historical_text_edit() -> None:
     runtime = _WorkflowRuntime()
-    handler = PregnancyPlanWorkflowToolHandler(
+    handler = PregnancyIntakeWorkflowToolHandler(
         runtime_service=runtime,
         start_handler=_SpyDelegate("start", []),
         analyze_handler=_SpyDelegate("analyze", []),
         advance_handler=_SpyDelegate("advance", []),
-        generate_handler=_SpyDelegate("generate", []),
     )
     active = {
         "phase": "ready_to_generate",

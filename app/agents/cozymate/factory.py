@@ -22,8 +22,6 @@ from app.modules.audit.repository import AuditRepository
 from app.modules.diary.repository import DiaryRepository
 from app.modules.diary.service import DiaryService
 from app.modules.files.repository import FileRepository
-from app.modules.notifications import NotificationsService
-from app.modules.notifications.repository import NotificationsRepository
 from app.modules.plans.repository import PlansRepository
 from app.modules.plans.service import PlansService
 from app.modules.profiles.lactation_context import LactationContextService
@@ -100,11 +98,6 @@ def build_cozymate_runtime(
         repository=DiaryRepository(session),
         audit_service=AuditService(repository=audit_repository),
     )
-    notifications_service = NotificationsService(
-        repository=NotificationsRepository(session),
-        audit_service=AuditService(repository=audit_repository),
-        idempotency_service=IdempotencyService(repository=audit_repository),
-    )
     support_service = SupportTicketsService(
         repository=SupportTicketsRepository(session),
         audit_service=AuditService(repository=audit_repository),
@@ -112,7 +105,6 @@ def build_cozymate_runtime(
     )
     action_policy = cozymate_action_policy()
     action_handlers = build_cozymate_action_handlers(
-        notifications_service=notifications_service,
         plans_service=plans_service,
         profile_service=profile_service,
         lactation_context_service=lactation_context_service,

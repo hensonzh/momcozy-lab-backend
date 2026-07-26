@@ -241,7 +241,7 @@ class BirthPreparationArtifactToolHandler(_StandardToolHandler):
                 args=context.args,
                 service=self.pump_models_service,
             )
-            if self.tool_name == "hospital_bag_cart_write"
+            if self.tool_name == "hospital_bag_cart_mutate"
             else []
         )
         result = create_birth_preparation_artifact_result(
@@ -892,7 +892,7 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
                 form_artifact is not None
                 and form_artifact.status != "deleted"
                 and form_artifact.artifact_type == "form"
-                and artifact_payload.get("tool_name") == "pregnancy_plan_manage"
+                and artifact_payload.get("tool_name") == "pregnancy_intake_manage"
                 and isinstance(form, dict)
                 and form.get("id") == PREGNANCY_PLAN_INTAKE_FORM_ID
             ):
@@ -928,7 +928,7 @@ class PregnancyPlanIntakeStartToolHandler(_StandardToolHandler):
             artifact_type="form",
             schema_version="1.0",
             status="created",
-            payload={"tool_name": "pregnancy_plan_manage", "form": form},
+            payload={"tool_name": "pregnancy_intake_manage", "form": form},
             emit_event=False,
         )
         snapshot: dict[str, Any] = collecting_intake_snapshot(form_artifact_id=str(form_artifact.id))

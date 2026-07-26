@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Plan, PlanTask
+from .schedule_domain import SPECIALIZED_PLAN_TYPES
+
+
+@dataclass(frozen=True)
+class ScheduleTimelineTaskRow:
+    task: PlanTask
+    plan: Plan | None
 
 
 class PlansRepository:
@@ -69,11 +77,53 @@ class PlansRepository:
         await self.session.flush()
         return plan
 
+    async def update_plan_metadata_and_version(
+        self,
+        *,
+        plan_id: UUID,
+        owner_user_id: UUID,
+        expected_version: int,
+        updates: dict[str, Any],
+    ) -> Plan | None:
+        plan = await self.get_plan_for_owner_for_update(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+        )
+        if plan is None or plan.version != expected_version:
+            return None
+        for field, value in updates.items():
+            setattr(plan, field, value)
+        plan.version += 1
+        await self.session.flush()
+        return plan
+
     async def list_plans(self, *, owner_user_id: UUID, plan_type: str, status: str, limit: int) -> list[Plan]:
         statement = select(Plan).where(Plan.owner_user_id == owner_user_id, Plan.status == status, Plan.deleted_at.is_(None))
         if plan_type:
             statement = statement.where(Plan.plan_type == plan_type)
         statement = statement.order_by(Plan.updated_at.desc(), Plan.id.desc()).limit(limit)
+        result = await self.session.scalars(statement)
+        return list(result.all())
+
+    async def list_schedule_timeline_plans(
+        self,
+        *,
+        owner_user_id: UUID,
+        domains: tuple[str, ...],
+        status: str,
+        limit: int,
+    ) -> list[Plan]:
+        statement = (
+            select(Plan)
+            .where(
+                Plan.owner_user_id == owner_user_id,
+                Plan.status == status,
+                Plan.deleted_at.is_(None),
+                _plan_domain_condition(domains),
+            )
+            .order_by(Plan.updated_at.desc(), Plan.id.desc())
+            .limit(limit)
+        )
         result = await self.session.scalars(statement)
         return list(result.all())
 
@@ -173,6 +223,44 @@ class PlansRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
+    async def list_schedule_timeline_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+        domains: tuple[str, ...],
+        limit: int,
+    ) -> list[ScheduleTimelineTaskRow]:
+        statement = (
+            select(PlanTask, Plan)
+            .outerjoin(
+                Plan,
+                and_(
+                    Plan.id == PlanTask.plan_id,
+                    Plan.owner_user_id == owner_user_id,
+                ),
+            )
+            .where(
+                PlanTask.owner_user_id == owner_user_id,
+                PlanTask.deleted_at.is_(None),
+                PlanTask.task_date >= start_date,
+                PlanTask.task_date <= end_date,
+                or_(
+                    PlanTask.plan_id.is_(None),
+                    and_(Plan.id.is_not(None), Plan.deleted_at.is_(None)),
+                ),
+                _task_domain_condition(domains),
+            )
+            .order_by(PlanTask.task_date.asc(), PlanTask.task_time.asc(), PlanTask.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(statement)
+        return [
+            ScheduleTimelineTaskRow(task=row[0], plan=row[1])
+            for row in result.all()
+        ]
+
     async def list_tasks_for_plan(
         self,
         *,
@@ -225,32 +313,6 @@ class PlansRepository:
         )
         if for_update:
             statement = statement.with_for_update()
-        result = await self.session.scalars(statement)
-        return list(result.all())
-
-    async def list_milk_timeline_tasks(
-        self,
-        *,
-        owner_user_id: UUID,
-        start_date: date,
-        end_date: date,
-        limit: int,
-    ) -> list[PlanTask]:
-        statement = (
-            select(PlanTask)
-            .join(Plan, Plan.id == PlanTask.plan_id)
-            .where(
-                PlanTask.owner_user_id == owner_user_id,
-                PlanTask.deleted_at.is_(None),
-                PlanTask.task_date >= start_date,
-                PlanTask.task_date <= end_date,
-                Plan.owner_user_id == owner_user_id,
-                Plan.plan_type == "milk_management",
-                Plan.deleted_at.is_(None),
-            )
-            .order_by(PlanTask.task_date.asc(), PlanTask.task_time.asc(), PlanTask.id.asc())
-            .limit(limit)
-        )
         result = await self.session.scalars(statement)
         return list(result.all())
 
@@ -314,3 +376,56 @@ class PlansRepository:
 def _schedule_advisory_lock_key(*, owner_user_id: UUID, task_date: date) -> int:
     digest = hashlib.sha256(f"plan-task-schedule:{owner_user_id}:{task_date.isoformat()}".encode()).digest()
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def _plan_domain_condition(domains: tuple[str, ...]) -> Any:
+    conditions: list[Any] = []
+    if "lactation" in domains:
+        conditions.append(Plan.plan_type == "milk_management")
+    if "pregnancy" in domains:
+        conditions.append(Plan.plan_type.in_(("pregnancy", "birth_prep", "birth_journey")))
+    if "postpartum_recovery" in domains:
+        conditions.append(Plan.plan_type == "postpartum_recovery")
+    if "general" in domains:
+        conditions.append(Plan.plan_type.not_in(SPECIALIZED_PLAN_TYPES))
+    return or_(*conditions)
+
+
+def _task_domain_condition(domains: tuple[str, ...]) -> Any:
+    standalone_domain = PlanTask.payload["domain"].astext
+    conditions: list[Any] = []
+    if "lactation" in domains:
+        conditions.append(
+            or_(
+                Plan.plan_type == "milk_management",
+                and_(PlanTask.plan_id.is_(None), standalone_domain == "lactation"),
+            )
+        )
+    if "pregnancy" in domains:
+        conditions.append(
+            or_(
+                Plan.plan_type.in_(("pregnancy", "birth_prep", "birth_journey")),
+                and_(PlanTask.plan_id.is_(None), standalone_domain == "pregnancy"),
+            )
+        )
+    if "postpartum_recovery" in domains:
+        conditions.append(
+            or_(
+                Plan.plan_type == "postpartum_recovery",
+                and_(PlanTask.plan_id.is_(None), standalone_domain == "postpartum_recovery"),
+            )
+        )
+    if "general" in domains:
+        conditions.append(
+            or_(
+                Plan.plan_type.not_in(SPECIALIZED_PLAN_TYPES),
+                and_(
+                    PlanTask.plan_id.is_(None),
+                    or_(
+                        standalone_domain.is_(None),
+                        standalone_domain.not_in(("lactation", "pregnancy", "postpartum_recovery")),
+                    ),
+                ),
+            )
+        )
+    return or_(*conditions)

@@ -8,7 +8,8 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import Plan, PlanTask
-from .repository import PlansRepository
+from .repository import PlansRepository, ScheduleTimelineTaskRow
+from .schedule_domain import normalize_schedule_domains
 
 
 PLAN_CREATE_IDEMPOTENCY_SCOPE = "plans.create"
@@ -83,11 +84,75 @@ class PlansService:
             limit=limit,
         )
 
+    async def list_schedule_timeline_plans(
+        self,
+        *,
+        owner_user_id: UUID,
+        domains: tuple[str, ...],
+        status: str = "active",
+        limit: int = 20,
+    ) -> list[Plan]:
+        normalized_domains = normalize_schedule_domains(domains)
+        self._validate_limit(limit)
+        return await self.repository.list_schedule_timeline_plans(
+            owner_user_id=owner_user_id,
+            domains=normalized_domains,
+            status=status,
+            limit=limit,
+        )
+
     async def get_plan(self, *, owner_user_id: UUID, plan_id: UUID) -> Plan:
         plan = await self.repository.get_plan_for_owner(plan_id=plan_id, owner_user_id=owner_user_id)
         if plan is None:
             raise ApiError(code="not_found", message="Plan not found.", status=404)
         return plan
+
+    async def update_plan_metadata(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        expected_version: int,
+        updates: dict[str, Any],
+        request_id: str = "",
+    ) -> Plan:
+        unsupported = set(updates) - {"title", "summary"}
+        if unsupported or not updates:
+            raise ApiError(code="validation_failed", message="Unsupported plan update fields.", status=422)
+        normalized: dict[str, str] = {}
+        if "title" in updates:
+            title = str(updates["title"] or "").strip()
+            if not title or len(title) > 255:
+                raise ApiError(code="validation_failed", message="title is invalid.", status=422)
+            normalized["title"] = title
+        if "summary" in updates:
+            summary = updates["summary"]
+            if not isinstance(summary, str):
+                raise ApiError(code="validation_failed", message="summary is invalid.", status=422)
+            normalized["summary"] = summary.strip()
+        updated = await self.repository.update_plan_metadata_and_version(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+            expected_version=expected_version,
+            updates=normalized,
+        )
+        if updated is None:
+            existing = await self.repository.get_plan_for_owner(
+                plan_id=plan_id,
+                owner_user_id=owner_user_id,
+            )
+            if existing is None:
+                raise ApiError(code="not_found", message="Plan not found.", status=404)
+            raise ApiError(code="version_conflict", message="Plan version changed.", status=409)
+        await self._audit(
+            owner_user_id=owner_user_id,
+            action="plans.update",
+            resource_type="plan",
+            resource_id=str(plan_id),
+            request_id=request_id,
+            details={"fields": sorted(normalized), "version": updated.version},
+        )
+        return updated
 
     async def delete_plan(self, *, owner_user_id: UUID, plan_id: UUID, request_id: str = "") -> None:
         deleted = await self.repository.soft_delete_plan(plan_id=plan_id, owner_user_id=owner_user_id, deleted_at=_utcnow())
@@ -162,6 +227,32 @@ class PlansService:
         self._validate_limit(limit)
         return await self.repository.list_tasks(owner_user_id=owner_user_id, task_date=task_date, status=status, limit=limit)
 
+    async def list_schedule_timeline_tasks(
+        self,
+        *,
+        owner_user_id: UUID,
+        start_date: date,
+        end_date: date,
+        domains: tuple[str, ...],
+        limit: int,
+    ) -> list[ScheduleTimelineTaskRow]:
+        window_days = (end_date - start_date).days + 1
+        if window_days < 1 or window_days > 31:
+            raise ApiError(
+                code="validation_failed",
+                message="Timeline date range must contain 1 to 31 days.",
+                status=422,
+            )
+        normalized_domains = normalize_schedule_domains(domains)
+        self._validate_limit(limit)
+        return await self.repository.list_schedule_timeline_tasks(
+            owner_user_id=owner_user_id,
+            start_date=start_date,
+            end_date=end_date,
+            domains=normalized_domains,
+            limit=limit,
+        )
+
     async def get_task(self, *, owner_user_id: UUID, task_id: UUID) -> PlanTask:
         task = await self.repository.get_task_for_owner(task_id=task_id, owner_user_id=owner_user_id)
         if task is None:
@@ -206,30 +297,6 @@ class PlansService:
             limit=MAX_FUTURE_MILK_PLAN_TASKS + 1,
         )
         return _bounded_future_milk_plan_tasks(tasks)
-
-    async def list_milk_timeline_tasks(
-        self,
-        *,
-        owner_user_id: UUID,
-        start_date: date,
-        end_date: date,
-        limit: int,
-    ) -> list[PlanTask]:
-        window_days = (end_date - start_date).days + 1
-        if window_days < 1 or window_days > 31:
-            raise ApiError(
-                code="validation_failed",
-                message="Timeline date range must contain 1 to 31 days.",
-                status=422,
-            )
-        if limit < 1 or limit > 100:
-            raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
-        return await self.repository.list_milk_timeline_tasks(
-            owner_user_id=owner_user_id,
-            start_date=start_date,
-            end_date=end_date,
-            limit=limit,
-        )
 
     async def replace_future_milk_plan_tasks(
         self,
@@ -619,7 +686,16 @@ class PlansService:
             raise ApiError(code="conflict", message="Idempotency response resource is unavailable.", status=409)
         return task
 
-    async def _audit(self, *, owner_user_id: UUID, action: str, resource_type: str, resource_id: str, request_id: str) -> None:
+    async def _audit(
+        self,
+        *,
+        owner_user_id: UUID,
+        action: str,
+        resource_type: str,
+        resource_id: str,
+        request_id: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
@@ -627,6 +703,7 @@ class PlansService:
                 resource_type=resource_type,
                 resource_id=resource_id,
                 request_id=request_id,
+                details=details,
             )
 
     def _validate_limit(self, limit: int) -> None:

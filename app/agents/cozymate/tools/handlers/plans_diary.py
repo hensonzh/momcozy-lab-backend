@@ -5,14 +5,9 @@ from typing import Any
 from app.core.errors import ApiError
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agent_runtime.tools.executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandlerContext
-from app.agents.cozymate.actions.diary import PREGNANCY_DIARY_DELETE_ACTION, PREGNANCY_DIARY_SAVE_ACTION
+from app.agents.cozymate.actions.diary import DIARY_DELETE_ACTION, DIARY_SAVE_ACTION
 from app.modules.diary.service import DiaryService
-from app.agents.cozymate.actions.notifications import MILK_REMINDER_CREATE_ACTION
 from app.agents.cozymate.actions.plans import (
-    PLAN_TASK_COMPLETE_ACTION,
-    PLAN_TASK_CREATE_ACTION,
-    PLAN_TASK_DELETE_ACTION,
-    PLAN_TASK_UPDATE_ACTION,
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
 )
@@ -43,21 +38,10 @@ from .shared import (
     _failed_action_result,
     _interrupt_pregnancy_plan_for_safety,
     _limit,
-    _milk_reminder_apply_payload,
-    _milk_reminder_preview_payload,
     _optional_date_arg,
+    _optional_uuid_arg,
     _plan_delete_apply_payload,
     _plan_delete_preview_payload,
-    _plan_payload,
-    _plan_task_complete_apply_payload,
-    _plan_task_complete_preview_payload,
-    _plan_task_create_apply_payload,
-    _plan_task_create_preview_payload,
-    _plan_task_delete_apply_payload,
-    _plan_task_delete_preview_payload,
-    _plan_task_update_apply_payload,
-    _plan_task_update_fields,
-    _plan_task_update_preview_payload,
     _pregnancy_plan_action_idempotency_key,
     _pregnancy_plan_apply_payload,
     _pregnancy_plan_preview_payload,
@@ -66,59 +50,12 @@ from .shared import (
     _propose_action_reusing_idempotency,
     _require_pregnancy_plan_thread_id,
     _required_diary_content,
-    _task_payload,
     _text,
     _upsert_pregnancy_plan_workflow,
 )
 
 
-class PlansCurrentReadToolHandler(_StandardToolHandler):
-    def __init__(self, *, plans_service: PlansService) -> None:
-        self.plans_service = plans_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        owner_user_id = context.actor.user_id
-        limit = _limit(context.args.get("limit"), default=5, max_limit=20)
-        plans = await self.plans_service.list_plans(owner_user_id=owner_user_id, status="active", limit=limit)
-        tasks = await self.plans_service.list_tasks(owner_user_id=owner_user_id, limit=limit)
-        output: dict[str, Any] = {
-            "plans": [_plan_payload(plan) for plan in plans],
-            "tasks": [_task_payload(task) for task in tasks],
-            "counts": {
-                "plans": len(plans),
-                "tasks": len(tasks),
-            },
-        }
-        return output
-
-
-class PlansCalendarReadToolHandler(_StandardToolHandler):
-    def __init__(self, *, plans_service: PlansService) -> None:
-        self.plans_service = plans_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        limit = _limit(context.args.get("limit"), default=10, max_limit=50)
-        task_date = _optional_date_arg(context.args, "task_date")
-        status = _text(context.args, "status") or None
-        tasks = await self.plans_service.list_tasks(
-            owner_user_id=context.actor.user_id,
-            task_date=task_date,
-            status=status,
-            limit=limit,
-        )
-        output: dict[str, Any] = {
-            "tasks": [_task_payload(task) for task in tasks],
-            "count": len(tasks),
-            "filters": {
-                "task_date": _date_iso(task_date),
-                "status": status or "",
-                "limit": limit,
-            },
-        }
-        return output
-
-
-class PregnancyDiaryQueryToolHandler(_StandardToolHandler):
+class DiaryQueryToolHandler(_StandardToolHandler):
     def __init__(self, *, diary_service: DiaryService) -> None:
         self.diary_service = diary_service
 
@@ -131,7 +68,10 @@ class PregnancyDiaryQueryToolHandler(_StandardToolHandler):
         owner_user_id = context.actor.user_id
         entry_date = _diary_entry_date(context.args)
         try:
-            entry = await self.diary_service.get_entry(owner_user_id=owner_user_id, entry_date=entry_date)
+            entry = await self.diary_service.get_entry(
+                owner_user_id=owner_user_id,
+                entry_date=entry_date,
+            )
         except ApiError as exc:
             if exc.code != "not_found":
                 raise
@@ -175,7 +115,7 @@ class PregnancyDiaryQueryToolHandler(_StandardToolHandler):
         return output
 
 
-class PregnancyDiarySaveToolHandler(_StandardToolHandler):
+class DiarySaveToolHandler(_StandardToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
 
@@ -199,23 +139,28 @@ class PregnancyDiarySaveToolHandler(_StandardToolHandler):
             self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
-            action_type=PREGNANCY_DIARY_SAVE_ACTION,
-            target_type="pregnancy_diary_entry",
+            action_type=DIARY_SAVE_ACTION,
+            target_type="diary_entry",
             target_id=entry_date.isoformat(),
             side_effect_level="low",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:pregnancy-diary-save",
+            or f"{context.run_id}:{context.call_id}:diary-save",
         )
         output = _proposal_result(action=action, preview_payload=preview_payload)
-        output.update({"operation": operation, "entry_date": entry_date.isoformat()})
+        output.update(
+            {
+                "operation": operation,
+                "entry_date": entry_date.isoformat(),
+            }
+        )
         if output["write_succeeded"]:
             output.update({"status": "entry_saved", "side_effect_performed": True})
         return output
 
 
-class PregnancyDiaryDeleteToolHandler(_StandardToolHandler):
+class DiaryDeleteToolHandler(_StandardToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
         self.runtime_service = runtime_service
 
@@ -227,7 +172,9 @@ class PregnancyDiaryDeleteToolHandler(_StandardToolHandler):
                 "side_effect_performed": False,
                 "entry_date": entry_date.isoformat(),
             }
-        apply_payload = {"entry_date": entry_date.isoformat()}
+        apply_payload = {
+            "entry_date": entry_date.isoformat(),
+        }
         preview_payload = {
             "operation": "delete",
             "entry_date": entry_date.isoformat(),
@@ -236,30 +183,35 @@ class PregnancyDiaryDeleteToolHandler(_StandardToolHandler):
             self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
-            action_type=PREGNANCY_DIARY_DELETE_ACTION,
-            target_type="pregnancy_diary_entry",
+            action_type=DIARY_DELETE_ACTION,
+            target_type="diary_entry",
             target_id=entry_date.isoformat(),
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:pregnancy-diary-delete",
+            or f"{context.run_id}:{context.call_id}:diary-delete",
         )
         output = _proposal_result(action=action, preview_payload=preview_payload)
-        output.update({"operation": "delete", "entry_date": entry_date.isoformat()})
+        output.update(
+            {
+                "operation": "delete",
+                "entry_date": entry_date.isoformat(),
+            }
+        )
         if output["write_succeeded"]:
             output.update({"status": "entry_deleted", "side_effect_performed": True})
         return output
 
 
-class PregnancyDiaryWriteToolHandler(_OperationDispatchToolHandler):
+class DiaryMutateToolHandler(_OperationDispatchToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        save_handler = PregnancyDiarySaveToolHandler(runtime_service=runtime_service)
+        save_handler = DiarySaveToolHandler(runtime_service=runtime_service)
         super().__init__(
             operations={
                 "create": save_handler,
                 "update": save_handler,
-                "delete": PregnancyDiaryDeleteToolHandler(runtime_service=runtime_service),
+                "delete": DiaryDeleteToolHandler(runtime_service=runtime_service),
             }
         )
 
@@ -372,174 +324,33 @@ class PregnancyPlanProposeToolHandler(_StandardToolHandler):
         }
 
 
-class PlanTaskCreateProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _plan_task_create_apply_payload(context.args)
-        title = _text(apply_payload, "title")
-        if not title:
-            raise ApiError(code="validation_failed", message="title is required.", status=422)
-        preview_payload = _plan_task_create_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PLAN_TASK_CREATE_ACTION,
-            target_type="plan_task",
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-create",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class PlanTaskCompleteProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _plan_task_complete_apply_payload(context.args)
-        task_id = _text(apply_payload, "task_id")
-        if not task_id:
-            raise ApiError(code="validation_failed", message="task_id is required.", status=422)
-        preview_payload = _plan_task_complete_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PLAN_TASK_COMPLETE_ACTION,
-            target_type="plan_task",
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-complete",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class PlanTaskUpdateProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _plan_task_update_apply_payload(context.args)
-        task_id = _text(apply_payload, "task_id")
-        if not task_id:
-            raise ApiError(code="validation_failed", message="task_id is required.", status=422)
-        if not _plan_task_update_fields(apply_payload):
-            raise ApiError(code="validation_failed", message="At least one task update field is required.", status=422)
-        preview_payload = _plan_task_update_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PLAN_TASK_UPDATE_ACTION,
-            target_type="plan_task",
-            target_id=task_id,
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-update",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class PlanTaskDeleteProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _plan_task_delete_apply_payload(context.args)
-        task_id = _text(apply_payload, "task_id")
-        if not task_id:
-            raise ApiError(code="validation_failed", message="task_id is required.", status=422)
-        preview_payload = _plan_task_delete_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=PLAN_TASK_DELETE_ACTION,
-            target_type="plan_task",
-            target_id=task_id,
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-task-delete",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class PlanTaskWriteToolHandler(_StandardToolHandler):
-    _FIELD_UPDATES = frozenset({"plan_id", "task_date", "task_time", "title", "description", "payload"})
-
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.create_handler = PlanTaskCreateProposeToolHandler(runtime_service=runtime_service)
-        self.complete_handler = PlanTaskCompleteProposeToolHandler(runtime_service=runtime_service)
-        self.update_handler = PlanTaskUpdateProposeToolHandler(runtime_service=runtime_service)
-        self.delete_handler = PlanTaskDeleteProposeToolHandler(runtime_service=runtime_service)
-
-    async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
-        operation = _text(context.args, "operation")
-        if operation == "create":
-            return await self.create_handler.execute(context)
-        if operation == "delete":
-            return await self.delete_handler.execute(context)
-        if operation != "update":
-            raise ApiError(code="unsupported_operation", message="Plan task operation is not supported.", status=422)
-
-        changes_completion = "completed" in context.args
-        changes_fields = any(field in context.args for field in self._FIELD_UPDATES)
-        if changes_completion and changes_fields:
-            raise ApiError(
-                code="validation_failed",
-                message="Task completion and task field updates must be submitted separately.",
-                status=422,
-            )
-        handler = self.complete_handler if changes_completion else self.update_handler
-        return await handler.execute(context)
-
-
 class PlanDeleteProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+    def __init__(self, *, runtime_service: AgentRuntimeService, plans_service: PlansService) -> None:
         self.runtime_service = runtime_service
+        self.plans_service = plans_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         apply_payload = _plan_delete_apply_payload(context.args)
-        plan_id = _text(apply_payload, "plan_id")
-        if not plan_id:
+        raw_plan_id = _text(apply_payload, "plan_id")
+        if not raw_plan_id:
             raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
+        plan_id = _optional_uuid_arg(apply_payload, "plan_id")
+        if plan_id is None:
+            raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
+        await self.plans_service.get_plan(
+            owner_user_id=context.actor.user_id,
+            plan_id=plan_id,
+        )
         preview_payload = _plan_delete_preview_payload(apply_payload)
         action = await self.runtime_service.propose_action(
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PLAN_DELETE_ACTION,
             target_type="plan",
-            target_id=plan_id,
+            target_id=raw_plan_id,
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-delete",
-        )
-        return _proposal_result(action=action, preview_payload=preview_payload)
-
-
-class MilkReminderProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
-        self.runtime_service = runtime_service
-
-    async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
-        apply_payload = _milk_reminder_apply_payload(context.args)
-        title = _text(apply_payload, "title")
-        if not title:
-            raise ApiError(code="validation_failed", message="title is required.", status=422)
-        preview_payload = _milk_reminder_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=MILK_REMINDER_CREATE_ACTION,
-            target_type="notification",
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:milk-reminder",
         )
         return _proposal_result(action=action, preview_payload=preview_payload)

@@ -40,7 +40,7 @@ def test_workflow_context_projects_verified_pregnancy_form_without_internal_line
         }
     }
     assert projected[0]["next_transition"] == {
-        "tool": "pregnancy_plan_manage",
+        "tool": "pregnancy_intake_manage",
         "command": "submit_form",
     }
     serialized = str(projected)

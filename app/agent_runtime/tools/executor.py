@@ -167,7 +167,12 @@ class ToolExecutor:
             deferred_events = _extract_deferred_agent_events(output_payload)
             validate_tool_output(schema=contract.output_schema, value=output_payload)
             model_output = (
-                ToolResult.json(output_payload).output
+                ToolResult.json(
+                    self.policy.model_output(
+                        tool_name=tool_name,
+                        output=output_payload,
+                    )
+                ).output
                 if contract.output_schema is not None
                 else raw_result.output
             )

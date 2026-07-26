@@ -144,7 +144,7 @@ server-side action ledger. Direct explicit-intent actions use
 `user_visible=false`, so clients must not create an action card for them.
 
 Actions that still require a value-bearing preview (for example support
-handoff, milk-plan save, and reminders) emit `action.confirmation_required`.
+handoff and milk-plan save) emit `action.confirmation_required`.
 The confirm API records authorization, emits `action.confirmed`, and moves the
 same run back to `queued`; it never writes domain state in the HTTP request.
 The agent worker resumes that run, executes the action synchronously, persists
@@ -154,7 +154,8 @@ only then completes the run. The run queue is the only action-apply execution pa
 Action API responses likewise expose preview/status metadata only. They do not
 return server-side `apply_payload` or action idempotency keys.
 
-The direct `pregnancy.plan.create` tool path also emits the durable application
+The `plan_mutate` path for `operation=create, plan_type=pregnancy` executes the
+`pregnancy.plan.create` Action and also emits the durable application
 event `pregnancy_plan.changed` in the same transaction as the authoritative
 Plan and action result. Its payload is intentionally limited to
 `operation=created`, opaque `plan_id`, `plan_type=pregnancy`,
@@ -205,6 +206,18 @@ persist a stable `item_id` on every structured todo. Clients update one item via
 complete authoritative `PlanRead` with an incremented `version`. A stale write
 returns `version_conflict`; an old item without `item_id` remains read-only and
 returns `todo_item_not_found`. Clients must never match todo items by title.
+
+## Diary
+
+The persisted diary resource and model-visible agent tools are generic. Entries
+are scoped by authenticated owner and local `entry_date`; pregnancy, postpartum,
+and parenting are content semantics rather than resource types or storage
+partitions.
+
+The existing `/v1/pregnancy-diary/entries` Flutter API remains unchanged for
+this rollout. It is a compatibility adapter over the same generic daily diary
+resource, so the current frontend does not need to change. Generic app-facing
+diary routes can be added separately when the UI is ready.
 
 ## Product Assets
 

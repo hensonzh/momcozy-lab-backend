@@ -25,8 +25,8 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
         [
             scripted_sdk_response(
                 final_text="I read your profile.",
-                tool_invocations=(scripted_tool_invocation("plans_current_read", {"limit": 1}),),
-                expected_available_tools=("plans_current_read",),
+                tool_invocations=(scripted_tool_invocation("schedule_timeline_read", {"limit": 1}),),
+                expected_available_tools=("schedule_timeline_read",),
             )
         ]
     )
@@ -36,10 +36,10 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "read profile"}],
-        tool_names=("plans_current_read",),
+        tool_names=("schedule_timeline_read",),
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "additionalProperties": False, "properties": {}},
                 invoke=invoke_json,
@@ -53,7 +53,7 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
     assert invoked_args == ['{"limit": 1}']
     assert result.tool_calls == [
         {
-            "tool_name": "plans_current_read",
+            "tool_name": "schedule_timeline_read",
             "status": "completed",
             "args": {"limit": 1},
             "safe_output": {"profile": {"preferred_name": "Mai"}},
@@ -75,8 +75,8 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         [
             scripted_sdk_response(
                 final_text="I found the entry.",
-                tool_invocations=(scripted_tool_invocation("pregnancy_diary_read", {}),),
-                expected_available_tools=("pregnancy_diary_read",),
+                tool_invocations=(scripted_tool_invocation("diary_read", {}),),
+                expected_available_tools=("diary_read",),
             )
         ]
     )
@@ -86,10 +86,10 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "read my diary"}],
-        tool_names=("pregnancy_diary_read",),
+        tool_names=("diary_read",),
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_diary_read",
+                contract_name="diary_read",
                 description="Read diary.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -110,7 +110,7 @@ def test_scripted_sdk_backend_fails_on_missing_tool_contract() -> None:
         [
             scripted_sdk_response(
                 final_text="",
-                tool_invocations=(scripted_tool_invocation("plans_current_read"),),
+                tool_invocations=(scripted_tool_invocation("schedule_timeline_read"),),
             )
         ]
     )
@@ -128,7 +128,7 @@ def test_scripted_sdk_backend_fails_on_missing_tool_contract() -> None:
         asyncio.run(OpenAIResponsesRunner(backend=backend).run_reasoning(request))
 
     assert exc_info.value.code == "sdk_mock_contract_mismatch"
-    assert exc_info.value.details == {"tool_name": "plans_current_read"}
+    assert exc_info.value.details == {"tool_name": "schedule_timeline_read"}
 
 
 def test_responses_runner_preserves_sanitized_provider_error_details() -> None:

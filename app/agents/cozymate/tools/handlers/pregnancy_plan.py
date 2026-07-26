@@ -21,7 +21,6 @@ from .birth_support import (
     PregnancyPlanIntakeAnalyzeToolHandler,
     PregnancyPlanIntakeStartToolHandler,
 )
-from .plans_diary import PregnancyPlanProposeToolHandler
 from .shared import (
     _interrupt_pregnancy_plan_for_safety,
     _pregnancy_plan_urgent_result,
@@ -30,12 +29,8 @@ from .shared import (
 )
 
 
-class PregnancyPlanWorkflowToolHandler(_StandardToolHandler):
-    """One model-facing facade over the deterministic pregnancy-plan workflow.
-
-    The legacy operation handlers stay internal so plan creation continues to
-    cross the audited ``pregnancy.plan.create`` action boundary.
-    """
+class PregnancyIntakeWorkflowToolHandler(_StandardToolHandler):
+    """Model-facing facade for deterministic pregnancy-plan intake only."""
 
     def __init__(
         self,
@@ -44,13 +39,11 @@ class PregnancyPlanWorkflowToolHandler(_StandardToolHandler):
         start_handler: Any | None = None,
         analyze_handler: Any | None = None,
         advance_handler: Any | None = None,
-        generate_handler: Any | None = None,
     ) -> None:
         self.runtime_service = runtime_service
         self.start_handler = start_handler or PregnancyPlanIntakeStartToolHandler(runtime_service=runtime_service)
         self.analyze_handler = analyze_handler or PregnancyPlanIntakeAnalyzeToolHandler(runtime_service=runtime_service)
         self.advance_handler = advance_handler or PregnancyPlanIntakeAdvanceToolHandler(runtime_service=runtime_service)
-        self.generate_handler = generate_handler or PregnancyPlanProposeToolHandler(runtime_service=runtime_service)
 
     async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
         command = _text(context.args, "command")
@@ -99,8 +92,6 @@ class PregnancyPlanWorkflowToolHandler(_StandardToolHandler):
         if command == "abandon":
             delegated_args["action"] = "abandon"
             return await self.advance_handler.execute(replace(context, args=delegated_args))
-        if command == "generate_plan":
-            return await self.generate_handler.execute(replace(context, args=delegated_args))
         if command == "pause":
             try:
                 paused = pause_pregnancy_plan_workflow(_workflow(context.args))

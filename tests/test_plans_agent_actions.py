@@ -11,11 +11,12 @@ from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CREATE_ACTION,
     MILK_PLAN_CHANGED_EVENT,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
+    PLAN_DELETE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
     PLAN_TASK_DELETE_ACTION,
     PLAN_TASK_UPDATE_ACTION,
-    PLAN_DELETE_ACTION,
+    PLAN_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
     MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
@@ -24,6 +25,7 @@ from app.agents.cozymate.actions.plans import (
     PlanTaskCreateActionHandler,
     PlanTaskDeleteActionHandler,
     PlanTaskUpdateActionHandler,
+    PlanUpdateActionHandler,
     PregnancyPlanCreateActionHandler,
 )
 from app.modules.plans.models import Plan, PlanTask
@@ -294,6 +296,8 @@ def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> N
         "title": "团队会议",
         "description": "",
         "payload": {
+            "domain": "general",
+            "event_type": "calendar_event",
             "task_type": "other",
             "calendar_kind": "custom_event",
             "end_time": "12:30",
@@ -543,6 +547,41 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
     assert service.delete_plan_kwargs["plan_id"] == plan_id
 
 
+def test_plan_update_action_handler_updates_metadata_with_version_and_emits_change_event() -> None:
+    service = FakePlansService()
+    owner_user_id = uuid4()
+    service.plan.owner_user_id = owner_user_id
+    service.plan.version = 3
+    action = _action(
+        action_type=PLAN_UPDATE_ACTION,
+        target_type="plan",
+        apply_payload={
+            "plan_id": str(service.plan.id),
+            "expected_version": 3,
+            "title": "更新后的奶量计划",
+            "summary": "新的计划摘要",
+        },
+    )
+    action.actor_user_id = owner_user_id
+
+    result = asyncio.run(PlanUpdateActionHandler(service=service)(action))
+
+    assert service.update_plan_metadata_kwargs == {
+        "owner_user_id": owner_user_id,
+        "plan_id": service.plan.id,
+        "expected_version": 3,
+        "updates": {
+            "title": "更新后的奶量计划",
+            "summary": "新的计划摘要",
+        },
+        "request_id": f"agent-action:{action.id}",
+    }
+    assert result.details["version"] == 4
+    assert result.details["fields"] == ["summary", "title"]
+    assert result.application_events[0].payload["operation"] == "updated"
+    assert result.application_events[0].payload["plan_type"] == "milk_management"
+
+
 def test_pregnancy_plan_delete_emits_deleted_change_event() -> None:
     service = FakePlansService()
     service.plan.plan_type = "pregnancy"
@@ -661,6 +700,7 @@ class FakePlansService:
         self.update_task_kwargs = {}
         self.delete_task_kwargs = {}
         self.delete_plan_kwargs = {}
+        self.update_plan_metadata_kwargs = {}
         self.reschedule_milk_tasks_kwargs = {}
         self.replace_future_milk_plan_tasks_kwargs = {}
 
@@ -714,6 +754,13 @@ class FakePlansService:
 
     async def delete_plan(self, **kwargs):
         self.delete_plan_kwargs = kwargs
+
+    async def update_plan_metadata(self, **kwargs):
+        self.update_plan_metadata_kwargs = kwargs
+        for key, value in kwargs["updates"].items():
+            setattr(self.plan, key, value)
+        self.plan.version += 1
+        return self.plan
 
     async def reschedule_milk_tasks(self, **kwargs):
         self.reschedule_milk_tasks_kwargs = kwargs

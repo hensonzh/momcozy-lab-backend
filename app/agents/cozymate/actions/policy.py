@@ -24,15 +24,15 @@ COZYMATE_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="low",
         requires_confirmation=False,
     ),
-    "pregnancy_diary.entry.save": AgentActionPolicyRule(
-        action_type="pregnancy_diary.entry.save",
-        target_type="pregnancy_diary_entry",
+    "diary.entry.save": AgentActionPolicyRule(
+        action_type="diary.entry.save",
+        target_type="diary_entry",
         side_effect_level="low",
         requires_confirmation=False,
     ),
-    "pregnancy_diary.entry.delete": AgentActionPolicyRule(
-        action_type="pregnancy_diary.entry.delete",
-        target_type="pregnancy_diary_entry",
+    "diary.entry.delete": AgentActionPolicyRule(
+        action_type="diary.entry.delete",
+        target_type="diary_entry",
         side_effect_level="medium",
         requires_confirmation=False,
     ),
@@ -132,16 +132,17 @@ COZYMATE_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="medium",
         requires_confirmation=False,
     ),
+    "plans.plan.update": AgentActionPolicyRule(
+        action_type="plans.plan.update",
+        target_type="plan",
+        side_effect_level="medium",
+        requires_confirmation=False,
+    ),
     "plans.plan.delete": AgentActionPolicyRule(
         action_type="plans.plan.delete",
         target_type="plan",
         side_effect_level="medium",
         requires_confirmation=False,
-    ),
-    "notifications.milk_reminder.create": AgentActionPolicyRule(
-        action_type="notifications.milk_reminder.create",
-        target_type="notification",
-        side_effect_level="medium",
     ),
 }
 

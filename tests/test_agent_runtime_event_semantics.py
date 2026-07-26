@@ -109,26 +109,33 @@ def test_every_registered_tool_has_specific_started_copy() -> None:
 @pytest.mark.parametrize(
     ("tool_name", "safe_args", "effect_scope", "started_label", "status", "completed_label"),
     [
-        ("pregnancy_diary_read", {}, "none", "我先看看孕期日记～", "entries_read", "我看好孕期日记啦"),
         (
-            "pregnancy_diary_write",
-            {"operation": "create"},
-            "user_resource",
-            "我先帮你保存孕期日记～",
-            "entry_saved",
-            "我已经保存好孕期日记啦",
+            "diary_read",
+            {},
+            "none",
+            "我先看看日记～",
+            "entries_read",
+            "我看好日记啦",
         ),
         (
-            "pregnancy_diary_write",
+            "diary_mutate",
+            {"operation": "create"},
+            "user_resource",
+            "我先帮你保存日记～",
+            "entry_saved",
+            "我已经保存好日记啦",
+        ),
+        (
+            "diary_mutate",
             {"operation": "delete"},
             "user_resource",
-            "我先帮你删除孕期日记～",
+            "我先帮你删除日记～",
             "entry_deleted",
-            "我已经删除这条孕期日记啦",
+            "我已经删除这条日记啦",
         ),
     ],
 )
-def test_pregnancy_diary_semantics_follow_action_and_result(
+def test_diary_semantics_follow_action_and_result(
     tool_name: str,
     safe_args: dict[str, str],
     effect_scope: str,
@@ -173,7 +180,7 @@ def test_conversation_history_image_read_event_semantic_uses_history_image_copy(
 def test_tool_event_semantic_maps_confirmation_outputs() -> None:
     semantic = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="plans_task_write",
+        tool_name="schedule_timeline_mutate",
         safe_output={"requires_confirmation": True},
         effect_scope="user_resource",
     )
@@ -186,13 +193,20 @@ def test_tool_event_semantic_maps_confirmation_outputs() -> None:
 def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_plan() -> None:
     milk_started = tool_event_semantic(
         event_type="tool.started",
-        tool_name="plans_milk_plan_write",
+        tool_name="plan_mutate",
+        safe_args={"operation": "create", "plan_type": "milk_management"},
         effect_scope="user_resource",
     )
     pregnancy_completed = tool_event_semantic(
         event_type="tool.completed",
-        tool_name="pregnancy_plan_manage",
-        safe_output={"status": "card_created"},
+        tool_name="plan_mutate",
+        safe_args={"operation": "create", "plan_type": "pregnancy"},
+        safe_output={
+            "status": "created",
+            "operation": "create",
+            "plan_type": "pregnancy",
+            "write_succeeded": True,
+        },
         effect_scope="user_resource",
     )
     assert milk_started["label"] == "我先帮你整理奶量计划～"
@@ -202,8 +216,8 @@ def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_pl
 @pytest.mark.parametrize(
     ("tool_name", "status", "forbidden_success_copy"),
     [
-        ("pregnancy_diary_write", "action_failed", "已经保存好"),
-        ("pregnancy_diary_read", "entry_not_found", "已经更新好"),
+        ("diary_mutate", "action_failed", "已经保存好"),
+        ("diary_read", "entry_not_found", "已经更新好"),
     ],
 )
 def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(

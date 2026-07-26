@@ -12,6 +12,7 @@ from app.agents.cozymate.tools.result import cozymate_tool_result_from_payload
 _MAX_MEDIA_VOICE_ITEMS = 2
 _DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL = "我放了一张当前步骤的对照图，你可以边看图边完成这一步。"
 _MILK_ANALYSIS_PLAN_TTL = timedelta(minutes=30)
+_MUTATION_TOOL_SUFFIXES = ("_mutate", "_create", "_update", "_delete")
 _ToolOperationOutput = ToolResult | dict[str, Any]
 
 
@@ -22,7 +23,7 @@ class _StandardToolHandler:
             if resolved.audit_output is None:
                 raise TypeError("ToolResult returned by a tool handler requires audit_output.")
             return resolved
-        if context.tool_name.endswith("_write"):
+        if context.tool_name.endswith(_MUTATION_TOOL_SUFFIXES):
             operation = str(context.args.get("operation") or "").strip()
             if operation:
                 resolved = {"operation": operation, **resolved}

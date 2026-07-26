@@ -160,9 +160,11 @@ def test_cozymate_tool_handlers_are_grouped_by_business_capability() -> None:
         "birth_support.py",
         "devices.py",
         "milk.py",
+        "plans.py",
         "plans_diary.py",
         "pregnancy_plan.py",
         "registry.py",
+        "schedule.py",
         "shared.py",
     }
 
@@ -430,7 +432,7 @@ def test_service_skills_capture_current_domain_flow_semantics() -> None:
     lactation = registry.get("milk-management").prompt_block()
     after_sales = registry.get("device-guidance").prompt_block()
 
-    assert "pregnancy_plan_manage" in pregnancy
+    assert "pregnancy_intake_manage" in pregnancy
     assert "pregnancy_plan_intake_start" not in pregnancy
     assert "pregnancy_plan_intake_analyze" not in pregnancy
     assert "pregnancy_plan_intake_advance" not in pregnancy
@@ -440,7 +442,7 @@ def test_service_skills_capture_current_domain_flow_semantics() -> None:
     assert "产检记录" in pregnancy
     assert "还有其他需要补充的信息吗？如果没有，我就基于目前的信息开始为你制定孕期计划啦。" in pregnancy
     assert "birth_journey_plan_card_create" not in pregnancy
-    assert "plans_plan_write" in pregnancy
+    assert "plan_mutate" in pregnancy
     assert "pregnancy_plan_todo_propose" not in pregnancy
     assert "version_conflict" not in pregnancy
     assert "hospital_bag_manage" in pregnancy
@@ -450,24 +452,26 @@ def test_service_skills_capture_current_domain_flow_semantics() -> None:
     assert "labor_communication_card_create" not in pregnancy
 
     assert "追奶、稳奶还是减奶" in lactation
-    assert "lactation_timeline_read" in lactation
-    assert "lactation_timeline_write" in lactation
+    assert "schedule_timeline_read" in lactation
+    assert "schedule_timeline_mutate" in lactation
+    assert "entry_type=execution" in lactation
+    assert "milk_volume_ml" in lactation
     assert "milk_analysis_manage" in lactation
     assert "records_milk_summary_read" not in lactation
-    assert "plans_milk_plan_write" in lactation
+    assert "plan_mutate" in lactation
 
     assert "Air1 (BP334)" in after_sales
     assert "每轮给 1 个主步骤" in after_sales
     assert "devices_guidance_manage" in after_sales
     assert "devices_guidance_read" not in after_sales
     assert "devices_unboxing_advance" not in after_sales
-    assert "support_ticket_write" in after_sales
+    assert "support_ticket_create" in after_sales
 
 def test_tool_contract_registry_contains_only_model_visible_tools() -> None:
     registry = default_tool_registry()
     registered_names = set(registry.names_for_sdk())
-    support_ticket = registry.get("support_ticket_write")
-    ibclc_consult = registry.get("ibclc_consult_card_write")
+    support_ticket = registry.get("support_ticket_create")
+    ibclc_consult = registry.get("ibclc_consult_card_create")
     milk_analysis = registry.get("milk_analysis_manage")
 
     assert registered_names.isdisjoint(
@@ -499,8 +503,8 @@ def test_tool_contract_registry_contains_only_model_visible_tools() -> None:
             "records_growth_record_delete_propose",
         }
     )
-    assert "plans_milk_plan_write" in registered_names
-    assert "pregnancy_plan_manage" in registered_names
+    assert {"plan_read", "plan_mutate"} <= registered_names
+    assert "pregnancy_intake_manage" in registered_names
     assert "hospital_bag_manage" in registered_names
     assert {
         "pregnancy_plan_propose",
@@ -544,11 +548,11 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
 @pytest.mark.parametrize(
     ("tool_name", "effect_scope", "action_types"),
     [
-        ("profile_write", "user_resource", ("profile.update",)),
+        ("profile_update", "user_resource", ("profile.update",)),
         ("profile_read", "none", ()),
-        ("lactation_timeline_read", "none", ()),
+        ("schedule_timeline_read", "none", ()),
         (
-            "lactation_timeline_write",
+            "schedule_timeline_mutate",
             "user_resource",
             (
                 "plans.task.create",
@@ -568,22 +572,27 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
             ),
         ),
         ("milk_analysis_manage", "agent_internal", ()),
+        ("plan_read", "none", ()),
         (
-            "plans_task_write",
+            "plan_mutate",
             "user_resource",
-            ("plans.task.create", "plans.task.complete", "plans.task.update", "plans.task.delete"),
+            (
+                "plans.milk_plan.create",
+                "pregnancy.plan.create",
+                "plans.plan.update",
+                "plans.plan.delete",
+            ),
         ),
-        ("plans_milk_plan_write", "user_resource", ("plans.milk_plan.create",)),
-        ("pregnancy_plan_manage", "user_resource", ("pregnancy.plan.create",)),
+        ("pregnancy_intake_manage", "agent_internal", ()),
         (
-            "pregnancy_diary_write",
+            "diary_mutate",
             "user_resource",
-            ("pregnancy_diary.entry.save", "pregnancy_diary.entry.delete"),
+            ("diary.entry.save", "diary.entry.delete"),
         ),
         ("devices_guidance_manage", "agent_internal", ()),
         ("pump_models_read", "none", ()),
         ("hospital_bag_manage", "agent_internal", ()),
-        ("support_ticket_write", "agent_internal", ()),
+        ("support_ticket_create", "agent_internal", ()),
     ],
 )
 def test_model_tool_contracts_keep_effect_boundary(
@@ -602,10 +611,10 @@ def test_all_tool_contracts_are_available_for_direct_responses_exposure() -> Non
     device_tool_names = {
         "devices_guidance_manage",
         "pump_models_read",
-        "support_ticket_write",
+        "support_ticket_create",
     }
 
-    assert len(registry.names_for_sdk()) == 21
+    assert len(registry.names_for_sdk()) == 17
     assert device_tool_names <= set(registry.names_for_sdk())
     assert {
         "load_service_skill",
@@ -658,32 +667,29 @@ def test_responses_tool_parameters_match_registered_input_schemas() -> None:
 def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     registry = default_tool_registry()
     profile_schema = registry.get("profile_read").input_schema
-    profile_write_schema = registry.get("profile_write").input_schema
-    support_schema = registry.get("support_ticket_write").input_schema
-    timeline_manage_schema = registry.get("lactation_timeline_write").input_schema
+    profile_update_schema = registry.get("profile_update").input_schema
+    support_schema = registry.get("support_ticket_create").input_schema
+    timeline_manage_schema = registry.get("schedule_timeline_mutate").input_schema
     milk_analysis_schema = registry.get("milk_analysis_manage").input_schema
-    plans_schema = registry.get("plans_current_read").input_schema
-    calendar_schema = registry.get("plans_calendar_read").input_schema
-    diary_query_schema = registry.get("pregnancy_diary_read").input_schema
-    diary_save_schema = registry.get("pregnancy_diary_write").input_schema
-    diary_delete_schema = registry.get("pregnancy_diary_write").input_schema
+    plans_schema = registry.get("schedule_timeline_read").input_schema
+    diary_query_schema = registry.get("diary_read").input_schema
+    diary_save_schema = registry.get("diary_mutate").input_schema
+    diary_delete_schema = registry.get("diary_mutate").input_schema
     device_guidance_schema = registry.get("devices_guidance_manage").input_schema
     history_image_contract = registry.get("conversation_history_image_read")
     history_image_schema = history_image_contract.input_schema
-    milk_plan_schema = registry.get("plans_milk_plan_write").input_schema
-    pregnancy_plan_schema = registry.get("pregnancy_plan_manage").input_schema
-    task_create_schema = registry.get("plans_task_write").input_schema
-    task_complete_schema = registry.get("plans_task_write").input_schema
-    task_update_schema = registry.get("plans_task_write").input_schema
-    task_delete_schema = registry.get("plans_task_write").input_schema
-    plan_delete_schema = registry.get("plans_plan_write").input_schema
-    plan_delete_description = registry.get("plans_plan_write").description
-    milk_reminder_schema = registry.get("notifications_milk_reminder_write").input_schema
+    plan_read_schema = registry.get("plan_read").input_schema
+    plan_mutate_schema = registry.get("plan_mutate").input_schema
+    pregnancy_intake_schema = registry.get("pregnancy_intake_manage").input_schema
+    task_create_schema = registry.get("schedule_timeline_mutate").input_schema
+    task_complete_schema = registry.get("schedule_timeline_mutate").input_schema
+    task_update_schema = registry.get("schedule_timeline_mutate").input_schema
+    task_delete_schema = registry.get("schedule_timeline_mutate").input_schema
     hospital_bag_manage_schema = registry.get("hospital_bag_manage").input_schema
-    hospital_bag_cart_schema = registry.get("hospital_bag_cart_write").input_schema
+    hospital_bag_cart_schema = registry.get("hospital_bag_cart_mutate").input_schema
     pump_models_contract = registry.get("pump_models_read")
     pump_models_schema = pump_models_contract.input_schema
-    ibclc_schema = registry.get("ibclc_consult_card_write").input_schema
+    ibclc_schema = registry.get("ibclc_consult_card_create").input_schema
 
     assert profile_schema == {
         "type": "object",
@@ -700,11 +706,11 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
             }
         },
     }
-    assert profile_write_schema["additionalProperties"] is False
-    assert profile_write_schema["required"] == ["operation"]
-    assert profile_write_schema["minProperties"] == 2
-    user_update_schema = profile_write_schema["properties"]["mother"]
-    infant_update_schema = profile_write_schema["properties"]["infants"]["items"]
+    assert profile_update_schema["additionalProperties"] is False
+    assert profile_update_schema["required"] == ["operation"]
+    assert profile_update_schema["minProperties"] == 2
+    user_update_schema = profile_update_schema["properties"]["mother"]
+    infant_update_schema = profile_update_schema["properties"]["infants"]["items"]
     assert user_update_schema["properties"]["preferred_name"]["anyOf"][0]["maxLength"] == 120
     assert user_update_schema["properties"]["age"]["anyOf"][0]["minimum"] == 12
     assert user_update_schema["properties"]["age"]["anyOf"][0]["maximum"] == 70
@@ -740,7 +746,8 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "answer",
         "evaluate",
     ]
-    assert timeline_manage_schema["required"] == ["operation", "item_type"]
+    assert timeline_manage_schema["required"] == ["operation", "entry_type"]
+    assert timeline_manage_schema["properties"]["entry_type"]["enum"] == ["schedule", "execution"]
     assert timeline_manage_schema["properties"]["operation"]["enum"] == [
         "create",
         "update",
@@ -749,12 +756,19 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "reschedule",
     ]
     assert plans_schema["additionalProperties"] is False
-    assert plans_schema["properties"]["limit"]["maximum"] == 20
-    assert calendar_schema["properties"]["task_date"]["maxLength"] == 20
-    assert calendar_schema["properties"]["status"]["maxLength"] == 32
+    assert plans_schema["properties"]["limit"]["maximum"] == 50
+    assert plans_schema["properties"]["domains"]["items"]["enum"] == [
+        "lactation",
+        "pregnancy",
+        "postpartum_recovery",
+        "general",
+    ]
     assert diary_query_schema["additionalProperties"] is False
     assert diary_query_schema["properties"]["limit"]["maximum"] == 30
+    assert diary_query_schema.get("required", []) == []
     assert diary_save_schema["required"] == ["operation"]
+    assert "diary_type" not in diary_query_schema["properties"]
+    assert "diary_type" not in diary_save_schema["properties"]
     assert diary_save_schema["properties"]["operation"]["enum"] == ["create", "update", "delete"]
     assert diary_save_schema["properties"]["content"]["maxLength"] == 5000
     assert diary_delete_schema["properties"]["confirmation_evidence"]["maxLength"] == 500
@@ -792,24 +806,31 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "将当前可见对话历史中由智能体回复展示过的一张图片重新加载到本轮模型上下文。"
         "当用户追问此前智能体回复里的某张图片内容，需要基于该历史图片进行视觉理解时调用。"
     )
-    assert milk_plan_schema["additionalProperties"] is False
-    assert milk_plan_schema["required"] == ["operation", "direction"]
-    assert "payload" not in milk_plan_schema["properties"]
-    assert "title" not in milk_plan_schema["properties"]
-    assert "summary" not in milk_plan_schema["properties"]
-    assert "tasks" not in milk_plan_schema["properties"]
-    assert milk_plan_schema["properties"]["days"]["maximum"] == 30
-    assert milk_plan_schema["properties"]["preferred_pumping_times"]["maxItems"] == 10
-    assert milk_plan_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease"]
-    assert milk_plan_schema["properties"]["calendar_write_strategy"]["enum"] == [
+    assert plan_read_schema["additionalProperties"] is False
+    assert plan_read_schema["required"] == ["mode"]
+    assert plan_read_schema["properties"]["mode"]["enum"] == ["list", "detail"]
+    assert plan_read_schema["properties"]["plan_id"]["format"] == "uuid"
+    assert plan_read_schema["properties"]["include_content"]["type"] == "boolean"
+    assert plan_mutate_schema["additionalProperties"] is False
+    assert plan_mutate_schema["required"] == ["operation"]
+    assert plan_mutate_schema["properties"]["operation"]["enum"] == ["create", "update", "delete"]
+    assert "payload" not in plan_mutate_schema["properties"]
+    assert "tasks" not in plan_mutate_schema["properties"]
+    assert plan_mutate_schema["properties"]["days"]["maximum"] == 30
+    assert plan_mutate_schema["properties"]["preferred_pumping_times"]["maxItems"] == 10
+    assert plan_mutate_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease"]
+    assert plan_mutate_schema["properties"]["calendar_write_strategy"]["enum"] == [
         "append",
         "replace_future_plan_tasks",
     ]
-    assert pregnancy_plan_schema["additionalProperties"] is False
-    assert pregnancy_plan_schema["required"] == ["command"]
-    assert "title" not in pregnancy_plan_schema["properties"]
-    assert "payload" not in pregnancy_plan_schema["properties"]
-    assert set(pregnancy_plan_schema["properties"]["command"]["enum"]) == {
+    assert plan_mutate_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
+    assert plan_mutate_schema["properties"]["expected_version"]["minimum"] == 1
+    assert plan_mutate_schema["properties"]["plan_id"]["format"] == "uuid"
+    assert pregnancy_intake_schema["additionalProperties"] is False
+    assert pregnancy_intake_schema["required"] == ["command"]
+    assert "title" not in pregnancy_intake_schema["properties"]
+    assert "payload" not in pregnancy_intake_schema["properties"]
+    assert set(pregnancy_intake_schema["properties"]["command"]["enum"]) == {
         "start_or_resume",
         "submit_form",
         "answer_current",
@@ -817,32 +838,29 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         "pause",
         "resume",
         "abandon",
-        "generate_plan",
     }
-    assert pregnancy_plan_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
-    assert pregnancy_plan_schema["properties"]["additional_info"]["maxLength"] == 2000
-    assert pregnancy_plan_schema["properties"]["restart"]["type"] == "boolean"
-    assert "topic" not in pregnancy_plan_schema["properties"]
+    assert pregnancy_intake_schema["properties"]["restart"]["type"] == "boolean"
+    assert "topic" not in pregnancy_intake_schema["properties"]
     assert "expected_step" not in registry.get("devices_guidance_manage").input_schema["properties"]
-    assert "runtime_workflow_context" not in pregnancy_plan_schema["properties"]
-    assert "runtime_checkup_attachment_count" not in pregnancy_plan_schema["properties"]
+    assert "runtime_workflow_context" not in pregnancy_intake_schema["properties"]
+    assert "runtime_checkup_attachment_count" not in pregnancy_intake_schema["properties"]
     assert task_create_schema["additionalProperties"] is False
-    assert task_create_schema["required"] == ["operation"]
-    assert task_create_schema["properties"]["operation"]["enum"] == ["create", "update", "delete"]
+    assert task_create_schema["required"] == ["operation", "entry_type"]
+    assert task_create_schema["properties"]["operation"]["enum"] == [
+        "create",
+        "update",
+        "delete",
+        "set_status",
+        "reschedule",
+    ]
     assert task_create_schema["properties"]["task_date"]["type"] == "string"
     assert task_complete_schema["additionalProperties"] is False
-    assert task_complete_schema["required"] == ["operation"]
+    assert task_complete_schema["required"] == ["operation", "entry_type"]
     assert task_complete_schema["properties"]["completed"]["type"] == "boolean"
-    assert task_update_schema["required"] == ["operation"]
+    assert task_update_schema["required"] == ["operation", "entry_type"]
     assert task_update_schema["properties"]["task_date"]["type"] == "string"
-    assert task_delete_schema["required"] == ["operation"]
-    assert plan_delete_schema["required"] == ["operation", "plan_id"]
-    assert "用户当前已明确表达删除意图" in plan_delete_description
-    assert "不要再追加口头确认或通用确认卡" in plan_delete_description
-    assert "skill 已完成口头确认" not in plan_delete_description
-    assert milk_reminder_schema["additionalProperties"] is False
-    assert milk_reminder_schema["required"] == ["operation", "title"]
-    assert milk_reminder_schema["properties"]["remind_at"]["type"] == "string"
+    assert task_delete_schema["required"] == ["operation", "entry_type"]
+    assert plan_mutate_schema["properties"]["reason"]["maxLength"] == 500
     assert timeline_manage_schema["properties"]["calendar_events"]["maxItems"] == 21
     assert timeline_manage_schema["properties"]["volume_ml"]["type"] == "number"
     assert timeline_manage_schema["properties"]["milk_volume_ml"]["type"] == "number"
@@ -987,13 +1005,13 @@ def test_sdk_runner_uses_injected_backend_and_never_legacy_loop() -> None:
         actor_user_id="user_1",
         instructions="Be concise.",
         model_input=[{"role": "user", "content": "hello"}],
-        tool_names=("plans_current_read",),
+        tool_names=("schedule_timeline_read",),
     )
 
     result = asyncio.run(OpenAIResponsesRunner(backend=FakeSdkBackend()).run_reasoning(request))
 
     assert result.final_text == "hello"
-    assert result.tool_calls == [{"tool_name": "plans_current_read"}]
+    assert result.tool_calls == [{"tool_name": "schedule_timeline_read"}]
 
 
 def test_sdk_request_renders_all_tools_as_top_level_function_payloads() -> None:
@@ -1006,10 +1024,10 @@ def test_sdk_request_renders_all_tools_as_top_level_function_payloads() -> None:
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "milk summary"}],
-        tool_names=("plans_current_read", "milk_analysis_manage", "lactation_timeline_write"),
+        tool_names=("schedule_timeline_read", "milk_analysis_manage", "schedule_timeline_mutate"),
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="读取个人资料。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -1021,7 +1039,7 @@ def test_sdk_request_renders_all_tools_as_top_level_function_payloads() -> None:
                 invoke=invoke_json,
             ),
             SdkToolDefinition(
-                contract_name="lactation_timeline_write",
+                contract_name="schedule_timeline_mutate",
                 description="提出喂养记录草稿。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -1034,7 +1052,7 @@ def test_sdk_request_renders_all_tools_as_top_level_function_payloads() -> None:
     assert payload == [
         {
             "type": "function",
-            "name": "plans_current_read",
+            "name": "schedule_timeline_read",
             "description": "读取个人资料。",
             "parameters": {"type": "object", "properties": {}},
         },
@@ -1046,7 +1064,7 @@ def test_sdk_request_renders_all_tools_as_top_level_function_payloads() -> None:
         },
         {
             "type": "function",
-            "name": "lactation_timeline_write",
+            "name": "schedule_timeline_mutate",
             "description": "提出喂养记录草稿。",
             "parameters": {"type": "object", "properties": {}},
         },
@@ -1065,7 +1083,7 @@ def test_sdk_runner_calls_direct_top_level_tool(monkeypatch: pytest.MonkeyPatch)
                 output=[
                     {
                         "type": "function_call",
-                        "name": "lactation_timeline_write",
+                        "name": "schedule_timeline_mutate",
                         "call_id": "call_1",
                         "arguments": '{"volume_ml":80}',
                     },
@@ -1096,10 +1114,10 @@ def test_sdk_runner_calls_direct_top_level_tool(monkeypatch: pytest.MonkeyPatch)
         actor_user_id="user_1",
         instructions="Use tools.",
         model_input=[{"role": "user", "content": "帮我记录一次瓶喂 80ml"}],
-        tool_names=("lactation_timeline_write",),
+        tool_names=("schedule_timeline_mutate",),
         tools=(
             SdkToolDefinition(
-                contract_name="lactation_timeline_write",
+                contract_name="schedule_timeline_mutate",
                 description="提出喂养记录草稿。",
                 params_json_schema={"type": "object", "properties": {"volume_ml": {"type": "number"}}},
                 invoke=invoke_json,
@@ -1118,7 +1136,7 @@ def test_sdk_runner_calls_direct_top_level_tool(monkeypatch: pytest.MonkeyPatch)
     assert result.final_text == "记录草稿已准备好。"
     assert result.tool_calls == [
         {
-            "tool_name": "lactation_timeline_write",
+            "tool_name": "schedule_timeline_mutate",
             "status": "completed",
             "args": {"volume_ml": 80},
             "safe_output": {"ok": True},
@@ -1239,7 +1257,7 @@ def test_responses_runner_appends_tool_result_as_function_call_output(monkeypatc
                 output=[
                     {
                         "type": "function_call",
-                        "name": "plans_current_read",
+                        "name": "schedule_timeline_read",
                         "call_id": "call_1",
                         "arguments": "{}",
                     }
@@ -1264,7 +1282,7 @@ def test_responses_runner_appends_tool_result_as_function_call_output(monkeypatc
         model_input=[{"role": "user", "content": "帮我看看奶量"}],
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="读取个人资料。",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1294,7 +1312,7 @@ def test_responses_runner_returns_recoverable_tool_errors_to_the_model(monkeypat
                 output=[
                     {
                         "type": "function_call",
-                        "name": "pregnancy_plan_manage",
+                        "name": "pregnancy_intake_manage",
                         "call_id": "call_1",
                         "arguments": '{"command":"answer_current"}',
                     }
@@ -1319,7 +1337,7 @@ def test_responses_runner_returns_recoverable_tool_errors_to_the_model(monkeypat
         model_input=[{"role": "user", "content": "还没确认"}],
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_plan_manage",
+                contract_name="pregnancy_intake_manage",
                 description="Advance the active intake.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1352,7 +1370,7 @@ def test_responses_runner_keeps_tool_commit_failures_fatal(monkeypatch: pytest.M
                 output=[
                     {
                         "type": "function_call",
-                        "name": "pregnancy_plan_manage",
+                        "name": "pregnancy_intake_manage",
                         "call_id": "call_1",
                         "arguments": '{"command":"answer_current"}',
                     }
@@ -1377,7 +1395,7 @@ def test_responses_runner_keeps_tool_commit_failures_fatal(monkeypatch: pytest.M
         model_input=[{"role": "user", "content": "继续"}],
         tools=(
             SdkToolDefinition(
-                contract_name="pregnancy_plan_manage",
+                contract_name="pregnancy_intake_manage",
                 description="Advance the active intake.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1471,7 +1489,7 @@ def test_responses_runner_persists_loop_items_in_provider_order(monkeypatch: pyt
                     {
                         "type": "function_call",
                         "id": "fc_1",
-                        "name": "plans_current_read",
+                        "name": "schedule_timeline_read",
                         "call_id": "call_1",
                         "arguments": "{}",
                     }
@@ -1510,7 +1528,7 @@ def test_responses_runner_persists_loop_items_in_provider_order(monkeypatch: pyt
         on_context_items=persist,
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke,
@@ -1547,7 +1565,7 @@ def test_responses_runner_preserves_reloaded_tool_items_in_api_input(monkeypatch
         {
             "type": "function_call",
             "id": "fc_profile_1",
-            "name": "plans_current_read",
+            "name": "schedule_timeline_read",
             "call_id": "call_profile_1",
             "arguments": "{}",
         },
@@ -1899,7 +1917,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
         output=[
             {
                 "type": "function_call",
-                "name": "plans_current_read",
+                "name": "schedule_timeline_read",
                 "call_id": "call_1",
                 "arguments": '{"owner_user_id":"user_1"}',
             }
@@ -1948,7 +1966,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
         model_input=[{"role": "user", "content": "保存我的资料"}],
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -1963,7 +1981,7 @@ def test_sdk_runner_streams_text_without_changing_tools_between_tool_turns(monke
     assert result.final_text == "保存好了。"
     assert result.tool_calls == [
         {
-            "tool_name": "plans_current_read",
+            "tool_name": "schedule_timeline_read",
             "status": "completed",
             "args": {"owner_user_id": "user_1"},
             "safe_output": {"args": {"owner_user_id": "user_1"}, "status": "ok"},
@@ -1990,7 +2008,7 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
                 type="function_call",
                 id="fc_1",
                 call_id="call_1",
-                name="plans_current_read",
+                name="schedule_timeline_read",
                 arguments='{"owner_user_id":"user_1"}',
                 parsed_arguments={"owner_user_id": "user_1"},
                 status="completed",
@@ -2017,7 +2035,7 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
         model_input=[{"role": "user", "content": "读取资料"}],
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2033,7 +2051,7 @@ def test_responses_runner_strips_parsed_function_arguments_before_next_tool_turn
         "type": "function_call",
         "id": "fc_1",
         "call_id": "call_1",
-        "name": "plans_current_read",
+        "name": "schedule_timeline_read",
         "arguments": '{"owner_user_id":"user_1"}',
         "status": "completed",
     }
@@ -2049,7 +2067,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         output=[
             {
                 "type": "function_call",
-                "name": "profile_write",
+                "name": "profile_update",
                 "call_id": "call_1",
                 "arguments": '{"preferred_name":"Mai"}',
             }
@@ -2106,7 +2124,7 @@ def test_sdk_runner_streams_each_turn_before_response_completed(monkeypatch: pyt
         model_input=[{"role": "user", "content": "给我三个下一步"}],
         tools=(
             SdkToolDefinition(
-                contract_name="profile_write",
+                contract_name="profile_update",
                 description="Update profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2149,7 +2167,7 @@ def test_sdk_runner_uses_streamed_text_when_response_completed_event_is_missing(
         model_input=[{"role": "user", "content": "hello"}],
         tools=(
             SdkToolDefinition(
-                contract_name="plans_current_read",
+                contract_name="schedule_timeline_read",
                 description="Read profile.",
                 params_json_schema={"type": "object", "properties": {}},
                 invoke=invoke_json,
@@ -2190,7 +2208,7 @@ def test_sdk_runner_records_backend_metrics() -> None:
         actor_user_id="user_1",
         instructions="Be concise.",
         model_input=[{"role": "user", "content": "hello"}],
-        tool_names=("plans_current_read",),
+        tool_names=("schedule_timeline_read",),
     )
 
     asyncio.run(OpenAIResponsesRunner(backend=FakeSdkBackend(), metrics=metrics).run_reasoning(request))

@@ -457,15 +457,17 @@ class CozymateAgentExecutor:
             if key in command_context
         }
         tool_calls: list[dict[str, Any]] = []
+        tool_name, tool_args = _structured_pregnancy_plan_tool_call(args)
         safe_output = await self._execute_structured_pregnancy_plan_tool(
             run=run,
-            args=args,
+            tool_name=tool_name,
+            args=tool_args,
         )
         tool_calls.append(
             {
-                "tool_name": "pregnancy_plan_manage",
+                "tool_name": tool_name,
                 "status": "completed",
-                "args": args,
+                "args": tool_args,
                 "safe_output": safe_output,
             }
         )
@@ -483,16 +485,18 @@ class CozymateAgentExecutor:
             }
         ):
             generation_args = {
-                "command": "generate_plan",
+                "operation": "create",
+                "plan_type": "pregnancy",
                 **({"scope": args["scope"]} if "scope" in args else {}),
             }
             safe_output = await self._execute_structured_pregnancy_plan_tool(
                 run=run,
+                tool_name="plan_mutate",
                 args=generation_args,
             )
             tool_calls.append(
                 {
-                    "tool_name": "pregnancy_plan_manage",
+                    "tool_name": "plan_mutate",
                     "status": "completed",
                     "args": generation_args,
                     "safe_output": safe_output,
@@ -507,6 +511,7 @@ class CozymateAgentExecutor:
         self,
         *,
         run: AgentRun,
+        tool_name: str,
         args: dict[str, Any],
     ) -> dict[str, Any]:
         guarded_types = self._turn_state(run.id).guarded_workflow_types
@@ -514,7 +519,7 @@ class CozymateAgentExecutor:
             guarded_types.append(PREGNANCY_PLAN_WORKFLOW_TYPE)
         trusted_args = await self._trusted_tool_args(
             run=run,
-            contract_name="pregnancy_plan_manage",
+            contract_name=tool_name,
             args=args,
         )
         trusted_args = {
@@ -524,7 +529,7 @@ class CozymateAgentExecutor:
         execution = await self.tool_executor.execute(
             actor=_run_actor(run),
             run_id=run.id,
-            tool_name="pregnancy_plan_manage",
+            tool_name=tool_name,
             call_id=f"ui-pregnancy-plan-{uuid4().hex}",
             args=args,
             trusted_args=trusted_args,
@@ -1149,7 +1154,7 @@ class CozymateAgentExecutor:
                     if exc.code in {"missing_workflow_reply_context", "stale_workflow_step"}:
                         self._turn_state(run.id).workflow_reply_recovery_type = guarded_type
                     raise
-        if contract_name in {"pregnancy_diary_read", "pregnancy_diary_write"}:
+        if contract_name in {"diary_read", "diary_mutate"}:
             local_date = self._turn_state(run.id).local_date
             diary_trusted_args: dict[str, Any] = {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text
@@ -1162,20 +1167,40 @@ class CozymateAgentExecutor:
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name in {"profile_read", "lactation_timeline_read"}:
+        if contract_name in {"profile_read", "schedule_timeline_read"}:
             local_date = self._turn_state(run.id).local_date
             read_context_args = {"runtime_timezone": self._turn_state(run.id).timezone}
             if local_date:
                 read_context_args["runtime_local_date"] = local_date
             return read_context_args
-        if contract_name == "plans_milk_plan_write":
-            return {
+        if contract_name == "plan_mutate":
+            plan_trusted_args: dict[str, Any] = {
                 "runtime_local_date": self._turn_state(run.id).local_date,
                 "runtime_timezone": self._turn_state(run.id).timezone,
             }
-        if contract_name == "support_ticket_write":
+            if (
+                _text(args or {}, "operation") == "create"
+                and _text(args or {}, "plan_type") == "pregnancy"
+            ):
+                workflow = await self._latest_pregnancy_plan_workflow(run=run)
+                plan_trusted_args.update(
+                    {
+                        "runtime_plan_context": _pregnancy_workflow_runtime_context(
+                            workflow=workflow
+                        ),
+                        "runtime_workflow_context": _dict(workflow, "state"),
+                        "trusted_current_user_text": self._turn_state(
+                            run.id
+                        ).current_user_text,
+                        "runtime_checkup_attachment_count": self._turn_state(
+                            run.id
+                        ).checkup_attachment_count,
+                    }
+                )
+            return plan_trusted_args
+        if contract_name == "support_ticket_create":
             return {"trusted_current_user_text": self._turn_state(run.id).current_user_text}
-        if contract_name == "pregnancy_plan_manage":
+        if contract_name == "pregnancy_intake_manage":
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             trusted_args: dict[str, Any] = {
                 "runtime_plan_context": _pregnancy_workflow_runtime_context(workflow=workflow),
@@ -1264,13 +1289,13 @@ class CozymateAgentExecutor:
                     verified_form_data
                 )
             return hospital_bag_trusted_args
-        if contract_name == "hospital_bag_cart_write":
+        if contract_name == "hospital_bag_cart_mutate":
             client_groups = self._turn_state(run.id).hospital_bag_cart_groups
             if client_groups is not None:
                 return {"groups": client_groups}
             groups = await self._latest_hospital_bag_cart_groups(run=run)
             return {"groups": groups} if groups is not None else {}
-        if contract_name == "ibclc_consult_card_write":
+        if contract_name == "ibclc_consult_card_create":
             return {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "trusted_previous_assistant_text": self._turn_state(run.id).previous_assistant_text,
@@ -1755,7 +1780,7 @@ def _elapsed_ms(started_at: float) -> float:
 
 def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> bool:
     return any(
-        _text(tool_call, "tool_name") == "pregnancy_plan_manage"
+        _text(tool_call, "tool_name") == "pregnancy_intake_manage"
         and _text(_dict(tool_call, "safe_args"), "command") == "submit_form"
         and _text(_dict(tool_call, "safe_output"), "status") in {"intake_analyzed", "intake_in_progress"}
         for tool_call in tool_calls
@@ -1965,6 +1990,21 @@ def _pregnancy_workflow_command_final_text(safe_output: dict[str, Any]) -> str:
     if _text(current_step, "id") == "generate_plan":
         return "信息已经确认，可以开始生成孕期计划。"
     return "孕期计划已更新，请按下方当前步骤继续。"
+
+
+def _structured_pregnancy_plan_tool_call(
+    args: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    if _text(args, "command") != "generate_plan":
+        return "pregnancy_intake_manage", args
+    return (
+        "plan_mutate",
+        {
+            "operation": "create",
+            "plan_type": "pregnancy",
+            **({"scope": args["scope"]} if "scope" in args else {}),
+        },
+    )
 
 
 def _current_hospital_bag_cart_groups(message: AgentMessage) -> list[dict[str, Any]] | None:

@@ -68,10 +68,10 @@ def test_workflow_reply_guard_accepts_the_current_cursor() -> None:
 @pytest.mark.parametrize(
     ("tool_name", "args", "workflow_type"),
     [
-        ("pregnancy_plan_manage", {"command": "answer_current"}, "pregnancy_plan"),
-        ("pregnancy_plan_manage", {"command": "edit_answer"}, "pregnancy_plan"),
-        ("pregnancy_plan_manage", {"command": "start_or_resume"}, None),
-        ("pregnancy_plan_manage", {"command": "resume"}, None),
+        ("pregnancy_intake_manage", {"command": "answer_current"}, "pregnancy_plan"),
+        ("pregnancy_intake_manage", {"command": "edit_answer"}, "pregnancy_plan"),
+        ("pregnancy_intake_manage", {"command": "start_or_resume"}, None),
+        ("pregnancy_intake_manage", {"command": "resume"}, None),
         ("milk_analysis_manage", {"operation": "answer"}, "milk_analysis"),
         ("milk_analysis_manage", {"operation": "start_or_resume"}, None),
         ("milk_analysis_manage", {"operation": "evaluate"}, None),

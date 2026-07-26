@@ -30,6 +30,7 @@ PLAN_TASK_CREATE_ACTION = "plans.task.create"
 PLAN_TASK_COMPLETE_ACTION = "plans.task.complete"
 PLAN_TASK_UPDATE_ACTION = "plans.task.update"
 PLAN_TASK_DELETE_ACTION = "plans.task.delete"
+PLAN_UPDATE_ACTION = "plans.plan.update"
 PLAN_DELETE_ACTION = "plans.plan.delete"
 
 
@@ -176,6 +177,8 @@ class MilkScheduleRescheduleActionHandler:
                         title=str(event["title"]),
                         description=str(event.get("description") or ""),
                         payload={
+                            "domain": "general",
+                            "event_type": "calendar_event",
                             "task_type": "other",
                             "calendar_kind": "custom_event",
                             "end_time": str(event["end_time"]),
@@ -496,6 +499,74 @@ class PlanDeleteActionHandler:
             resource_type="plan",
             resource_id=str(plan_id),
             details={
+                "agent_action_id": str(action.id),
+                "agent_run_id": str(action.run_id),
+            },
+            application_events=application_events,
+        )
+
+
+class PlanUpdateActionHandler:
+    def __init__(self, *, service: PlansService) -> None:
+        self.service = service
+
+    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
+        payload = dict(action.apply_payload or {})
+        plan_id = _required_uuid(payload, "plan_id", "missing_plan_id", "invalid_plan_id")
+        expected_version = payload.get("expected_version")
+        if not isinstance(expected_version, int) or isinstance(expected_version, bool) or expected_version < 1:
+            raise PermanentActionError("invalid_expected_version")
+        updates = {
+            key: payload[key]
+            for key in ("title", "summary")
+            if key in payload
+        }
+        if not updates:
+            raise PermanentActionError("missing_plan_update")
+        try:
+            plan = await self.service.update_plan_metadata(
+                owner_user_id=action.actor_user_id,
+                plan_id=plan_id,
+                expected_version=expected_version,
+                updates=updates,
+                request_id=f"agent-action:{action.id}",
+            )
+        except ApiError as exc:
+            raise PermanentActionError(exc.code) from exc
+        application_events: tuple[AgentApplicationEvent, ...] = ()
+        if plan.plan_type == "milk_management":
+            application_events = (
+                AgentApplicationEvent(
+                    event_type=MILK_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "updated",
+                        "reason": "plan_metadata_updated",
+                        "plan_id": str(plan.id),
+                        "plan_type": plan.plan_type,
+                        "source": "agent_action",
+                        "affected_dates": _milk_plan_affected_dates(plan),
+                    },
+                ),
+            )
+        elif plan.plan_type == "pregnancy":
+            application_events = (
+                AgentApplicationEvent(
+                    event_type=PREGNANCY_PLAN_CHANGED_EVENT,
+                    payload={
+                        "operation": "updated",
+                        "plan_id": str(plan.id),
+                        "plan_type": plan.plan_type,
+                        "source": "agent_action",
+                    },
+                ),
+            )
+        return AgentActionApplyResult(
+            resource_type="plan",
+            resource_id=str(plan.id),
+            details={
+                "plan_type": plan.plan_type,
+                "version": plan.version,
+                "fields": sorted(updates),
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },

@@ -247,7 +247,7 @@ def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(m
             run_id=run_id,
             sequence=2,
             event_type="tool.completed",
-            payload={"tool_name": "plans_milk_plan_write"},
+            payload={"tool_name": "plan_mutate"},
         ),
         AgentEvent(
             event_id=uuid4(),

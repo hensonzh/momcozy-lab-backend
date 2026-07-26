@@ -26,7 +26,7 @@ def test_profile_read_replaces_raw_growth_history_as_direct_tool() -> None:
     assert "妈妈与宝宝的基础资料" in contract.description
     assert "不返回奶量产出或摄入记录" in contract.description
     assert "profile_read" in names
-    assert "profile_write" in names
+    assert "profile_update" in names
     assert "maternal_infant_profile_read" not in names
     assert "maternal_infant_profile_update" not in names
     assert "lactation_context_read" not in names
@@ -81,8 +81,8 @@ def test_profile_read_declares_described_nested_output_schema() -> None:
             assert field_schema.get("description"), f"{object_schema['title']}.{field_name} lacks a description"
 
 
-def test_profile_write_is_the_described_profile_write_superset() -> None:
-    contract = default_tool_registry().get("profile_write")
+def test_profile_update_is_the_described_profile_update_superset() -> None:
+    contract = default_tool_registry().get("profile_update")
 
     assert contract.domain == "profiles"
     assert contract.effect_scope == "user_resource"

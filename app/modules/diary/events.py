@@ -3,21 +3,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from .models import PregnancyDiaryEntry
+from .models import DiaryEntry
 
 
-PREGNANCY_DIARY_CHANGED_EVENT = "pregnancy_diary.changed"
+DIARY_CHANGED_EVENT = "diary.changed"
 
 
-def pregnancy_diary_changed_payload(
+def diary_changed_payload(
     *,
-    entry: PregnancyDiaryEntry,
+    entry: DiaryEntry,
     operation: str,
     source: str,
 ) -> dict[str, Any]:
     normalized_operation = str(operation or "").strip()
     if normalized_operation not in {"created", "updated", "deleted"}:
-        raise ValueError("Unsupported pregnancy diary change operation.")
+        raise ValueError("Unsupported diary change operation.")
     updated_at = entry.updated_at if isinstance(entry.updated_at, datetime) else datetime.now(timezone.utc)
     if updated_at.tzinfo is None:
         updated_at = updated_at.replace(tzinfo=timezone.utc)

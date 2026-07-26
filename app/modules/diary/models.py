@@ -12,31 +12,32 @@ from sqlalchemy.orm import Mapped, mapped_column
 from ...infrastructure.db.base import Base
 
 
-class PregnancyDiaryEntry(Base):
-    __tablename__ = "pregnancy_diary_entries"
+class DiaryEntry(Base):
+    __tablename__ = "diary_entries"
     __table_args__ = (
-        UniqueConstraint("owner_user_id", "entry_date", name="uq_pregnancy_diary_owner_date"),
-        Index("ix_pregnancy_diary_owner_date", "owner_user_id", "entry_date"),
+        UniqueConstraint(
+            "owner_user_id",
+            "entry_date",
+            name="uq_diary_entries_owner_date",
+        ),
+        Index(
+            "ix_diary_entries_owner_date",
+            "owner_user_id",
+            "entry_date",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     entry_date: Mapped[date] = mapped_column(Date, nullable=False)
-    gestational_week: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
-    mood: Mapped[str] = mapped_column(String(64), default="", server_default="", nullable=False)
-    energy_level: Mapped[str] = mapped_column(String(64), default="", server_default="", nullable=False)
-    sleep_summary: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    fetal_movement: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    symptom_tags: Mapped[list[Any]] = mapped_column(
-        "symptom_tags_json",
+    content: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
+    attributes: Mapped[dict[str, Any]] = mapped_column(
+        "attributes_json",
         postgresql.JSONB,
-        default=list,
-        server_default=text("'[]'::jsonb"),
+        default=dict,
+        server_default=text("'{}'::jsonb"),
         nullable=False,
     )
-    appointment_note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    nutrition_note: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
-    content: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     attachments: Mapped[list[Any]] = mapped_column(
         "attachments_json",
         postgresql.JSONB,

@@ -42,16 +42,16 @@ def test_agent_event_sink_batches_related_events_into_one_commit() -> None:
             thread_id=uuid4(),
             run_id=run_id,
             events=(
-                ("tool.completed", {"tool_name": "pregnancy_diary_read"}),
-                ("pregnancy_diary.changed", {"operation": "created"}),
+                ("tool.completed", {"tool_name": "diary_read"}),
+                ("diary.changed", {"operation": "created"}),
             ),
         )
     )
 
-    assert [event.event_type for event in events] == ["tool.completed", "pregnancy_diary.changed"]
+    assert [event.event_type for event in events] == ["tool.completed", "diary.changed"]
     assert repository.operations == [
         "db:tool.completed",
-        "db:pregnancy_diary.changed",
+        "db:diary.changed",
         "commit",
         "cursor:2",
     ]
@@ -72,13 +72,13 @@ def test_agent_event_sink_can_stage_batch_inside_caller_savepoint_before_commit(
             thread_id=uuid4(),
             run_id=run_id,
             events=(
-                ("tool.completed", {"tool_name": "pregnancy_diary_read"}),
-                ("pregnancy_diary.changed", {"operation": "created"}),
+                ("tool.completed", {"tool_name": "diary_read"}),
+                ("diary.changed", {"operation": "created"}),
             ),
         )
         assert repository.operations == [
             "db:tool.completed",
-            "db:pregnancy_diary.changed",
+            "db:diary.changed",
         ]
         assert controls.stream_cursor is None
         await sink.finalize_staged_events(run_id=run_id, events=events)
@@ -87,7 +87,7 @@ def test_agent_event_sink_can_stage_batch_inside_caller_savepoint_before_commit(
 
     assert repository.operations == [
         "db:tool.completed",
-        "db:pregnancy_diary.changed",
+        "db:diary.changed",
         "commit",
         "cursor:2",
     ]
@@ -176,7 +176,7 @@ def test_agent_event_publisher_defers_redis_state_until_outer_commit() -> None:
         await publisher.append_event(
             thread_id=thread_id,
             run_id=run_id,
-            event_type="pregnancy_diary.changed",
+            event_type="diary.changed",
             payload={"operation": "deleted"},
         )
         await publisher.clear_active_run(thread_id=thread_id, run_id=run_id)
@@ -187,7 +187,7 @@ def test_agent_event_publisher_defers_redis_state_until_outer_commit() -> None:
     asyncio.run(exercise())
 
     assert repository.operations == [
-        "db:pregnancy_diary.changed",
+        "db:diary.changed",
         "cursor:1",
         "clear_active_run",
     ]

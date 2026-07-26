@@ -8,6 +8,7 @@ from app.core.errors import ApiError
 from app.modules.audit.models import IdempotencyKey
 from app.modules.audit.service import request_hash
 from app.modules.plans.models import Plan, PlanTask
+from app.modules.plans.repository import ScheduleTimelineTaskRow
 from app.modules.plans.service import PlansService
 
 
@@ -183,27 +184,95 @@ def test_plans_service_can_filter_plans_by_type() -> None:
     }
 
 
-def test_plans_service_lists_milk_timeline_tasks_in_bounded_range() -> None:
+def test_plans_service_updates_plan_metadata_with_optimistic_version_and_audit() -> None:
     owner_user_id = uuid4()
-    task = _task(owner_user_id=owner_user_id)
-    repository = FakePlansRepository(tasks=[task])
-    service = PlansService(repository=repository)
+    plan = _plan(owner_user_id=owner_user_id)
+    plan.version = 2
+    repository = FakePlansRepository(plan=plan)
+    audit_service = FakeAuditService()
+    service = PlansService(repository=repository, audit_service=audit_service)
 
-    tasks = asyncio.run(
-        service.list_milk_timeline_tasks(
+    updated = asyncio.run(
+        service.update_plan_metadata(
             owner_user_id=owner_user_id,
-            start_date=date(2026, 7, 1),
-            end_date=date(2026, 7, 31),
-            limit=20,
+            plan_id=plan.id,
+            expected_version=2,
+            updates={"title": "更新后的计划", "summary": "更新后的摘要"},
+            request_id="req_plan_update",
         )
     )
 
-    assert tasks == [task]
-    assert repository.list_milk_timeline_tasks_kwargs == {
+    assert updated.title == "更新后的计划"
+    assert updated.summary == "更新后的摘要"
+    assert updated.version == 3
+    assert repository.update_plan_metadata_kwargs["expected_version"] == 2
+    assert audit_service.record_kwargs["action"] == "plans.update"
+    assert audit_service.record_kwargs["details"] == {
+        "fields": ["summary", "title"],
+        "version": 3,
+    }
+
+
+def test_plans_service_rejects_a_stale_plan_metadata_update() -> None:
+    owner_user_id = uuid4()
+    plan = _plan(owner_user_id=owner_user_id)
+    plan.version = 4
+    repository = FakePlansRepository(plan=plan)
+    service = PlansService(repository=repository)
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.update_plan_metadata(
+                owner_user_id=owner_user_id,
+                plan_id=plan.id,
+                expected_version=3,
+                updates={"title": "过期更新"},
+            )
+        )
+
+    assert exc_info.value.code == "version_conflict"
+    assert plan.title == "Birth plan"
+
+
+def test_plans_service_lists_cross_domain_timeline_plans_and_tasks() -> None:
+    owner_user_id = uuid4()
+    plan = _plan(owner_user_id=owner_user_id)
+    task = _task(owner_user_id=owner_user_id)
+    repository = FakePlansRepository(plans=[plan], tasks=[task])
+    service = PlansService(repository=repository)
+
+    plans = asyncio.run(
+        service.list_schedule_timeline_plans(
+            owner_user_id=owner_user_id,
+            domains=("general", "pregnancy"),
+            status="active",
+            limit=5,
+        )
+    )
+    rows = asyncio.run(
+        service.list_schedule_timeline_tasks(
+            owner_user_id=owner_user_id,
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 7, 31),
+            domains=("general", "pregnancy"),
+            limit=7,
+        )
+    )
+
+    assert plans == [plan]
+    assert rows[0].task is task
+    assert repository.list_schedule_plans_kwargs == {
+        "owner_user_id": owner_user_id,
+        "domains": ("pregnancy", "general"),
+        "status": "active",
+        "limit": 5,
+    }
+    assert repository.list_schedule_tasks_kwargs == {
         "owner_user_id": owner_user_id,
         "start_date": date(2026, 7, 1),
         "end_date": date(2026, 7, 31),
-        "limit": 20,
+        "domains": ("pregnancy", "general"),
+        "limit": 7,
     }
 
 
@@ -506,9 +575,11 @@ class FakePlansRepository:
         self.update_task_kwargs = {}
         self.set_task_state_kwargs = {}
         self.list_plans_kwargs = {}
+        self.list_schedule_plans_kwargs = {}
+        self.list_schedule_tasks_kwargs = {}
         self.update_plan_payload_kwargs = {}
+        self.update_plan_metadata_kwargs = {}
         self.list_future_milk_tasks_kwargs = {}
-        self.list_milk_timeline_tasks_kwargs = {}
         self.locked_task_dates = []
         self.soft_deleted_task_ids = []
 
@@ -524,6 +595,17 @@ class FakePlansRepository:
     async def list_plans(self, **kwargs):
         self.list_plans_kwargs = kwargs
         return self.plans
+
+    async def list_schedule_timeline_plans(self, **kwargs):
+        self.list_schedule_plans_kwargs = kwargs
+        return self.plans
+
+    async def list_schedule_timeline_tasks(self, **kwargs):
+        self.list_schedule_tasks_kwargs = kwargs
+        return [
+            ScheduleTimelineTaskRow(task=task, plan=None)
+            for task in self.tasks
+        ]
 
     async def soft_delete_plan(self, **kwargs):
         self.plan.status = "deleted"
@@ -542,10 +624,6 @@ class FakePlansRepository:
 
     async def list_future_milk_plan_tasks(self, **kwargs):
         self.list_future_milk_tasks_kwargs = kwargs
-        return self.tasks
-
-    async def list_milk_timeline_tasks(self, **kwargs):
-        self.list_milk_timeline_tasks_kwargs = kwargs
         return self.tasks
 
     async def lock_milk_schedule_dates(self, *, owner_user_id, task_dates):
@@ -572,6 +650,15 @@ class FakePlansRepository:
         if self.plan is None or self.plan.version != kwargs["expected_version"]:
             return None
         self.plan.payload = kwargs["payload"]
+        self.plan.version += 1
+        return self.plan
+
+    async def update_plan_metadata_and_version(self, **kwargs):
+        self.update_plan_metadata_kwargs = kwargs
+        if self.plan is None or self.plan.version != kwargs["expected_version"]:
+            return None
+        for field, value in kwargs["updates"].items():
+            setattr(self.plan, field, value)
         self.plan.version += 1
         return self.plan
 

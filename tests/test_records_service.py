@@ -212,6 +212,18 @@ def test_records_service_deletes_feeding_with_audit() -> None:
     assert audit_service.record_kwargs["action"] == "records.feeding.delete"
 
 
+def test_records_service_deletes_linked_feeding_and_restores_task_when_no_execution_remains() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    feeding = _feeding(owner_user_id=owner_user_id, plan_task_id=task_id)
+    repository = FakeRecordsRepository(feeding=feeding)
+    service = RecordsService(repository=repository)
+
+    asyncio.run(service.delete_feeding(owner_user_id=owner_user_id, record_id=feeding.id))
+
+    assert repository.restored_plan_task_id == task_id
+
+
 def test_records_service_creates_pumping_with_idempotency_and_audit() -> None:
     owner_user_id = uuid4()
     repository = FakeRecordsRepository()
@@ -251,6 +263,18 @@ def test_records_service_lists_and_deletes_pumpings() -> None:
     assert repository.list_pumpings_kwargs["limit"] == 10
     assert repository.deleted_pumping.status == "deleted"
     assert audit_service.record_kwargs["action"] == "records.pumping.delete"
+
+
+def test_records_service_deletes_linked_pumping_and_restores_task_when_no_execution_remains() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    pumping = _pumping(owner_user_id=owner_user_id, plan_task_id=task_id)
+    repository = FakeRecordsRepository(pumping=pumping)
+    service = RecordsService(repository=repository)
+
+    asyncio.run(service.delete_pumping(owner_user_id=owner_user_id, record_id=pumping.id))
+
+    assert repository.restored_plan_task_id == task_id
 
 
 def test_records_service_updates_feeding_and_completes_new_linked_task() -> None:
@@ -539,6 +563,7 @@ class FakeRecordsRepository:
         self.plan_task_kind = plan_task_kind
         self.create_feeding_error = create_feeding_error
         self.completed_plan_task_id = None
+        self.restored_plan_task_id = None
         self.feeding = feeding
         self.feedings = feedings or []
         self.pumping = pumping
@@ -570,6 +595,10 @@ class FakeRecordsRepository:
 
     async def complete_plan_task(self, *, plan_task_id: UUID, owner_user_id: UUID):
         self.completed_plan_task_id = plan_task_id
+        return True
+
+    async def restore_plan_task_if_unrecorded(self, *, plan_task_id: UUID, owner_user_id: UUID):
+        self.restored_plan_task_id = plan_task_id
         return True
 
     async def create_feeding(self, **kwargs):

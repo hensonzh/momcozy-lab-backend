@@ -3,17 +3,17 @@ from __future__ import annotations
 from typing import Any
 
 from app.agents.cozymate.actions.diary import (
-    PREGNANCY_DIARY_DELETE_ACTION,
-    PREGNANCY_DIARY_SAVE_ACTION,
-    PregnancyDiaryDeleteActionHandler,
-    PregnancyDiarySaveActionHandler,
+    DIARY_DELETE_ACTION,
+    DIARY_SAVE_ACTION,
+    DiaryDeleteActionHandler,
+    DiarySaveActionHandler,
 )
 from app.agents.cozymate.actions.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
-from app.agents.cozymate.actions.notifications import MILK_REMINDER_CREATE_ACTION, MilkReminderCreateActionHandler
 from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CREATE_ACTION,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_DELETE_ACTION,
+    PLAN_UPDATE_ACTION,
     PLAN_TASK_COMPLETE_ACTION,
     PLAN_TASK_CREATE_ACTION,
     PLAN_TASK_DELETE_ACTION,
@@ -22,6 +22,7 @@ from app.agents.cozymate.actions.plans import (
     MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
+    PlanUpdateActionHandler,
     PlanTaskCompleteActionHandler,
     PlanTaskCreateActionHandler,
     PlanTaskDeleteActionHandler,
@@ -58,7 +59,6 @@ from app.agent_runtime.actions.executor import AgentActionApplyHandler
 
 def build_cozymate_action_handlers(
     *,
-    notifications_service: Any,
     plans_service: Any,
     profile_service: Any,
     lactation_context_service: Any,
@@ -72,9 +72,8 @@ def build_cozymate_action_handlers(
             profile_service=profile_service,
             lactation_context_service=lactation_context_service,
         ),
-        PREGNANCY_DIARY_SAVE_ACTION: PregnancyDiarySaveActionHandler(service=diary_service),
-        PREGNANCY_DIARY_DELETE_ACTION: PregnancyDiaryDeleteActionHandler(service=diary_service),
-        MILK_REMINDER_CREATE_ACTION: MilkReminderCreateActionHandler(service=notifications_service),
+        DIARY_SAVE_ACTION: DiarySaveActionHandler(service=diary_service),
+        DIARY_DELETE_ACTION: DiaryDeleteActionHandler(service=diary_service),
         MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),
         MILK_SCHEDULE_RESCHEDULE_ACTION: MilkScheduleRescheduleActionHandler(service=plans_service),
         PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service),
@@ -82,6 +81,7 @@ def build_cozymate_action_handlers(
         PLAN_TASK_COMPLETE_ACTION: PlanTaskCompleteActionHandler(service=plans_service),
         PLAN_TASK_UPDATE_ACTION: PlanTaskUpdateActionHandler(service=plans_service),
         PLAN_TASK_DELETE_ACTION: PlanTaskDeleteActionHandler(service=plans_service),
+        PLAN_UPDATE_ACTION: PlanUpdateActionHandler(service=plans_service),
         PLAN_DELETE_ACTION: PlanDeleteActionHandler(service=plans_service),
         FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(service=records_service),
         PUMPING_RECORD_CREATE_ACTION: PumpingRecordCreateActionHandler(service=records_service),

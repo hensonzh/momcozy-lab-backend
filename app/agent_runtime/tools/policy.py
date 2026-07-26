@@ -16,6 +16,11 @@ class ToolExecutionPolicy:
         del tool_name
         return cast(dict[str, Any], _safe_payload(output))
 
+    def model_output(self, *, tool_name: str, output: dict[str, Any]) -> dict[str, Any]:
+        """Project schema-validated output into the payload observed by the model."""
+        del tool_name
+        return output
+
     def effective_effect_scope(self, *, tool_name: str, args: dict[str, Any], default: str) -> str:
         del tool_name, args
         return default

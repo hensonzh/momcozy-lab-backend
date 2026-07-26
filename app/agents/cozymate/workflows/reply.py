@@ -34,7 +34,7 @@ _PREGNANCY_REPLY_PHASES = frozenset(
 
 def guarded_workflow_type(tool_name: str, args: dict[str, Any]) -> str | None:
     command = str(args.get("command") or "").strip()
-    if tool_name == "pregnancy_plan_manage" and command in {
+    if tool_name == "pregnancy_intake_manage" and command in {
         "answer_current",
         "edit_answer",
         "pause",

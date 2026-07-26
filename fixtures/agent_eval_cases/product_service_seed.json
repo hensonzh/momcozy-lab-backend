@@ -57,7 +57,7 @@
       ]
     },
     {
-      "suite": "hospital_bag_cart_write",
+      "suite": "hospital_bag_cart_mutate",
       "name": "reset hospital bag cart applies through the direct action contract",
       "domain": "birth-prep",
       "owner_team": "agent",
@@ -73,7 +73,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "hospital_bag_cart_write",
+        "intent": "hospital_bag_cart_mutate",
         "route": "action_proposal",
         "requires_confirmation_before_write": false,
         "service_skill_id": "birth-prep",
@@ -88,7 +88,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "hospital_bag_cart_write",
+          "contract": "hospital_bag_cart_mutate",
           "timing": "before_cart_update",
           "args_subset": {
             "operation": "reset_cart"
@@ -218,7 +218,7 @@
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "hospital_bag_cart_write"
+          "contract": "hospital_bag_cart_mutate"
         }
       ]
     },
@@ -256,7 +256,7 @@
           "contract": "devices_guidance_manage"
         },
         {
-          "contract": "support_ticket_write"
+          "contract": "support_ticket_create"
         }
       ]
     },
@@ -296,8 +296,13 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "lactation_timeline_read",
-          "timing": "before_final_response"
+          "contract": "schedule_timeline_read",
+          "timing": "before_final_response",
+          "args_subset": {
+            "domains": [
+              "lactation"
+            ]
+          }
         }
       ]
     },
@@ -365,11 +370,11 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "lactation_timeline_write",
+          "contract": "schedule_timeline_mutate",
           "timing": "before_action_confirmation",
           "args_subset": {
-            "operation": "reschedule",
-            "item_type": "schedule"
+            "entry_type": "schedule",
+            "operation": "reschedule"
           }
         }
       ],
@@ -385,6 +390,105 @@
         {
           "type": "milk_plan.changed",
           "operation": "rescheduled"
+        }
+      ]
+    },
+    {
+      "suite": "milk_task_completion_measured",
+      "name": "completing a pumping task writes measured output through the unified timeline tool",
+      "domain": "milk-management",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "I finished the 08:30 pumping task at 08:55 and pumped 105 ml."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai",
+          "trusted_exact_target": {
+            "task_id": "55555555-5555-4555-8555-555555555555",
+            "domain": "lactation",
+            "event_type": "pumping",
+            "owner_scoped": true,
+            "match_count": 1
+          }
+        }
+      },
+      "expected_behavior": {
+        "intent": "milk_task_completion_measured",
+        "route": "synchronous_measured_task_completion",
+        "requires_confirmation_before_write": false,
+        "requires_final_response_after_tools": true,
+        "service_skill_id": "milk-management",
+        "must_include": [
+          "measured_execution_record",
+          "linked_task_completed",
+          "single_record_action"
+        ],
+        "must_not": [
+          "task_only_completion",
+          "second_task_complete_action",
+          "use_planned_volume_as_actual"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "schedule_timeline_mutate",
+          "timing": "after_exact_target_resolution",
+          "args_subset": {
+            "operation": "set_status",
+            "entry_type": "schedule",
+            "task_id": "55555555-5555-4555-8555-555555555555",
+            "completed": true,
+            "occurred_at": "2026-07-24T08:55:00+08:00",
+            "milk_volume_ml": 105
+          }
+        }
+      ]
+    },
+    {
+      "suite": "milk_task_completion_missing_volume",
+      "name": "pumping completion without actual output asks for milk volume before mutation",
+      "domain": "milk-management",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Mark the 08:30 pumping task complete."
+          }
+        ],
+        "fixtures": {
+          "trusted_exact_target": {
+            "task_id": "55555555-5555-4555-8555-555555555555",
+            "domain": "lactation",
+            "event_type": "pumping",
+            "owner_scoped": true,
+            "match_count": 1
+          },
+          "actual_milk_volume_ml": null
+        }
+      },
+      "expected_behavior": {
+        "intent": "milk_task_completion_missing_volume",
+        "route": "clarify_actual_milk_volume_before_write",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "milk-management",
+        "must_include": [
+          "ask_actual_milk_volume"
+        ],
+        "must_not": [
+          "task_only_completion",
+          "use_planned_volume_as_actual",
+          "mutate_before_measurement"
+        ]
+      },
+      "expected_tool_calls": [],
+      "forbidden_tool_calls": [
+        {
+          "contract": "schedule_timeline_mutate"
         }
       ]
     },
@@ -436,10 +540,11 @@
           "timing": "after_intake"
         },
         {
-          "contract": "plans_milk_plan_write",
+          "contract": "plan_mutate",
           "timing": "after_needed_context",
           "args_subset": {
-            "operation": "create"
+            "operation": "create",
+            "plan_type": "milk_management"
           }
         }
       ],
@@ -636,7 +741,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "after_user_consent",
           "args_subset": {
             "command": "start_or_resume"
@@ -645,9 +750,10 @@
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "plan_mutate",
           "args_subset": {
-            "command": "generate_plan"
+            "operation": "create",
+            "plan_type": "pregnancy"
           }
         }
       ]
@@ -705,7 +811,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "after_verified_submission",
           "args_subset": {
             "command": "submit_form"
@@ -714,9 +820,10 @@
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "plan_mutate",
           "args_subset": {
-            "command": "generate_plan"
+            "operation": "create",
+            "plan_type": "pregnancy"
           }
         }
       ]
@@ -763,7 +870,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "after_followup_reply",
           "args_subset": {
             "command": "answer_current"
@@ -772,15 +879,16 @@
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "args_subset": {
             "command": "submit_form"
           }
         },
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "plan_mutate",
           "args_subset": {
-            "command": "generate_plan"
+            "operation": "create",
+            "plan_type": "pregnancy"
           }
         }
       ]
@@ -819,13 +927,14 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "plan_mutate",
           "args_subset": {
-            "command": "generate_plan"
+            "operation": "create",
+            "plan_type": "pregnancy"
           }
         },
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "args_subset": {
             "command": "answer_current",
             "choice_id": "mark_checkup_records_uploaded"
@@ -881,10 +990,11 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "plan_mutate",
           "timing": "after_supplemental_information_reply",
           "args_subset": {
-            "command": "generate_plan"
+            "operation": "create",
+            "plan_type": "pregnancy"
           }
         }
       ]
@@ -930,18 +1040,19 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plans_task_write",
+          "contract": "schedule_timeline_mutate",
           "timing": "after_exact_target_resolution",
           "args_subset": {
+            "entry_type": "schedule",
             "task_id": "22222222-2222-4222-8222-222222222222",
             "completed": true,
-            "operation": "update"
+            "operation": "set_status"
           }
         }
       ]
     },
     {
-      "suite": "pregnancy_diary_write_exact",
+      "suite": "pregnancy_diary_mutate_exact",
       "name": "explicit delete intent with exact owner scoped diary target executes without redundant confirmation",
       "domain": "pregnancy-diary",
       "owner_team": "agent",
@@ -962,7 +1073,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_write_exact",
+        "intent": "pregnancy_diary_mutate_exact",
         "route": "synchronous_exact_target_delete",
         "requires_confirmation_before_write": false,
         "requires_final_response_after_tools": true,
@@ -981,7 +1092,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary_write",
+          "contract": "diary_mutate",
           "timing": "on_explicit_intent_and_exact_target",
           "args_subset": {
             "entry_date": "2026-07-04",
@@ -992,7 +1103,7 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_write_ambiguous",
+      "suite": "pregnancy_diary_mutate_ambiguous",
       "name": "ambiguous diary target asks one clarification and never guesses",
       "domain": "pregnancy-diary",
       "owner_team": "agent",
@@ -1012,7 +1123,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_write_ambiguous",
+        "intent": "pregnancy_diary_mutate_ambiguous",
         "route": "clarify_target_without_write",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
@@ -1028,7 +1139,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary_write"
+          "contract": "diary_mutate"
         }
       ]
     },
@@ -1073,7 +1184,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plans_plan_write",
+          "contract": "plan_mutate",
           "timing": "on_explicit_intent_and_exact_target",
           "args_subset": {
             "plan_id": "11111111-1111-4111-8111-111111111111",
@@ -1116,7 +1227,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "plans_plan_write"
+          "contract": "plan_mutate"
         }
       ]
     },
@@ -1142,7 +1253,7 @@
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
-          "pregnancy_diary_namespace",
+          "unified_diary_resource",
           "synchronous_create"
         ],
         "must_not": [
@@ -1151,7 +1262,47 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary_write",
+          "contract": "diary_mutate",
+          "timing": "after_user_record_intent",
+          "args_subset": {
+            "operation": "create"
+          }
+        }
+      ],
+      "forbidden_tool_calls": []
+    },
+    {
+      "suite": "general_diary_entry",
+      "name": "explicit general diary intent selects the generic diary namespace",
+      "domain": "diary",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Save this to today's general diary: I finished a book and felt peaceful."
+          }
+        ],
+        "fixtures": {
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      "expected_behavior": {
+        "intent": "general_diary_entry",
+        "route": "generic_diary_action",
+        "requires_confirmation_before_write": false,
+        "service_skill_id": "cozymate_service_agent",
+        "must_include": [
+          "unified_diary_resource",
+          "synchronous_create"
+        ],
+        "must_not": [
+          "store_diary_in_session_state"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "diary_mutate",
           "timing": "after_user_record_intent",
           "args_subset": {
             "operation": "create"
@@ -1194,7 +1345,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary_write",
+          "contract": "diary_mutate",
           "timing": "after_diary_worthy_narrative",
           "args_subset": {
             "operation": "create"
@@ -1240,19 +1391,19 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary_write",
+          "contract": "diary_mutate",
           "timing": "first_write_attempt",
           "args_subset": {
             "operation": "create"
           }
         },
         {
-          "contract": "pregnancy_diary_read",
+          "contract": "diary_read",
           "timing": "after_entry_already_exists",
           "args_subset": {}
         },
         {
-          "contract": "pregnancy_diary_write",
+          "contract": "diary_mutate",
           "timing": "after_existing_entry_read",
           "args_subset": {
             "operation": "update"
@@ -1294,7 +1445,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary_write"
+          "contract": "diary_mutate"
         }
       ]
     },
@@ -1329,7 +1480,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary_write"
+          "contract": "diary_mutate"
         }
       ]
     },
@@ -1366,7 +1517,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_diary_write"
+          "contract": "diary_mutate"
         }
       ]
     },
@@ -1398,7 +1549,7 @@
         "requires_final_response_after_tools": true,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
-          "pregnancy_diary_namespace",
+          "unified_diary_resource",
           "user_stated_facts_only",
           "continue_health_response_after_write"
         ],
@@ -1410,7 +1561,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_diary_write",
+          "contract": "diary_mutate",
           "timing": "as_adjunct_to_health_response",
           "args_subset": {
             "operation": "create"
@@ -1460,8 +1611,13 @@
           "timing": "before_recovery_guidance"
         },
         {
-          "contract": "plans_current_read",
-          "timing": "before_recovery_guidance"
+          "contract": "schedule_timeline_read",
+          "timing": "before_recovery_guidance",
+          "args_subset": {
+            "domains": [
+              "postpartum_recovery"
+            ]
+          }
         }
       ]
     },
@@ -1500,14 +1656,21 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "plans_current_read",
-          "timing": "before_task_proposal"
+          "contract": "schedule_timeline_read",
+          "timing": "before_task_proposal",
+          "args_subset": {
+            "domains": [
+              "postpartum_recovery"
+            ]
+          }
         },
         {
-          "contract": "plans_task_write",
+          "contract": "schedule_timeline_mutate",
           "timing": "after_explicit_single_task_request",
           "args_subset": {
-            "operation": "create"
+            "entry_type": "schedule",
+            "operation": "create",
+            "domain": "postpartum_recovery"
           }
         }
       ]
@@ -1546,7 +1709,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "profile_write"
+          "contract": "profile_update"
         }
       ]
     },
@@ -1583,7 +1746,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "profile_write"
+          "contract": "profile_update"
         }
       ]
     },
@@ -1619,7 +1782,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "ibclc_consult_card_write",
+          "contract": "ibclc_consult_card_create",
           "timing": "after_explicit_semantic_consent",
           "args_subset": {
             "operation": "create"
@@ -1628,7 +1791,7 @@
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "support_ticket_write"
+          "contract": "support_ticket_create"
         }
       ],
       "expected_events": [
@@ -1908,7 +2071,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "plans_task_write"
+          "contract": "schedule_timeline_mutate"
         }
       ]
     },
@@ -1952,12 +2115,13 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "lactation_timeline_write",
+          "contract": "schedule_timeline_mutate",
           "timing": "after_exact_target_resolution",
           "args_subset": {
+            "entry_type": "execution",
             "operation": "delete",
-            "item_type": "feeding",
-            "item_id": "44444444-4444-4444-8444-444444444444"
+            "record_type": "feeding",
+            "record_id": "44444444-4444-4444-8444-444444444444"
           }
         }
       ]
@@ -1996,7 +2160,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "lactation_timeline_write"
+          "contract": "schedule_timeline_mutate"
         }
       ]
     },
@@ -2074,8 +2238,13 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "lactation_timeline_read",
-          "timing": "before_final_response"
+          "contract": "schedule_timeline_read",
+          "timing": "before_final_response",
+          "args_subset": {
+            "domains": [
+              "lactation"
+            ]
+          }
         }
       ]
     },
@@ -2331,31 +2500,32 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "after_user_intent",
           "args_subset": {
             "command": "start_or_resume"
           }
         },
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "after_verified_submission",
           "args_subset": {
             "command": "submit_form"
           }
         },
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "after_followup_reply",
           "args_subset": {
             "command": "answer_current"
           }
         },
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "plan_mutate",
           "timing": "after_ready_to_generate",
           "args_subset": {
-            "command": "generate_plan"
+            "operation": "create",
+            "plan_type": "pregnancy"
           }
         }
       ],
@@ -2420,7 +2590,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage"
+          "contract": "pregnancy_intake_manage"
         }
       ]
     },
@@ -2465,14 +2635,14 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "on_pause_selection",
           "args_subset": {
             "command": "pause"
           }
         },
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "on_resume_selection",
           "args_subset": {
             "command": "resume"
@@ -2525,7 +2695,7 @@
       },
       "expected_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage",
+          "contract": "pregnancy_intake_manage",
           "timing": "on_historical_choice",
           "args_subset": {
             "command": "edit_answer",
@@ -2578,7 +2748,7 @@
       "expected_tool_calls": [],
       "forbidden_tool_calls": [
         {
-          "contract": "pregnancy_plan_manage"
+          "contract": "pregnancy_intake_manage"
         }
       ]
     },

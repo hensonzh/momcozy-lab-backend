@@ -18,15 +18,15 @@ from app.agents.cozymate.tools import (
     HospitalBagCartUpdateProposeToolHandler,
     HospitalBagWorkflowToolHandler,
     IbclcConsultCardCreateToolHandler,
-    LactationTimelineManageToolHandler,
     MilkAnalysisReadToolHandler,
     MilkAnalysisToolHandler,
     MilkAnalysisEvaluateToolHandler,
     MilkAnalysisIntakeToolHandler,
     MilkStatusReadToolHandler,
-    MilkPlanProposeToolHandler,
-    PregnancyDiaryWriteToolHandler,
-    PregnancyPlanWorkflowToolHandler,
+    PlanMutateToolHandler,
+    DiaryMutateToolHandler,
+    PregnancyIntakeWorkflowToolHandler,
+    ScheduleTimelineMutateToolHandler,
     SupportTicketProposeToolHandler,
     CozymateToolExecutor,
     default_tool_registry,
@@ -66,8 +66,8 @@ from app.agent_runtime.providers import (
 )
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.modules.assets.models import ProductAsset
-from app.modules.diary.models import PregnancyDiaryEntry
-from app.agents.cozymate.actions.diary import PregnancyDiarySaveActionHandler
+from app.modules.diary.models import DiaryEntry
+from app.agents.cozymate.actions.diary import DiarySaveActionHandler
 from app.agents.cozymate.actions.hospital_bag import HospitalBagCartUpdateActionHandler
 from app.agents.cozymate.actions.plans import (
     MilkPlanCreateActionHandler,
@@ -97,12 +97,12 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         text="我现在32周，想制定孕期计划。",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("pregnancy_plan_manage", {"command": "start_or_resume"}),
+            scripted_tool_invocation("pregnancy_intake_manage", {"command": "start_or_resume"}),
         ),
         final_text="请先填写孕期基本信息表。",
     )
 
-    _assert_tools(started.trace, "pregnancy_plan_manage")
+    _assert_tools(started.trace, "pregnancy_intake_manage")
     _assert_artifact_events(started.trace, "form")
     workflow = scenario.workflow("pregnancy_plan")
     assert workflow.status == "collecting"
@@ -132,7 +132,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         ],
         client_context=scenario.pregnancy_command_context(command="submit_form"),
     )
-    _assert_tools(analyzed.trace, "pregnancy_plan_manage")
+    _assert_tools(analyzed.trace, "pregnancy_intake_manage")
     assert scenario.workflow("pregnancy_plan").state["source_form_submission_id"] == "pregnancy-submission-1"
 
     skipped = scenario.run_turn(
@@ -143,7 +143,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
             choice_id="skip_checkup_records",
         ),
     )
-    _assert_tools(skipped.trace, "pregnancy_plan_manage")
+    _assert_tools(skipped.trace, "pregnancy_intake_manage")
     assert scenario.workflow("pregnancy_plan").state["phase"] == "final_plan_confirmation"
 
     created = scenario.run_turn(
@@ -155,7 +155,7 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
         ),
     )
 
-    _assert_tools(created.trace, "pregnancy_plan_manage", "pregnancy_plan_manage")
+    _assert_tools(created.trace, "pregnancy_intake_manage", "plan_mutate")
     _assert_actions(created.trace, ("pregnancy.plan.create", "applied", "plan"))
     _assert_event_types(created.trace, required={"action.applied", "pregnancy_plan.changed", "artifact.created"})
     _assert_event_types(created.trace, forbidden={"action.confirmation_required"})
@@ -177,15 +177,15 @@ def test_observed_pregnancy_plan_urgent_turn_enters_model_before_tool_safety_res
         handlers=scenario.pregnancy_handlers(),
         tool_invocations=(
             scripted_tool_invocation(
-                "pregnancy_plan_manage",
-                {"command": "generate_plan"},
+                "plan_mutate",
+                {"operation": "create", "plan_type": "pregnancy"},
             ),
         ),
         final_text="不应返回这段模型文本。",
     )
 
     assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
-    _assert_tools(result.trace, "pregnancy_plan_manage")
+    _assert_tools(result.trace, "plan_mutate")
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
     assert scenario.workflow("pregnancy_plan").status == "paused"
@@ -216,7 +216,7 @@ def test_observed_pregnancy_plan_urgent_historical_edit_interrupts_before_revisi
     )
 
     assert result.execution_result.final_text == PREGNANCY_PLAN_URGENT_RESPONSE
-    _assert_tools(result.trace, "pregnancy_plan_manage")
+    _assert_tools(result.trace, "pregnancy_intake_manage")
     assert result.trace.actions == []
     assert scenario.repository.artifacts == []
     workflow = scenario.workflow("pregnancy_plan")
@@ -277,13 +277,13 @@ def test_observed_hospital_bag_form_card_and_cart_use_runtime_ledgers() -> None:
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "hospital_bag_cart_write",
+                "hospital_bag_cart_mutate",
                 {"operation": "reset_cart"},
             ),
         ),
         final_text="已更新待产包。",
     )
-    _assert_tools(cart.trace, "hospital_bag_cart_write")
+    _assert_tools(cart.trace, "hospital_bag_cart_mutate")
     _assert_actions(cart.trace, ("hospital_bag.cart.update", "applied", "hospital_bag_cart"))
     _assert_event_types(cart.trace, required={"action.applied", "hospital_bag.cart.changed"})
     _assert_event_types(cart.trace, forbidden={"action.confirmation_required"})
@@ -436,9 +436,10 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "plans_milk_plan_write",
+                "plan_mutate",
                 {
                     "operation": "create",
+                    "plan_type": "milk_management",
                     "direction": "maintain",
                     "days": 1,
                     "preferred_pumping_times": ["08:00", "11:00", "14:00"],
@@ -447,7 +448,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         ),
         final_text="请确认后创建计划。",
     )
-    _assert_tools(plan_turn.trace, "plans_milk_plan_write")
+    _assert_tools(plan_turn.trace, "plan_mutate")
     _assert_actions(plan_turn.trace, ("plans.milk_plan.create", "confirmation_required", "plan"))
     _assert_event_types(
         plan_turn.trace,
@@ -472,10 +473,10 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "lactation_timeline_write",
+                "schedule_timeline_mutate",
                 {
                     "operation": "reschedule",
-                    "item_type": "schedule",
+                    "entry_type": "schedule",
                     "plan_id": str(plan.id),
                     "calendar_events": [
                         {
@@ -490,7 +491,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         ),
         final_text="请确认日程调整。",
     )
-    _assert_tools(schedule_turn.trace, "lactation_timeline_write")
+    _assert_tools(schedule_turn.trace, "schedule_timeline_mutate")
     _assert_actions(schedule_turn.trace, ("plans.milk_schedule.reschedule", "confirmation_required", "plan"))
     _assert_artifact_events(schedule_turn.trace, "milk_schedule_reschedule_preview")
     _assert_event_types(schedule_turn.trace, required={"action.confirmation_required"})
@@ -546,8 +547,12 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
             handlers=handlers,
             tool_invocations=(
                 scripted_tool_invocation(
-                    "plans_milk_plan_write",
-                    {"operation": "create", "direction": "increase"},
+                    "plan_mutate",
+                    {
+                        "operation": "create",
+                        "plan_type": "milk_management",
+                        "direction": "increase",
+                    },
                 ),
             ),
             final_text="不应成功。",
@@ -555,7 +560,7 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
 
     failed_run = scenario.repository.runs[-1]
     assert [(call.tool_name, call.status) for call in scenario.repository.tool_calls_for(failed_run.id)] == [
-        ("plans_milk_plan_write", "failed")
+        ("plan_mutate", "failed")
     ]
     assert scenario.repository.actions_for(failed_run.id) == []
     assert len(scenario.repository.artifacts) == artifact_count
@@ -626,7 +631,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "support_ticket_write",
+                "support_ticket_create",
                 {
                     "operation": "create",
                     "issue_type": "missing_parts",
@@ -640,7 +645,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         final_text="这件事确实很影响使用体验，我可以帮你创建一个售后工单。需要我现在帮你创建吗？",
     )
 
-    _assert_tools(offered.trace, "support_ticket_write")
+    _assert_tools(offered.trace, "support_ticket_create")
     _assert_event_types(offered.trace, forbidden={"artifact.created", "action.confirmation_required"})
     assert scenario.repository.artifacts == []
 
@@ -649,7 +654,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "support_ticket_write",
+                "support_ticket_create",
                 {
                     "operation": "create",
                     "issue_type": "missing_parts",
@@ -663,7 +668,7 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         final_text="我已经把售后信息整理好了，你可以检查并提交。",
     )
 
-    _assert_tools(confirmed.trace, "support_ticket_write")
+    _assert_tools(confirmed.trace, "support_ticket_create")
     _assert_artifact_events(confirmed.trace, "support_ticket_draft")
     assert confirmed.trace.actions == []
     assert scenario.repository.artifacts[-1].payload["submit_label"] == "确认并提交"
@@ -676,7 +681,7 @@ def test_observed_health_response_can_write_user_facts_then_continue_replying() 
         handlers=scenario.diary_handlers(),
         tool_invocations=(
             scripted_tool_invocation(
-                "pregnancy_diary_write",
+                "diary_mutate",
                 {
                     "operation": "create",
                     "content": "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。",
@@ -686,8 +691,8 @@ def test_observed_health_response_can_write_user_facts_then_continue_replying() 
         final_text="我已经记下来了。先休息并观察；如果牵拉感加重、出现出血或胎动异常，请及时联系产科。",
     )
 
-    _assert_tools(result.trace, "pregnancy_diary_write")
-    _assert_event_types(result.trace, required={"pregnancy_diary.changed"})
+    _assert_tools(result.trace, "diary_mutate")
+    _assert_event_types(result.trace, required={"diary.changed"})
     assert result.trace.final_text.startswith("我已经记下来了")
     assert scenario.diary.entries[0].content == (
         "今天散步后有一点轻微牵拉感；没有出血或发烧，疼痛没有加重，宝宝胎动正常。"
@@ -780,11 +785,11 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         text="IBCLC 是什么？",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("ibclc_consult_card_write", {"operation": "create", "reason": "衔乳疼痛"}),
+            scripted_tool_invocation("ibclc_consult_card_create", {"operation": "create", "reason": "衔乳疼痛"}),
         ),
         final_text="IBCLC 是国际认证哺乳顾问。",
     )
-    _assert_tools(blocked.trace, "ibclc_consult_card_write")
+    _assert_tools(blocked.trace, "ibclc_consult_card_create")
     assert blocked.trace.actions == []
     assert scenario.repository.artifacts == []
     _assert_event_types(blocked.trace, forbidden={"artifact.created", "action.confirmation_required"})
@@ -798,11 +803,11 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         text="好的",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("ibclc_consult_card_write", {"operation": "create", "reason": "衔乳疼痛"}),
+            scripted_tool_invocation("ibclc_consult_card_create", {"operation": "create", "reason": "衔乳疼痛"}),
         ),
         final_text="当前不创建咨询入口。",
     )
-    _assert_tools(negated_offer.trace, "ibclc_consult_card_write")
+    _assert_tools(negated_offer.trace, "ibclc_consult_card_create")
     assert scenario.repository.artifacts == []
     _assert_event_types(negated_offer.trace, forbidden={"artifact.created", "action.confirmation_required"})
 
@@ -811,7 +816,7 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "ibclc_consult_card_write",
+                "ibclc_consult_card_create",
                 {
                     "operation": "create",
                     "reason": "衔乳疼痛",
@@ -822,10 +827,10 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         ),
         final_text="咨询入口已准备好。",
     )
-    _assert_tools(opened.trace, "ibclc_consult_card_write")
+    _assert_tools(opened.trace, "ibclc_consult_card_create")
     _assert_artifact_events(opened.trace, "ibclc_consult_card")
     assert opened.trace.actions == []
-    assert all(call["tool_name"] != "support_ticket_write" for call in opened.trace.tool_calls)
+    assert all(call["tool_name"] != "support_ticket_create" for call in opened.trace.tool_calls)
     _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
 
 
@@ -843,14 +848,14 @@ def test_observed_ibclc_canonical_offer_opens_on_first_short_confirmation() -> N
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "ibclc_consult_card_write",
+                "ibclc_consult_card_create",
                 {"operation": "create", "reason": "衔乳疼痛", "feeding_context": "宝宝吸不住"},
             ),
         ),
         final_text="IBCLC 咨询入口已经准备好。",
     )
 
-    _assert_tools(opened.trace, "ibclc_consult_card_write")
+    _assert_tools(opened.trace, "ibclc_consult_card_create")
     _assert_artifact_events(opened.trace, "ibclc_consult_card")
     assert opened.trace.actions == []
     _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
@@ -876,7 +881,7 @@ class ObservedScenario:
                 "plans.milk_plan.create": MilkPlanCreateActionHandler(service=self.plans),
                 "plans.milk_schedule.reschedule": MilkScheduleRescheduleActionHandler(service=self.plans),
                 "pregnancy.plan.create": PregnancyPlanCreateActionHandler(service=self.plans),
-                "pregnancy_diary.entry.save": PregnancyDiarySaveActionHandler(service=self.diary),
+                "diary.entry.save": DiarySaveActionHandler(service=self.diary),
             },
         )
         self.runtime_service = AgentRuntimeService(action_policy=ACTION_POLICY,
@@ -993,7 +998,11 @@ class ObservedScenario:
 
     def pregnancy_handlers(self) -> dict[str, Any]:
         return {
-            "pregnancy_plan_manage": PregnancyPlanWorkflowToolHandler(runtime_service=self.runtime_service),
+            "pregnancy_intake_manage": PregnancyIntakeWorkflowToolHandler(runtime_service=self.runtime_service),
+            "plan_mutate": PlanMutateToolHandler(
+                runtime_service=self.runtime_service,
+                plans_service=self.plans,
+            ),
         }
 
     def hospital_bag_handlers(self) -> dict[str, Any]:
@@ -1001,7 +1010,7 @@ class ObservedScenario:
             "hospital_bag_manage": HospitalBagWorkflowToolHandler(
                 runtime_service=self.runtime_service
             ),
-            "hospital_bag_cart_write": HospitalBagCartUpdateProposeToolHandler(runtime_service=self.runtime_service),
+            "hospital_bag_cart_mutate": HospitalBagCartUpdateProposeToolHandler(runtime_service=self.runtime_service),
         }
 
     def device_handlers(self) -> dict[str, Any]:
@@ -1013,13 +1022,13 @@ class ObservedScenario:
         }
 
     def ibclc_handlers(self) -> dict[str, Any]:
-        return {"ibclc_consult_card_write": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
+        return {"ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
 
     def support_handlers(self) -> dict[str, Any]:
-        return {"support_ticket_write": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
+        return {"support_ticket_create": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
 
     def diary_handlers(self) -> dict[str, Any]:
-        return {"pregnancy_diary_write": PregnancyDiaryWriteToolHandler(runtime_service=self.runtime_service)}
+        return {"diary_mutate": DiaryMutateToolHandler(runtime_service=self.runtime_service)}
 
     def milk_handlers(self) -> dict[str, Any]:
         return {
@@ -1039,11 +1048,11 @@ class ObservedScenario:
                 ),
                 evaluate_handler=MilkAnalysisEvaluateToolHandler(runtime_service=self.runtime_service),
             ),
-            "plans_milk_plan_write": MilkPlanProposeToolHandler(
+            "plan_mutate": PlanMutateToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),
-            "lactation_timeline_write": LactationTimelineManageToolHandler(
+            "schedule_timeline_mutate": ScheduleTimelineMutateToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),
@@ -1525,19 +1534,26 @@ class RecordingPlansService:
 class RecordingDiaryService:
     def __init__(self, *, owner_user_id: UUID) -> None:
         self.owner_user_id = owner_user_id
-        self.entries: list[PregnancyDiaryEntry] = []
+        self.entries: list[DiaryEntry] = []
 
-    async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict[str, Any], request_id: str):
+    async def create_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+        values: dict[str, Any],
+        request_id: str,
+    ):
         del request_id
         assert owner_user_id == self.owner_user_id
         if any(entry.entry_date == entry_date for entry in self.entries):
             raise ApiError(code="conflict", message="Diary entry already exists.", status=409)
-        entry = PregnancyDiaryEntry(
+        entry = DiaryEntry(
             id=uuid4(),
             owner_user_id=owner_user_id,
             entry_date=entry_date,
             content=str(values.get("content") or ""),
-            symptom_tags=[],
+            attributes=dict(values.get("attributes") or {}),
             attachments=[],
         )
         self.entries.append(entry)
@@ -1545,7 +1561,12 @@ class RecordingDiaryService:
 
     async def get_entry(self, *, owner_user_id: UUID, entry_date: date):
         entry = next(
-            (item for item in self.entries if item.owner_user_id == owner_user_id and item.entry_date == entry_date),
+            (
+                item
+                for item in self.entries
+                if item.owner_user_id == owner_user_id
+                and item.entry_date == entry_date
+            ),
             None,
         )
         if entry is None:

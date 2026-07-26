@@ -6,16 +6,16 @@ from typing import Any
 from app.agent_runtime.actions import AgentActionApplyResult, AgentApplicationEvent, PermanentActionError
 from app.agent_runtime.runs.models import AgentAction
 from app.core.errors import ApiError
-from app.modules.diary.events import PREGNANCY_DIARY_CHANGED_EVENT, pregnancy_diary_changed_payload
-from app.modules.diary.models import PregnancyDiaryEntry
+from app.modules.diary.events import DIARY_CHANGED_EVENT, diary_changed_payload
+from app.modules.diary.models import DiaryEntry
 from app.modules.diary.service import DiaryService
 
 
-PREGNANCY_DIARY_SAVE_ACTION = "pregnancy_diary.entry.save"
-PREGNANCY_DIARY_DELETE_ACTION = "pregnancy_diary.entry.delete"
+DIARY_SAVE_ACTION = "diary.entry.save"
+DIARY_DELETE_ACTION = "diary.entry.delete"
 
 
-class PregnancyDiarySaveActionHandler:
+class DiarySaveActionHandler:
     def __init__(self, *, service: DiaryService) -> None:
         self.service = service
 
@@ -55,7 +55,7 @@ class PregnancyDiarySaveActionHandler:
         return _result(entry=entry, operation=applied_operation, changed=changed)
 
 
-class PregnancyDiaryDeleteActionHandler:
+class DiaryDeleteActionHandler:
     def __init__(self, *, service: DiaryService) -> None:
         self.service = service
 
@@ -73,13 +73,13 @@ class PregnancyDiaryDeleteActionHandler:
         return _result(entry=entry, operation="deleted", changed=True)
 
 
-def _result(*, entry: PregnancyDiaryEntry, operation: str, changed: bool) -> AgentActionApplyResult:
+def _result(*, entry: DiaryEntry, operation: str, changed: bool) -> AgentActionApplyResult:
     events: tuple[AgentApplicationEvent, ...] = ()
     if changed:
         events = (
             AgentApplicationEvent(
-                event_type=PREGNANCY_DIARY_CHANGED_EVENT,
-                payload=pregnancy_diary_changed_payload(
+                event_type=DIARY_CHANGED_EVENT,
+                payload=diary_changed_payload(
                     entry=entry,
                     operation=operation,
                     source="agent_action",
@@ -87,9 +87,12 @@ def _result(*, entry: PregnancyDiaryEntry, operation: str, changed: bool) -> Age
             ),
         )
     return AgentActionApplyResult(
-        resource_type="pregnancy_diary_entry",
+        resource_type="diary_entry",
         resource_id=str(entry.id),
-        details={"operation": operation, "changed": changed},
+        details={
+            "operation": operation,
+            "changed": changed,
+        },
         application_events=events,
     )
 

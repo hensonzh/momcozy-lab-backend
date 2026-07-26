@@ -22,32 +22,34 @@ def test_model_visible_tool_contract_validates_declared_action_bindings() -> Non
     assert _contract(effect_scope="user_resource", action_types=("profile.update",)).action_types == ("profile.update",)
 
 
-def test_cozymate_registry_exposes_new_effect_scopes_and_no_legacy_mixed_write_tools() -> None:
+def test_cozymate_registry_exposes_effect_scopes_and_no_legacy_tool_aliases() -> None:
     registry = default_tool_registry()
 
-    assert "profile_write" in registry.names_for_sdk()
+    assert "profile_update" in registry.names_for_sdk()
     assert "pregnancy_diary.manage" not in registry.names_for_sdk()
 
-    assert registry.get("profile_write").effect_scope == "user_resource"
-    assert registry.get("profile_write").action_types == ("profile.update",)
-    assert registry.get("pregnancy_diary_read").effect_scope == "none"
-    assert registry.get("pregnancy_diary_write").action_types == (
-        "pregnancy_diary.entry.save",
-        "pregnancy_diary.entry.delete",
+    assert registry.get("profile_update").effect_scope == "user_resource"
+    assert registry.get("profile_update").action_types == ("profile.update",)
+    assert registry.get("diary_read").effect_scope == "none"
+    assert registry.get("diary_mutate").action_types == (
+        "diary.entry.save",
+        "diary.entry.delete",
     )
 
     assert registry.get("milk_analysis_manage").effect_scope == "agent_internal"
-    assert registry.get("lactation_timeline_write").effect_scope == "user_resource"
-    assert "records.feeding_record.update" in registry.get("lactation_timeline_write").action_types
-    assert registry.get("support_ticket_write").effect_scope == "agent_internal"
-    assert registry.get("support_ticket_write").action_types == ()
+    assert registry.get("schedule_timeline_mutate").effect_scope == "user_resource"
+    assert "plans.task.update" in registry.get("schedule_timeline_mutate").action_types
+    assert "records.feeding_record.update" in registry.get("schedule_timeline_mutate").action_types
+    assert "records.pumping_record.update" in registry.get("schedule_timeline_mutate").action_types
+    assert "records.growth_record.update" in registry.get("schedule_timeline_mutate").action_types
+    assert registry.get("support_ticket_create").effect_scope == "agent_internal"
+    assert registry.get("support_ticket_create").action_types == ()
 
 
 def test_every_action_backed_tool_is_registered_in_action_policy() -> None:
     registry = default_tool_registry()
     dependency = object()
     handlers = build_cozymate_action_handlers(
-        notifications_service=dependency,
         plans_service=dependency,
         profile_service=dependency,
         lactation_context_service=dependency,

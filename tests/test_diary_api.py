@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.auth import CurrentUser
-from app.modules.diary.models import PregnancyDiaryEntry
+from app.modules.diary.models import DiaryEntry
 from app.modules.diary.router import get_diary_service
 
 
@@ -38,9 +38,12 @@ def test_create_and_update_entry_use_current_user_and_request_id() -> None:
     assert create_response.status_code == 201
     assert update_response.status_code == 200
     assert fake_service.create_kwargs["owner_user_id"] == user_id
+    assert "diary_type" not in fake_service.create_kwargs
     assert fake_service.create_kwargs["entry_date"] == date(2026, 7, 2)
     assert fake_service.create_kwargs["request_id"] == "req_diary"
+    assert fake_service.create_kwargs["values"] == {"attributes": {"mood": "calm"}}
     assert fake_service.update_kwargs["owner_user_id"] == user_id
+    assert "diary_type" not in fake_service.update_kwargs
     assert fake_service.update_kwargs["entry_date"] == date(2026, 7, 2)
     assert fake_service.update_kwargs["request_id"] == "req_update"
 
@@ -61,7 +64,9 @@ def test_list_and_delete_entries_use_current_user_scope() -> None:
     assert list_response.status_code == 200
     assert delete_response.status_code == 204
     assert fake_service.list_kwargs["owner_user_id"] == user_id
+    assert "diary_type" not in fake_service.list_kwargs
     assert fake_service.list_kwargs["limit"] == 10
+    assert "diary_type" not in fake_service.delete_kwargs
     assert fake_service.delete_kwargs["request_id"] == "req_delete"
 
 
@@ -107,14 +112,13 @@ class FakeDiaryService:
     async def delete_entry(self, **kwargs):
         self.delete_kwargs = kwargs
 
-    def _entry(self) -> PregnancyDiaryEntry:
-        return PregnancyDiaryEntry(
+    def _entry(self) -> DiaryEntry:
+        return DiaryEntry(
             id=uuid4(),
             owner_user_id=self.user_id,
             entry_date=date(2026, 7, 2),
-            mood="calm",
+            attributes={"mood": "calm"},
             status="active",
-            symptom_tags=[],
             attachments=[],
             created_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
             updated_at=datetime(2026, 7, 2, tzinfo=timezone.utc),

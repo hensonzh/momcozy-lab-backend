@@ -6,80 +6,102 @@ import pytest
 
 from app.agent_runtime.runs.models import AgentAction
 from app.agents.cozymate.actions.diary import (
-    PREGNANCY_DIARY_DELETE_ACTION,
-    PREGNANCY_DIARY_SAVE_ACTION,
-    PregnancyDiaryDeleteActionHandler,
-    PregnancyDiarySaveActionHandler,
+    DIARY_DELETE_ACTION,
+    DIARY_SAVE_ACTION,
+    DiaryDeleteActionHandler,
+    DiarySaveActionHandler,
 )
-from app.modules.diary.models import PregnancyDiaryEntry
+from app.modules.diary.models import DiaryEntry
 from app.modules.diary.repository import DiaryEntryMutation
 from app.agent_runtime.actions.errors import PermanentActionError
 
 
-def test_pregnancy_diary_save_action_creates_entry_and_change_event() -> None:
+def test_diary_save_action_creates_entry_and_change_event() -> None:
     service = FakeDiaryService()
     action = _action(
-        action_type=PREGNANCY_DIARY_SAVE_ACTION,
-        payload={"operation": "create", "entry_date": "2026-07-21", "content": "Today felt calm."},
+        action_type=DIARY_SAVE_ACTION,
+        payload={
+            "operation": "create",
+            "entry_date": "2026-07-21",
+            "content": "Today felt calm.",
+        },
     )
 
-    result = asyncio.run(PregnancyDiarySaveActionHandler(service=service)(action))
+    result = asyncio.run(DiarySaveActionHandler(service=service)(action))
 
     assert service.create_kwargs["owner_user_id"] == action.actor_user_id
+    assert "diary_type" not in service.create_kwargs
     assert service.create_kwargs["values"] == {"content": "Today felt calm."}
     assert service.create_kwargs["request_id"] == f"agent-action:{action.id}"
     assert result.resource_id == str(service.entry.id)
-    assert result.details == {"operation": "created", "changed": True}
-    assert result.application_events[0].event_type == "pregnancy_diary.changed"
+    assert result.details == {
+        "operation": "created",
+        "changed": True,
+    }
+    assert result.application_events[0].event_type == "diary.changed"
     assert result.application_events[0].payload["source"] == "agent_action"
 
 
-def test_pregnancy_diary_save_action_updates_complete_entry() -> None:
+def test_diary_save_action_updates_complete_entry() -> None:
     service = FakeDiaryService()
     action = _action(
-        action_type=PREGNANCY_DIARY_SAVE_ACTION,
-        payload={"operation": "update", "entry_date": "2026-07-21", "content": "Complete rewritten entry."},
+        action_type=DIARY_SAVE_ACTION,
+        payload={
+            "operation": "update",
+            "entry_date": "2026-07-21",
+            "content": "Complete rewritten entry.",
+        },
     )
 
-    result = asyncio.run(PregnancyDiarySaveActionHandler(service=service)(action))
+    result = asyncio.run(DiarySaveActionHandler(service=service)(action))
 
     assert service.update_kwargs["values"] == {"content": "Complete rewritten entry."}
-    assert result.details == {"operation": "updated", "changed": True}
+    assert "diary_type" not in service.update_kwargs
+    assert result.details == {
+        "operation": "updated",
+        "changed": True,
+    }
 
 
-def test_pregnancy_diary_delete_action_soft_deletes_entry() -> None:
+def test_diary_delete_action_soft_deletes_entry() -> None:
     service = FakeDiaryService()
     action = _action(
-        action_type=PREGNANCY_DIARY_DELETE_ACTION,
+        action_type=DIARY_DELETE_ACTION,
         payload={"entry_date": "2026-07-21"},
     )
 
-    result = asyncio.run(PregnancyDiaryDeleteActionHandler(service=service)(action))
+    result = asyncio.run(DiaryDeleteActionHandler(service=service)(action))
 
     assert service.delete_kwargs["owner_user_id"] == action.actor_user_id
-    assert result.details == {"operation": "deleted", "changed": True}
+    assert "diary_type" not in service.delete_kwargs
+    assert result.details == {
+        "operation": "deleted",
+        "changed": True,
+    }
     assert result.application_events[0].payload["operation"] == "deleted"
 
 
-def test_pregnancy_diary_action_rejects_invalid_operation() -> None:
+def test_diary_action_rejects_invalid_operation() -> None:
     action = _action(
-        action_type=PREGNANCY_DIARY_SAVE_ACTION,
+        action_type=DIARY_SAVE_ACTION,
         payload={"operation": "append", "entry_date": "2026-07-21", "content": "No."},
     )
 
     with pytest.raises(PermanentActionError) as exc_info:
-        asyncio.run(PregnancyDiarySaveActionHandler(service=FakeDiaryService())(action))
+        asyncio.run(DiarySaveActionHandler(service=FakeDiaryService())(action))
 
     assert exc_info.value.code == "invalid_diary_save_operation"
 
 
 class FakeDiaryService:
     def __init__(self) -> None:
-        self.entry = PregnancyDiaryEntry(
+        self.entry = DiaryEntry(
             id=uuid4(),
             owner_user_id=uuid4(),
             entry_date=date(2026, 7, 21),
             content="",
+            attributes={},
+            attachments=[],
             updated_at=datetime(2026, 7, 21, tzinfo=timezone.utc),
         )
         self.create_kwargs: dict = {}
@@ -113,10 +135,10 @@ def _action(*, action_type: str, payload: dict) -> AgentAction:
         run_id=uuid4(),
         actor_user_id=uuid4(),
         action_type=action_type,
-        target_type="pregnancy_diary_entry",
+        target_type="diary_entry",
         target_id="",
         status="confirmed",
-        side_effect_level="low" if action_type == PREGNANCY_DIARY_SAVE_ACTION else "medium",
+        side_effect_level="low" if action_type == DIARY_SAVE_ACTION else "medium",
         preview_payload={},
         apply_payload=payload,
         idempotency_key="diary-action",

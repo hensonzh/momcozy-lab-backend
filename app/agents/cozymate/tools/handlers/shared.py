@@ -17,7 +17,7 @@ from app.agent_runtime.tools.result import ToolResult, ToolTextOutput
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.modules.assets.models import ProductAsset
 from app.modules.assets.service import ProductAssetService
-from app.modules.diary.models import PregnancyDiaryEntry
+from app.modules.diary.models import DiaryEntry
 from app.agents.cozymate.actions.plans import (
     MILK_PLAN_CALENDAR_APPEND,
 )
@@ -953,8 +953,8 @@ def _pregnancy_plan_workflow_result(
         )
     elif phase == PregnancyPlanPhase.READY_TO_GENERATE.value:
         instruction = (
-            "The trusted intake is ready. Call pregnancy_plan_manage with command=generate_plan in this same run without "
-            "another user confirmation question and do not reopen the form."
+            "The trusted intake is ready. Call plan_mutate with operation=create and plan_type=pregnancy in this same run "
+            "without another user confirmation question and do not reopen the form."
         )
     elif initial_analysis:
         instruction = (
@@ -1169,11 +1169,11 @@ def _pregnancy_plan_urgent_result(signal_ids: list[str]) -> ToolResult:
         "required_response": PREGNANCY_PLAN_URGENT_RESPONSE,
     }
     model_payload = {
-        "pregnancy_plan_safety": {
+            "pregnancy_plan_safety": {
             **output,
             "instruction": (
                 "Stop the pregnancy-plan workflow. Give required_response immediately and concisely. Do not ask the plan "
-                "supplemental-information question and do not call pregnancy_plan_manage with command=generate_plan. "
+                "supplemental-information question and do not call plan_mutate to create a pregnancy plan. "
                 "Do not diagnose."
             ),
         }
@@ -1308,32 +1308,6 @@ def _plan_delete_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any
     preview = {
         "plan_id": _text(apply_payload, "plan_id"),
         "reason": _text(apply_payload, "reason"),
-    }
-    return {key: value for key, value in preview.items() if value not in ("", None)}
-
-
-def _milk_reminder_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "title": _text(args, "title"),
-        "body": _text(args, "body"),
-        "remind_at": _text(args, "remind_at"),
-    }
-    reminder_payload = args.get("payload")
-    if isinstance(reminder_payload, dict):
-        payload["payload"] = reminder_payload
-    metadata = _metadata_payload(args)
-    if metadata:
-        payload["metadata"] = metadata
-    return {key: value for key, value in payload.items() if value not in ("", None, {})}
-
-
-def _milk_reminder_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
-    preview = {
-        "notification_type": "milk_reminder",
-        "title": _text(apply_payload, "title"),
-        "body": _text(apply_payload, "body"),
-        "remind_at": _text(apply_payload, "remind_at"),
-        "has_payload": isinstance(apply_payload.get("payload"), dict) and bool(apply_payload.get("payload")),
     }
     return {key: value for key, value in preview.items() if value not in ("", None)}
 
@@ -1886,18 +1860,11 @@ def _task_payload(task: PlanTask) -> dict[str, Any]:
     }
 
 
-def _diary_payload(entry: PregnancyDiaryEntry, *, include_content: bool) -> dict[str, Any]:
+def _diary_payload(entry: DiaryEntry, *, include_content: bool) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": str(entry.id),
         "entry_date": _date_iso(entry.entry_date),
-        "gestational_week": entry.gestational_week,
-        "mood": entry.mood,
-        "energy_level": entry.energy_level,
-        "sleep_summary": entry.sleep_summary,
-        "fetal_movement": entry.fetal_movement,
-        "symptom_tags": entry.symptom_tags,
-        "appointment_note": entry.appointment_note,
-        "nutrition_note": entry.nutrition_note,
+        "attributes": dict(entry.attributes or {}),
         "attachments": entry.attachments,
         "updated_at": _datetime_iso(entry.updated_at),
     }
@@ -1908,7 +1875,7 @@ def _diary_payload(entry: PregnancyDiaryEntry, *, include_content: bool) -> dict
     return payload
 
 
-def _diary_reference_payload(entry: PregnancyDiaryEntry) -> dict[str, Any]:
+def _diary_reference_payload(entry: DiaryEntry) -> dict[str, Any]:
     return {
         "id": str(entry.id),
         "entry_date": _date_iso(entry.entry_date),

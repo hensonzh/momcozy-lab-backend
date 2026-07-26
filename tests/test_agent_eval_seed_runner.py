@@ -29,10 +29,10 @@ def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_ef
     assert result.failures == []
 
 
-def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_request() -> None:
+def test_agent_eval_seed_assertion_engine_reports_profile_update_for_memory_request() -> None:
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "profile_write", "status": "completed"}],
+        tool_calls=[{"tool_name": "profile_update", "status": "completed"}],
         final_text="Saved to profile.",
     )
 
@@ -41,16 +41,16 @@ def test_agent_eval_seed_assertion_engine_reports_profile_write_for_memory_reque
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "profile_write"
+    assert result.failures[0].observed == "profile_update"
 
 
-def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_command() -> None:
+def test_agent_eval_seed_assertion_engine_scopes_forbidden_plan_calls_by_type() -> None:
     case = {
         "expected_tool_calls": [],
         "forbidden_tool_calls": [
             {
-                "contract": "pregnancy_plan_manage",
-                "args_subset": {"command": "generate_plan"},
+                "contract": "plan_mutate",
+                "args_subset": {"operation": "create", "plan_type": "pregnancy"},
             }
         ],
         "expected_behavior": {},
@@ -61,9 +61,9 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
         trace=AgentEvalTrace(
             tool_calls=[
                 {
-                    "tool_name": "pregnancy_plan_manage",
+                    "tool_name": "plan_mutate",
                     "status": "completed",
-                    "safe_args": {"command": "answer_current", "choice_id": "no_checkup_records"},
+                    "safe_args": {"operation": "create", "plan_type": "milk_management"},
                 }
             ],
         ),
@@ -73,9 +73,9 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
         trace=AgentEvalTrace(
             tool_calls=[
                 {
-                    "tool_name": "pregnancy_plan_manage",
+                    "tool_name": "plan_mutate",
                     "status": "completed",
-                    "safe_args": {"command": "generate_plan"},
+                    "safe_args": {"operation": "create", "plan_type": "pregnancy"},
                 }
             ],
         ),
@@ -84,14 +84,18 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_facade_calls_by_comma
     assert allowed.passed is True
     assert forbidden.passed is False
     assert forbidden.failures[0].category == "forbidden_tool"
-    assert forbidden.failures[0].observed == "pregnancy_plan_manage"
+    assert forbidden.failures[0].observed == "plan_mutate[operation=create]"
 
 
 def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
     case = _case("pregnancy_diary_entry")
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}}
+            {
+                "tool_name": "diary_mutate",
+                "status": "completed",
+                "safe_args": {"operation": "create"},
+            }
         ],
         final_text="Saved.",
     )
@@ -106,9 +110,12 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     case = {
         **_case("pregnancy_diary_entry"),
         "expected_tool_calls": [
-            {"contract": "pregnancy_diary_write", "args_subset": {"operation": "create"}},
             {
-                "contract": "pregnancy_diary_write",
+                "contract": "diary_mutate",
+                "args_subset": {"operation": "create"},
+            },
+            {
+                "contract": "diary_mutate",
                 "args_subset": {"operation": "update"},
             },
         ],
@@ -116,11 +123,15 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "pregnancy_diary_write",
+                "tool_name": "diary_mutate",
                 "status": "completed",
                 "safe_args": {"operation": "update"},
             },
-            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}},
+            {
+                "tool_name": "diary_mutate",
+                "status": "completed",
+                "safe_args": {"operation": "create"},
+            },
         ],
         final_text="Saved.",
     )
@@ -144,7 +155,11 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
     }
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}}
+            {
+                "tool_name": "diary_mutate",
+                "status": "completed",
+                "safe_args": {"operation": "create"},
+            }
         ],
         final_text="",
     )
@@ -163,7 +178,11 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     case = _case(suite)
     trace = AgentEvalTrace(
         tool_calls=[
-            {"tool_name": "pregnancy_diary_write", "status": "completed", "safe_args": {"operation": "create"}}
+            {
+                "tool_name": "diary_mutate",
+                "status": "completed",
+                "safe_args": {"operation": "create"},
+            }
         ],
         final_text="Saved.",
     )
@@ -173,7 +192,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
     assert result.passed is False
     assert result.failures[0].category == "forbidden_tool"
     assert result.failures[0].assertion == "tool.forbidden"
-    assert result.failures[0].observed == "pregnancy_diary_write"
+    assert result.failures[0].observed == "diary_mutate"
 
 
 @pytest.mark.parametrize(
@@ -196,7 +215,7 @@ def test_agent_eval_seed_assertion_engine_passes_critical_response_trace(suite: 
 def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flow() -> None:
     case = _case("mixed_intent_and_safety")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "hospital_bag_cart_write", "status": "completed"}],
+        tool_calls=[{"tool_name": "hospital_bag_cart_mutate", "status": "completed"}],
         events=[{"type": "action.confirmation_required"}],
         actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
     )
@@ -206,15 +225,15 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
     assert result.passed is False
     assert result.failures[0].category == "forbidden_side_effect"
     assert result.failures[0].assertion == "side_effect.none"
-    assert result.failures[0].observed == "hospital_bag_cart_write"
+    assert result.failures[0].observed == "hospital_bag_cart_mutate"
 
 
 def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> None:
-    case = _case("hospital_bag_cart_write")
+    case = _case("hospital_bag_cart_mutate")
     trace = AgentEvalTrace(
         tool_calls=[
             {
-                "tool_name": "hospital_bag_cart_write",
+                "tool_name": "hospital_bag_cart_mutate",
                 "status": "completed",
                 "safe_args": {"operation": "reset_cart"},
             }
@@ -236,7 +255,13 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
 def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_skill_expectation() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "lactation_timeline_read", "status": "completed"}],
+        tool_calls=[
+            {
+                "tool_name": "schedule_timeline_read",
+                "status": "completed",
+                "args": {"domains": ["lactation"]},
+            }
+        ],
         service_skill_id="cozymate_service_agent",
         final_text="Here is your milk summary.",
     )
@@ -250,7 +275,13 @@ def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_s
 def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_has_route() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
-        tool_calls=[{"tool_name": "lactation_timeline_read", "status": "completed"}],
+        tool_calls=[
+            {
+                "tool_name": "schedule_timeline_read",
+                "status": "completed",
+                "args": {"domains": ["lactation"]},
+            }
+        ],
         service_skill_id="birth-prep",
         final_text="Here is your milk summary.",
     )
@@ -296,7 +327,7 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
                 "safe_args": {},
             },
             {
-                "tool_name": "hospital_bag_cart_write",
+                "tool_name": "hospital_bag_cart_mutate",
                 "status": "completed",
                 "safe_args": {
                     "operation": "replace_pump_model",
@@ -314,7 +345,7 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
     assert read_only_result.failures == []
     assert cart_mutation_result.passed is False
     assert cart_mutation_result.failures[0].category == "forbidden_tool"
-    assert cart_mutation_result.failures[0].observed == "hospital_bag_cart_write"
+    assert cart_mutation_result.failures[0].observed == "hospital_bag_cart_mutate"
 
 
 def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_operation() -> None:

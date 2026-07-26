@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import ApiError
-from app.modules.diary.models import PregnancyDiaryEntry
+from app.modules.diary.models import DiaryEntry
 from app.modules.diary.service import DiaryService
 
 
@@ -28,17 +28,17 @@ def test_diary_service_keeps_create_and_update_as_distinct_operations() -> None:
         service.update_entry(
             owner_user_id=owner_user_id,
             entry_date=created.entry_date,
-            values={"mood": "安心"},
+            values={"attributes": {"mood": "安心"}},
             request_id="update-request",
         )
     )
 
     assert updated is created
     assert created.content == "今天胎动规律。"
-    assert created.mood == "安心"
+    assert created.attributes["mood"] == "安心"
     assert [item["action"] for item in audit.entries] == [
-        "pregnancy_diary.entry.create",
-        "pregnancy_diary.entry.update",
+        "diary.entry.create",
+        "diary.entry.update",
     ]
 
 
@@ -76,14 +76,14 @@ def test_diary_service_maps_concurrent_create_to_conflict() -> None:
 class FakeDiaryRepository:
     def __init__(self, *, owner_user_id: UUID) -> None:
         self.owner_user_id = owner_user_id
-        self.entry: PregnancyDiaryEntry | None = None
+        self.entry: DiaryEntry | None = None
 
     async def create_entry(self, *, owner_user_id: UUID, entry_date: date, values: dict):
-        self.entry = PregnancyDiaryEntry(
+        self.entry = DiaryEntry(
             id=uuid4(),
             owner_user_id=owner_user_id,
             entry_date=entry_date,
-            symptom_tags=[],
+            attributes={},
             attachments=[],
             status="active",
         )
@@ -98,10 +98,17 @@ class FakeDiaryRepository:
         entry_date: date,
         values: dict,
     ):
-        if self.entry is None or self.entry.owner_user_id != owner_user_id or self.entry.entry_date != entry_date:
+        if (
+            self.entry is None
+            or self.entry.owner_user_id != owner_user_id
+            or self.entry.entry_date != entry_date
+        ):
             return None
         for key, value in values.items():
-            setattr(self.entry, key, value)
+            if key == "attributes":
+                self.entry.attributes = {**self.entry.attributes, **value}
+            else:
+                setattr(self.entry, key, value)
         return self.entry
 
 

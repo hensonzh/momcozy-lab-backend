@@ -7,22 +7,28 @@ from app.modules.profiles.lactation_context_schema import (
     MaternalInfantProfileReadOutput,
     MaternalInfantProfileUpdateOutput,
 )
-from app.modules.records.lactation_timeline_schema import (
-    LactationTimelineManageOutput,
-    LactationTimelineReadOutput,
+from app.modules.plans.schedule_timeline_schema import (
+    ScheduleTimelineReadOutput,
+    ScheduleTimelineMutateOutput,
 )
+from app.modules.plans.plan_tool_schema import PlanMutateOutput, PlanReadOutput
 from app.modules.records.milk_analysis_schema import MilkAnalysisOutput
+from app.modules.diary.tool_schema import DiaryMutateOutput, DiaryReadOutput
 
 
 JsonSchema = dict[str, Any]
 
 
 _TOOL_OUTPUT_SCHEMAS: dict[str, JsonSchema] = {
-    "lactation_timeline_write": LactationTimelineManageOutput.model_json_schema(),
-    "lactation_timeline_read": LactationTimelineReadOutput.model_json_schema(),
+    "schedule_timeline_read": ScheduleTimelineReadOutput.model_json_schema(),
+    "schedule_timeline_mutate": ScheduleTimelineMutateOutput.model_json_schema(),
+    "plan_read": PlanReadOutput.model_json_schema(),
+    "plan_mutate": PlanMutateOutput.model_json_schema(),
     "milk_analysis_manage": MilkAnalysisOutput.model_json_schema(),
     "profile_read": MaternalInfantProfileReadOutput.model_json_schema(),
-    "profile_write": MaternalInfantProfileUpdateOutput.model_json_schema(),
+    "profile_update": MaternalInfantProfileUpdateOutput.model_json_schema(),
+    "diary_read": DiaryReadOutput.model_json_schema(),
+    "diary_mutate": DiaryMutateOutput.model_json_schema(),
     "pump_models_read": {
         "type": "object",
         "additionalProperties": False,
