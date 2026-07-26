@@ -60,8 +60,8 @@ class LactationMotherContextOutput(_StrictOutputModel):
     estimated_due_date: date | None = Field(
         description=(
             "妈妈登记的预产期，格式为 YYYY-MM-DD；仅在尚无当前实际分娩日期和宝宝实际出生日期时返回。"
-            "一旦任一实际日期已存在，本字段固定投影为 null，避免产后奶量分析误用旧预产期；"
-            "这不会删除数据库中保留的原始值。"
+            "一旦任一实际日期已存在，数据库中的旧预产期会被清空，本字段返回 null，"
+            "避免产后奶量分析误用旧值。"
         ),
     )
     delivery_count: int | None = Field(
@@ -222,7 +222,7 @@ class LactationDataQualityIssueOutput(_StrictOutputModel):
 
     code: LactationDataQualityIssueCode = Field(
         description=(
-            "稳定、可机读的数据质量代码；current_infants_not_selected=多宝宝档案尚未标记本次分娩宝宝，"
+            "稳定、可机读的数据质量代码；current_infants_not_selected=已有宝宝档案但尚未明确标记本次分娩宝宝，"
             "actual_delivery_date_is_in_future=实际分娩日期在未来，infant_birth_date_mismatch=宝宝出生日期"
             "与妈妈实际分娩日期不一致，infant_birth_date_is_in_future=宝宝出生日期在未来。"
         ),
@@ -297,8 +297,14 @@ class MaternalInfantProfileUpdateOutput(_StrictOutputModel):
     action_id: UUID = Field(
         description="本次持久化 Action 的稳定 UUID。",
     )
-    action_type: Literal["profile.update"] = Field(
-        description="固定为 profile.update，表示受保护的基础资料更新 Action。",
+    action_type: Literal[
+        "profile.update",
+        "profile.current_infants.replace",
+    ] = Field(
+        description=(
+            "实际使用的受保护 Action 类型；profile.update=普通基础资料更新，"
+            "profile.current_infants.replace=完整替换当前分娩宝宝关系。"
+        ),
     )
     action_status: str = Field(
         description="Action 当前状态，例如 applied、confirmation_required 或 failed。",
@@ -329,4 +335,8 @@ class MaternalInfantProfileUpdateOutput(_StrictOutputModel):
     updated: MaternalInfantProfileUpdateSummary | None = Field(
         default=None,
         description="写入成功后的字段摘要；未成功应用时为 null 或省略。",
+    )
+    profile: MaternalInfantProfileReadOutput | None = Field(
+        default=None,
+        description="写入成功后重新读取的规范化妈妈与宝宝基础资料；尚待确认或写入失败时为 null 或省略。",
     )

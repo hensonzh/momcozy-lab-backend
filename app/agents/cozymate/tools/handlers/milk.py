@@ -37,7 +37,10 @@ from app.agents.cozymate.actions.records import (
     PUMPING_RECORD_DELETE_ACTION,
     PUMPING_RECORD_UPDATE_ACTION,
 )
-from app.agents.cozymate.actions.profiles import PROFILE_UPDATE_ACTION
+from app.agents.cozymate.actions.profiles import (
+    PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
+    PROFILE_UPDATE_ACTION,
+)
 from app.modules.records.service import RecordsService
 from app.agents.cozymate.tools.milk_analysis_flow import (
     MILK_ANALYSIS_SCHEMA_VERSION,
@@ -166,7 +169,6 @@ def _lactation_record_context(
             "weight_kg",
             "head_cm",
             "reason",
-            "idempotency_key",
         )
         if key in source
     }
@@ -633,10 +635,20 @@ class MaternalInfantProfileReadToolHandler(_StandardToolHandler):
 
 
 class MaternalInfantProfileUpdateToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService) -> None:
+    def __init__(
+        self,
+        *,
+        runtime_service: AgentRuntimeService,
+        lactation_context_service: LactationContextService,
+    ) -> None:
         self.runtime_service = runtime_service
+        self.lactation_context_service = lactation_context_service
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
+        reference_date = (
+            _optional_date_arg(context.args, "runtime_local_date")
+            or date.today()
+        )
         raw_mother_values = context.args.get("mother")
         if "mother" in context.args and not isinstance(raw_mother_values, dict):
             raise ApiError(
@@ -694,6 +706,19 @@ class MaternalInfantProfileUpdateToolHandler(_StandardToolHandler):
                 }
                 for link in current_infants
             ]
+            _, existing_current_infants = (
+                await self.lactation_context_service.get_maternal_profile(
+                    owner_user_id=context.actor.user_id,
+                )
+            )
+            apply_payload["expected_current_infants"] = [
+                {
+                    "infant_id": str(link["infant_id"]),
+                    "birth_order": link["birth_order"],
+                }
+                for link in existing_current_infants
+            ]
+        apply_payload["reference_date"] = reference_date.isoformat()
 
         updated = {
             "mother_fields": sorted(mother_values),
@@ -711,28 +736,59 @@ class MaternalInfantProfileUpdateToolHandler(_StandardToolHandler):
             for key, value in updated.items()
             if value not in ([], False)
         }
+        if current_infants_supplied:
+            preview_payload.update(
+                {
+                    "previous_current_infants": apply_payload[
+                        "expected_current_infants"
+                    ],
+                    "proposed_current_infants": apply_payload[
+                        "current_infants"
+                    ],
+                }
+            )
         action = await _propose_action_reusing_idempotency(
             self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
-            action_type=PROFILE_UPDATE_ACTION,
+            action_type=(
+                PROFILE_CURRENT_INFANTS_REPLACE_ACTION
+                if current_infants_supplied
+                else PROFILE_UPDATE_ACTION
+            ),
             target_type="profile",
             target_id=str(context.actor.user_id),
-            side_effect_level="low",
+            side_effect_level=(
+                "medium"
+                if current_infants_supplied
+                else "low"
+            ),
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:maternal-infant-profile-update",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:profile-update",
+                apply_payload,
+            ),
         )
         output = _proposal_result(
             action=action,
             preview_payload=preview_payload,
         )
         if output["write_succeeded"]:
+            profile = await self.lactation_context_service.read(
+                owner_user_id=context.actor.user_id,
+                as_of_date=reference_date,
+                infant_scope=(
+                    "all"
+                    if infant_updates
+                    else "current_delivery"
+                ),
+            )
             output.update(
                 {
                     "status": "maternal_infant_profile_updated",
                     "updated": updated,
+                    "profile": profile,
                 }
             )
         return output
@@ -747,7 +803,8 @@ class FeedingRecordProposeToolHandler(_StandardToolHandler):
         if apply_payload.get("volume_ml") is None and apply_payload.get("duration_seconds") is None:
             raise ApiError(code="validation_failed", message="volume_ml or duration_seconds is required.", status=422)
         preview_payload = _feeding_record_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=FEEDING_RECORD_CREATE_ACTION,
@@ -755,7 +812,10 @@ class FeedingRecordProposeToolHandler(_StandardToolHandler):
             side_effect_level="low",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:feeding-record",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:feeding-record-create",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -769,7 +829,8 @@ class PumpingRecordProposeToolHandler(_StandardToolHandler):
         if apply_payload.get("milk_volume_ml") is None and apply_payload.get("duration_seconds") is None:
             raise ApiError(code="validation_failed", message="milk_volume_ml or duration_seconds is required.", status=422)
         preview_payload = _pumping_record_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PUMPING_RECORD_CREATE_ACTION,
@@ -777,7 +838,10 @@ class PumpingRecordProposeToolHandler(_StandardToolHandler):
             side_effect_level="low",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pumping-record",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:pumping-record-create",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -794,7 +858,8 @@ class FeedingRecordUpdateProposeToolHandler(_StandardToolHandler):
         if not _feeding_record_update_fields(apply_payload):
             raise ApiError(code="validation_failed", message="At least one feeding update field is required.", status=422)
         preview_payload = _feeding_record_update_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=FEEDING_RECORD_UPDATE_ACTION,
@@ -803,8 +868,10 @@ class FeedingRecordUpdateProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:feeding-record-update",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:feeding-record-update",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -821,7 +888,8 @@ class PumpingRecordUpdateProposeToolHandler(_StandardToolHandler):
         if not _pumping_record_update_fields(apply_payload):
             raise ApiError(code="validation_failed", message="At least one pumping update field is required.", status=422)
         preview_payload = _pumping_record_update_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PUMPING_RECORD_UPDATE_ACTION,
@@ -830,8 +898,10 @@ class PumpingRecordUpdateProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:pumping-record-update",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:pumping-record-update",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -846,7 +916,8 @@ class FeedingRecordDeleteProposeToolHandler(_StandardToolHandler):
         if not record_id:
             raise ApiError(code="validation_failed", message="record_id is required.", status=422)
         preview_payload = _record_delete_preview_payload(apply_payload, record_type="feeding_record")
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=FEEDING_RECORD_DELETE_ACTION,
@@ -855,7 +926,10 @@ class FeedingRecordDeleteProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:feeding-record-delete",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:feeding-record-delete",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -870,7 +944,8 @@ class PumpingRecordDeleteProposeToolHandler(_StandardToolHandler):
         if not record_id:
             raise ApiError(code="validation_failed", message="record_id is required.", status=422)
         preview_payload = _record_delete_preview_payload(apply_payload, record_type="pumping_record")
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PUMPING_RECORD_DELETE_ACTION,
@@ -879,7 +954,10 @@ class PumpingRecordDeleteProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:pumping-record-delete",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:pumping-record-delete",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -895,7 +973,8 @@ class GrowthRecordProposeToolHandler(_StandardToolHandler):
         if not _has_any_growth_measurement(apply_payload):
             raise ApiError(code="validation_failed", message="height_cm, weight_kg, or head_cm is required.", status=422)
         preview_payload = _growth_record_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=GROWTH_RECORD_CREATE_ACTION,
@@ -903,7 +982,10 @@ class GrowthRecordProposeToolHandler(_StandardToolHandler):
             side_effect_level="low",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:growth-record",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:growth-record-create",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -920,7 +1002,8 @@ class GrowthRecordUpdateProposeToolHandler(_StandardToolHandler):
         if not _growth_update_fields(apply_payload):
             raise ApiError(code="validation_failed", message="At least one growth update field is required.", status=422)
         preview_payload = _growth_record_update_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=GROWTH_RECORD_UPDATE_ACTION,
@@ -929,7 +1012,10 @@ class GrowthRecordUpdateProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:growth-record-update",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:growth-record-update",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -944,7 +1030,8 @@ class GrowthRecordDeleteProposeToolHandler(_StandardToolHandler):
         if not record_id:
             raise ApiError(code="validation_failed", message="record_id is required.", status=422)
         preview_payload = _record_delete_preview_payload(apply_payload, record_type="growth_record")
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=GROWTH_RECORD_DELETE_ACTION,
@@ -953,7 +1040,10 @@ class GrowthRecordDeleteProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:growth-record-delete",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:growth-record-delete",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
@@ -1077,10 +1167,9 @@ class MilkPlanProposeToolHandler(_StandardToolHandler):
             preview_payload=preview_payload,
             apply_payload=apply_payload,
             expires_at=valid_until,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or _stable_payload_key(
-                "milk-plan",
-                {"owner": str(context.actor.user_id), "thread": str(context.thread_id), "payload": apply_payload},
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:milk-plan-create",
+                apply_payload,
             ),
         )
         payload = {**_milk_plan_artifact_payload(apply_payload), "action_id": str(action.id)}
@@ -1176,6 +1265,12 @@ class MilkScheduleRescheduleProposeToolHandler(_StandardToolHandler):
                 "updated_count": 0,
                 "affected_dates": [],
             }
+        apply_payload = {
+            "plan_id": str(plan_id),
+            "updates": preview["updates"],
+            "affected_dates": preview["affected_dates"],
+            "calendar_events": calendar_events,
+        }
         action = await _propose_action_reusing_idempotency(
             self.runtime_service,
             owner_user_id=context.actor.user_id,
@@ -1185,21 +1280,10 @@ class MilkScheduleRescheduleProposeToolHandler(_StandardToolHandler):
             target_id=str(plan_id),
             side_effect_level="medium",
             preview_payload=preview,
-            apply_payload={
-                "plan_id": str(plan_id),
-                "updates": preview["updates"],
-                "affected_dates": preview["affected_dates"],
-                "calendar_events": calendar_events,
-            },
-            idempotency_key=_text(context.args, "idempotency_key")
-            or _stable_payload_key(
-                "milk-schedule-reschedule",
-                {
-                    "owner": str(context.actor.user_id),
-                    "plan_id": str(plan_id),
-                    "updates": preview["updates"],
-                    "calendar_events": calendar_events,
-                },
+            apply_payload=apply_payload,
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:milk-schedule-reschedule",
+                apply_payload,
             ),
         )
         artifact_payload = {**preview, "action_id": str(action.id), "title": "奶量计划日程调整预览"}

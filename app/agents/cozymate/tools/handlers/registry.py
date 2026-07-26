@@ -63,7 +63,8 @@ def build_default_tool_handlers(
             service=lactation_context_service
         ),
         "profile_update": MaternalInfantProfileUpdateToolHandler(
-            runtime_service=agent_runtime_service
+            runtime_service=agent_runtime_service,
+            lactation_context_service=lactation_context_service,
         ),
         "schedule_timeline_mutate": ScheduleTimelineMutateToolHandler(
             runtime_service=agent_runtime_service,

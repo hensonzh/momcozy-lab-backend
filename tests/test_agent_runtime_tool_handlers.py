@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -58,6 +59,9 @@ from app.agents.cozymate.actions.plans import (
     PLAN_DELETE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
 )
+from app.agents.cozymate.actions.profiles import (
+    PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
+)
 from app.modules.plans.models import Plan, PlanTask
 from app.modules.profiles.models import InfantProfile, UserProfile
 from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
@@ -83,7 +87,11 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
     actor = _user()
     infant_id = uuid4()
     runtime_service = FakeAgentRuntimeService()
-    handler = MaternalInfantProfileUpdateToolHandler(runtime_service=runtime_service)
+    lactation_service = FakeLactationContextService()
+    handler = MaternalInfantProfileUpdateToolHandler(
+        runtime_service=runtime_service,
+        lactation_context_service=lactation_service,
+    )
 
     result = asyncio.run(
         handler.execute(
@@ -110,7 +118,7 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                             "gestational_age_at_birth_days": 258,
                         }
                     ],
-                    "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
+                    "runtime_local_date": "2026-07-26",
                 },
             )
         )
@@ -140,7 +148,13 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                 ],
             }
         ],
-        "current_infants_updated": True,
+        "current_infants_updated": False,
+    }
+    assert result["profile"] == lactation_service.profile
+    assert lactation_service.query == {
+        "owner_user_id": actor.user_id,
+        "as_of_date": date(2026, 7, 26),
+        "infant_scope": "all",
     }
     action_call = runtime_service.calls[0]
     assert action_call["owner_user_id"] == actor.user_id
@@ -167,16 +181,78 @@ def test_profile_update_tool_handler_updates_user_and_infant_in_one_action() -> 
                 "gestational_age_at_birth_days": 258,
             }
         ],
-        "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
+        "reference_date": "2026-07-26",
     }
+    assert action_call["idempotency_key"].startswith(
+        f"{action_call['run_id']}:profile-update:"
+    )
     validate_tool_output(
         schema=default_tool_registry().get("profile_update").output_schema,
         value=result,
     )
 
 
+def test_profile_update_current_infants_requires_confirmation_and_captures_expected_links() -> None:
+    actor = _user()
+    previous_infant_id = uuid4()
+    next_infant_id = uuid4()
+    runtime_service = FakeAgentRuntimeService()
+    lactation_service = FakeLactationContextService(
+        current_infants=[
+            {"infant_id": previous_infant_id, "birth_order": 1},
+        ]
+    )
+    handler = MaternalInfantProfileUpdateToolHandler(
+        runtime_service=runtime_service,
+        lactation_context_service=lactation_service,
+    )
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={
+                    "current_infants": [
+                        {"infant_id": str(next_infant_id), "birth_order": 1},
+                    ],
+                    "runtime_local_date": "2026-07-26",
+                },
+            )
+        )
+    )
+
+    assert result["action_type"] == PROFILE_CURRENT_INFANTS_REPLACE_ACTION
+    assert result["action_status"] == "confirmation_required"
+    assert result["requires_confirmation"] is True
+    assert result["write_succeeded"] is False
+    assert "profile" not in result
+    action_call = runtime_service.calls[0]
+    assert action_call["side_effect_level"] == "medium"
+    assert action_call["preview_payload"] == {
+        "current_infants_updated": True,
+        "previous_current_infants": [
+            {"infant_id": str(previous_infant_id), "birth_order": 1},
+        ],
+        "proposed_current_infants": [
+            {"infant_id": str(next_infant_id), "birth_order": 1},
+        ],
+    }
+    assert action_call["apply_payload"] == {
+        "current_infants": [
+            {"infant_id": str(next_infant_id), "birth_order": 1},
+        ],
+        "expected_current_infants": [
+            {"infant_id": str(previous_infant_id), "birth_order": 1},
+        ],
+        "reference_date": "2026-07-26",
+    }
+
+
 def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
-    handler = MaternalInfantProfileUpdateToolHandler(runtime_service=FakeAgentRuntimeService())
+    handler = MaternalInfantProfileUpdateToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        lactation_context_service=FakeLactationContextService(),
+    )
 
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(handler.execute(_context(args={})))
@@ -186,7 +262,10 @@ def test_profile_update_tool_handler_requires_at_least_one_field() -> None:
 
 def test_profile_update_tool_handler_preserves_explicit_nulls() -> None:
     runtime_service = FakeAgentRuntimeService()
-    handler = MaternalInfantProfileUpdateToolHandler(runtime_service=runtime_service)
+    handler = MaternalInfantProfileUpdateToolHandler(
+        runtime_service=runtime_service,
+        lactation_context_service=FakeLactationContextService(),
+    )
 
     result = asyncio.run(
         handler.execute(
@@ -208,8 +287,62 @@ def test_profile_update_tool_handler_preserves_explicit_nulls() -> None:
             "preferred_name": None,
             "age": None,
             "estimated_due_date": None,
-        }
+        },
+        "reference_date": date.today().isoformat(),
     }
+
+
+def test_profile_update_uses_payload_derived_idempotency_across_tool_call_retries() -> None:
+    runtime_service = FakeAgentRuntimeService()
+    handler = MaternalInfantProfileUpdateToolHandler(
+        runtime_service=runtime_service,
+        lactation_context_service=FakeLactationContextService(),
+    )
+    context = _context(
+        args={
+            "mother": {"age": 31},
+            "runtime_local_date": "2026-07-26",
+        },
+    )
+
+    first = asyncio.run(handler.execute(context))
+    second = asyncio.run(handler.execute(replace(context, call_id="call-2")))
+
+    assert second["action_id"] == first["action_id"]
+    assert len(runtime_service.calls) == 1
+    assert "call-1" not in runtime_service.calls[0]["idempotency_key"]
+
+
+def test_profile_update_standard_handler_does_not_inject_hidden_operation_field() -> None:
+    handler = MaternalInfantProfileUpdateToolHandler(
+        runtime_service=FakeAgentRuntimeService(),
+        lactation_context_service=FakeLactationContextService(),
+    )
+
+    result = asyncio.run(
+        handler(
+            _context(
+                tool_name="profile_update",
+                args={
+                    "mother": {"age": 31},
+                    "runtime_local_date": "2026-07-26",
+                },
+            )
+        )
+    )
+
+    assert result.audit_output is not None
+    assert "operation" not in result.audit_output
+    model_output = json.loads(result.to_function_call_output())
+    assert "action_id" not in model_output
+    assert "action_type" not in model_output
+    assert "preview_payload" not in model_output
+    assert model_output["write_succeeded"] is True
+    assert model_output["profile"] == result.audit_output["profile"]
+    validate_tool_output(
+        schema=default_tool_registry().get("profile_update").output_schema,
+        value=result.audit_output,
+    )
 
 
 def test_support_ticket_create_tool_handler_creates_editable_draft_artifact() -> None:
@@ -282,6 +415,7 @@ def test_hospital_bag_cart_mutate_propose_tool_handler_creates_confirmation_acti
             },
             "summary": "Mark nursing bra packed and add a phone charger",
             "timezone": "Asia/Shanghai",
+            "idempotency_key": "model-controlled-key",
         },
     )
 
@@ -298,6 +432,8 @@ def test_hospital_bag_cart_mutate_propose_tool_handler_creates_confirmation_acti
     assert runtime_service.calls[0]["target_type"] == "hospital_bag_cart"
     assert runtime_service.calls[0]["side_effect_level"] == "low"
     assert runtime_service.calls[0]["apply_payload"]["metadata"] == {"timezone": "Asia/Shanghai"}
+    assert runtime_service.calls[0]["idempotency_key"] != "model-controlled-key"
+    assert context.call_id not in runtime_service.calls[0]["idempotency_key"]
 
 
 def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idempotent_action() -> None:
@@ -316,7 +452,7 @@ def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idem
     context = _context(actor=actor, args={"operation": "reset_cart"})
 
     first = asyncio.run(handler(context))
-    second = asyncio.run(handler(context))
+    second = asyncio.run(handler(replace(context, call_id="hospital-cart-retry")))
     first_output = first.to_observation()
     second_output = second.to_observation()
 
@@ -330,6 +466,8 @@ def test_registered_hospital_bag_cart_handler_preserves_cart_result_through_idem
     assert len(cart_actions) == 1
     assert cart_actions[0].actor_user_id == actor.user_id
     assert cart_actions[0].apply_payload["cart_update"] == first_output["cart_update"]
+    assert context.call_id not in cart_actions[0].idempotency_key
+    assert "hospital-cart-retry" not in cart_actions[0].idempotency_key
 
 
 def test_registered_hospital_bag_cart_handler_reads_shared_pump_models_object_for_model_replacement() -> None:
@@ -3509,6 +3647,37 @@ def test_diary_mutate_creates_action_with_content_only() -> None:
     }
 
 
+def test_diary_mutate_uses_runtime_owned_stable_idempotency() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = DiarySaveToolHandler(runtime_service=runtime_service)
+    context = _context(
+        actor=actor,
+        args={
+            "operation": "create",
+            "entry_date": "2026-07-04",
+            "content": "Today I felt steady.",
+            "idempotency_key": "model-controlled-key",
+        },
+    )
+
+    first = asyncio.run(handler.execute(context))
+    second = asyncio.run(
+        handler.execute(replace(context, call_id="diary-save-retry"))
+    )
+
+    assert second["action_id"] == first["action_id"]
+    diary_actions = [
+        action
+        for action in runtime_service.actions
+        if action.action_type == "diary.entry.save"
+    ]
+    assert len(diary_actions) == 1
+    assert diary_actions[0].idempotency_key != "model-controlled-key"
+    assert context.call_id not in diary_actions[0].idempotency_key
+    assert "diary-save-retry" not in diary_actions[0].idempotency_key
+
+
 def test_diary_mutate_update_replaces_with_complete_content() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
@@ -3691,6 +3860,37 @@ def test_diary_mutate_creates_action_for_explicit_user_intent() -> None:
     }
 
 
+def test_diary_delete_uses_runtime_owned_stable_idempotency() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = DiaryDeleteToolHandler(runtime_service=runtime_service)
+    context = _context(
+        actor=actor,
+        args={
+            "entry_date": "2026-07-04",
+            "confirmation_evidence": "请删除 7 月 4 日的日记",
+            "trusted_current_user_text": "请删除 7 月 4 日的日记",
+            "idempotency_key": "model-controlled-key",
+        },
+    )
+
+    first = asyncio.run(handler.execute(context))
+    second = asyncio.run(
+        handler.execute(replace(context, call_id="diary-delete-retry"))
+    )
+
+    assert second["action_id"] == first["action_id"]
+    diary_actions = [
+        action
+        for action in runtime_service.actions
+        if action.action_type == "diary.entry.delete"
+    ]
+    assert len(diary_actions) == 1
+    assert diary_actions[0].idempotency_key != "model-controlled-key"
+    assert context.call_id not in diary_actions[0].idempotency_key
+    assert "diary-delete-retry" not in diary_actions[0].idempotency_key
+
+
 def test_support_ticket_create_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -3815,24 +4015,59 @@ class FakeProfileService:
 
 
 class FakeLactationContextService:
-    def __init__(self) -> None:
+    def __init__(self, *, current_infants: list[dict] | None = None) -> None:
         self.query = {}
+        self.current_infants = current_infants or []
+        self.profile = {}
+
+    async def get_maternal_profile(self, *, owner_user_id):
+        return None, self.current_infants
 
     async def read(self, **kwargs):
         self.query = kwargs
-        return {
+        self.profile = {
             "as_of_date": (kwargs["as_of_date"].isoformat() if kwargs.get("as_of_date") else "2026-07-23"),
-            "mother": {"postpartum_days": 74},
+            "infant_scope": kwargs.get("infant_scope", "current_delivery"),
+            "mother": {
+                "preferred_name": "Mai",
+                "age": 31,
+                "estimated_due_date": None,
+                "delivery_count": 1,
+                "current_delivery_method": "vaginal",
+                "actual_delivery_date": "2026-05-10",
+                "has_cesarean_history": False,
+                "postpartum_days": 74,
+                "current_feeding_mode": "mixed_feeding",
+            },
             "infants": [
                 {
+                    "infant_id": "11111111-1111-4111-8111-111111111111",
+                    "name": "Baby",
+                    "is_current_delivery": True,
                     "birth_order": 1,
                     "sex_at_birth": "female",
-                    "latest_measurement": {"height_cm": 62},
+                    "birth_date": "2026-05-10",
+                    "age_days": 74,
+                    "age_months": 2,
+                    "birth_weight_kg": 3.2,
+                    "gestational_age_at_birth": {
+                        "total_days": 280,
+                        "weeks": 40,
+                        "days": 0,
+                        "is_preterm": False,
+                    },
+                    "latest_measurement": {
+                        "weight_kg": 5.1,
+                        "height_cm": 62,
+                        "head_circumference_cm": 39,
+                        "measured_at": "2026-07-20T08:30:00+00:00",
+                    },
                 }
             ],
             "missing_fields": [],
             "data_quality_issues": [],
         }
+        return self.profile
 
 
 class FakeRecordsService:

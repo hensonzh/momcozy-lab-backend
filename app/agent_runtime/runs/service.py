@@ -656,6 +656,17 @@ class AgentRuntimeService:
                     idempotency_key=normalized_idempotency_key,
                 )
                 if existing is not None:
+                    if dict(existing.apply_payload or {}) != dict(
+                        apply_payload or {}
+                    ):
+                        raise ApiError(
+                            code="idempotency_conflict",
+                            message=(
+                                "The idempotency key was already used with "
+                                "a different action payload."
+                            ),
+                            status=409,
+                        )
                     if not decision.requires_confirmation and existing.status in {"confirmed", "applying"}:
                         assert action_executor is not None
                         outcome = await action_executor.apply(existing)

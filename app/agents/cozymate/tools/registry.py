@@ -43,13 +43,17 @@ def default_tool_registry() -> ToolContractRegistry:
             name="profile_update",
             domain="profiles",
             description=(
-                "使用 operation=update 更新 profile_read 对应的妈妈与宝宝基础资料。"
+                "更新 profile_read 对应的妈妈与宝宝基础资料。"
                 "用户明确提供、更正或清空妈妈称呼、年龄、预产期、当前分娩与喂养信息，"
                 "或宝宝姓名、出生日期、出生时性别、出生体重、出生孕周时调用；"
-                "更新宝宝必须使用 profile_read 返回的 infant_id。"
+                "更新宝宝必须使用 profile_read 返回的 infant_id。完整替换当前分娩宝宝关联"
+                "（包括传空数组清空）属于关系变更，必须由用户确认后执行。"
             ),
             effect_scope="user_resource",
-            action_types=("profile.update",),
+            action_types=(
+                "profile.update",
+                "profile.current_infants.replace",
+            ),
             blocking_policy="must_wait",
             result_dependency="final_response",
             timeout_seconds=10,

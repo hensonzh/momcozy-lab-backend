@@ -387,11 +387,6 @@ def _hospital_bag_cart_preview_payload(apply_payload: dict[str, Any]) -> dict[st
     return {key: value for key, value in preview.items() if value not in ("", None, {})}
 
 
-def _hospital_bag_cart_idempotency_key(*, run_id: Any, cart_update: dict[str, Any]) -> str:
-    canonical = json.dumps(cart_update, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    return f"hospital-bag-cart:{run_id}:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
-
-
 def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
     reason = _text(args, "reason")
     payload: dict[str, Any] = {

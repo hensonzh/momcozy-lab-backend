@@ -18,6 +18,9 @@ def test_run_agent_replay_eval_writes_passing_report(tmp_path: Path) -> None:
                 "events": [],
                 "tool_calls": [],
                 "actions": [],
+                "run": {
+                    "service_skill_id": "cozymate_service_agent",
+                },
             }
         )
     )
@@ -43,6 +46,9 @@ def test_run_agent_replay_eval_reports_blocking_failures(tmp_path: Path) -> None
                 "events": [],
                 "tool_calls": [{"tool_name": "profile_update", "status": "completed"}],
                 "actions": [],
+                "run": {
+                    "service_skill_id": "cozymate_service_agent",
+                },
             }
         )
     )

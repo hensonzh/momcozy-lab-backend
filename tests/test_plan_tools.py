@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -234,6 +235,39 @@ def test_plan_mutate_delete_derives_type_from_owner_scoped_plan() -> None:
     assert result["action_type"] == PLAN_DELETE_ACTION
 
 
+def test_plan_mutate_delete_uses_runtime_owned_stable_idempotency() -> None:
+    owner_user_id = uuid4()
+    plan = _plan(
+        owner_user_id=owner_user_id,
+        plan_type="milk_management",
+    )
+    runtime = FakeRuntimeService()
+    handler = PlanMutateToolHandler(
+        runtime_service=runtime,
+        plans_service=FakePlansService(plans=[plan]),
+    )
+    context = _context(
+        owner_user_id=owner_user_id,
+        tool_name="plan_mutate",
+        args={
+            "operation": "delete",
+            "plan_id": str(plan.id),
+            "idempotency_key": "model-controlled-key",
+        },
+    )
+
+    asyncio.run(handler.execute(context))
+    asyncio.run(handler.execute(replace(context, call_id="plan-delete-retry")))
+
+    keys = [call["idempotency_key"] for call in runtime.calls]
+    assert keys[0] == keys[1]
+    assert keys[0] != "model-controlled-key"
+    assert context.call_id not in keys[0]
+    assert "plan-delete-retry" not in keys[0]
+    assert len(runtime.propose_once_calls) == 2
+    assert all(call["reuse_existing"] is True for call in runtime.propose_once_calls)
+
+
 def test_plan_mutate_rejects_a_mismatched_type_hint_for_existing_plan() -> None:
     owner_user_id = uuid4()
     plan = _plan(owner_user_id=owner_user_id, plan_type="pregnancy")
@@ -301,6 +335,38 @@ def test_plan_mutate_update_proposes_versioned_metadata_action() -> None:
     )
 
 
+def test_plan_mutate_update_uses_runtime_owned_stable_idempotency() -> None:
+    owner_user_id = uuid4()
+    plan = _plan(owner_user_id=owner_user_id, plan_type="pregnancy")
+    runtime = FakeRuntimeService()
+    handler = PlanMutateToolHandler(
+        runtime_service=runtime,
+        plans_service=FakePlansService(plans=[plan]),
+    )
+    context = _context(
+        owner_user_id=owner_user_id,
+        tool_name="plan_mutate",
+        args={
+            "operation": "update",
+            "plan_id": str(plan.id),
+            "expected_version": 3,
+            "title": "更新后的孕期计划",
+            "idempotency_key": "model-controlled-key",
+        },
+    )
+
+    asyncio.run(handler.execute(context))
+    asyncio.run(handler.execute(replace(context, call_id="plan-update-retry")))
+
+    keys = [call["idempotency_key"] for call in runtime.calls]
+    assert keys[0] == keys[1]
+    assert keys[0] != "model-controlled-key"
+    assert context.call_id not in keys[0]
+    assert "plan-update-retry" not in keys[0]
+    assert len(runtime.propose_once_calls) == 2
+    assert all(call["reuse_existing"] is True for call in runtime.propose_once_calls)
+
+
 class FakePlansService:
     def __init__(self, *, plans: list | None = None) -> None:
         self.plans = plans or []
@@ -342,6 +408,7 @@ class CapturingPlanOperationHandler:
 class FakeRuntimeService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.propose_once_calls: list[dict] = []
 
     async def propose_action(self, **kwargs):
         self.calls.append(kwargs)
@@ -359,6 +426,10 @@ class FakeRuntimeService:
             idempotency_key=kwargs["idempotency_key"],
             error_code="",
         )
+
+    async def propose_action_once(self, **kwargs):
+        self.propose_once_calls.append(kwargs)
+        return await self.propose_action(**kwargs), True
 
 
 def _plan(

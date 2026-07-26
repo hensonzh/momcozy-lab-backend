@@ -39,7 +39,6 @@ MULTI_OPERATION_MUTATION_TOOLS = {
 
 SINGLE_OPERATION_TOOLS = {
     "ibclc_consult_card_create": "create",
-    "profile_update": "update",
     "support_ticket_create": "create",
 }
 
@@ -73,12 +72,16 @@ def test_single_operation_tool_names_match_their_operation() -> None:
         assert schema["properties"]["operation"]["enum"] == [operation], name
 
 
+def test_single_purpose_profile_update_does_not_repeat_operation_in_arguments() -> None:
+    schema = default_tool_registry().get("profile_update").input_schema
+
+    assert "operation" not in schema["properties"]
+    assert "required" not in schema
+
+
 def test_consolidated_resource_mutations_expose_only_supported_operations() -> None:
     registry = default_tool_registry()
 
-    assert registry.get("profile_update").input_schema["properties"]["operation"]["enum"] == [
-        "update",
-    ]
     assert registry.get("diary_mutate").input_schema["properties"]["operation"]["enum"] == [
         "create",
         "update",

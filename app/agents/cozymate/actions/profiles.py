@@ -12,6 +12,7 @@ from app.modules.profiles.service import ProfileService
 
 
 PROFILE_UPDATE_ACTION = "profile.update"
+PROFILE_CURRENT_INFANTS_REPLACE_ACTION = "profile.current_infants.replace"
 
 _PROFILE_UPDATE_FIELDS = {
     "age",
@@ -46,8 +47,15 @@ class MaternalInfantProfileUpdateActionHandler:
 
     async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
         payload = dict(action.apply_payload or {})
-        if set(payload) - {"mother", "infants", "current_infants"}:
+        if set(payload) - {
+            "mother",
+            "infants",
+            "current_infants",
+            "expected_current_infants",
+            "reference_date",
+        }:
             raise PermanentActionError("unsupported_profile_updates")
+        reference_date = _reference_date(payload.get("reference_date"))
 
         raw_mother_values = payload.get("mother")
         if raw_mother_values is not None and not isinstance(raw_mother_values, dict):
@@ -82,6 +90,22 @@ class MaternalInfantProfileUpdateActionHandler:
             if current_infants_supplied
             else []
         )
+        expected_current_infants_supplied = "expected_current_infants" in payload
+        expected_current_infants = (
+            _current_infant_links(payload["expected_current_infants"])
+            if expected_current_infants_supplied
+            else None
+        )
+        if expected_current_infants_supplied and not current_infants_supplied:
+            raise PermanentActionError("unexpected_current_infant_precondition")
+        if (
+            action.action_type == PROFILE_CURRENT_INFANTS_REPLACE_ACTION
+            and (
+                not current_infants_supplied
+                or not expected_current_infants_supplied
+            )
+        ):
+            raise PermanentActionError("missing_current_infant_precondition")
         if (
             not user_values
             and not maternal_values
@@ -104,6 +128,8 @@ class MaternalInfantProfileUpdateActionHandler:
                     owner_user_id=action.actor_user_id,
                     values=lactation_values,
                     anticipated_infant_birth_dates=anticipated_birth_dates,
+                    expected_current_infants=expected_current_infants,
+                    reference_date=reference_date,
                     request_id=f"agent-action:{action.id}",
                 )
             if user_values or infant_updates:
@@ -111,6 +137,7 @@ class MaternalInfantProfileUpdateActionHandler:
                     user_id=action.actor_user_id,
                     user_values=user_values,
                     infant_updates=infant_updates,
+                    reference_date=reference_date,
                     request_id=f"agent-action:{action.id}",
                 )
         except ApiError as exc:
@@ -208,3 +235,16 @@ def _date_value(*, field: str, value: Any, date_field: str) -> Any:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise PermanentActionError(f"invalid_{date_field}") from exc
+
+
+def _reference_date(value: Any) -> date:
+    if value is None:
+        return date.today()
+    parsed = _date_value(
+        field="reference_date",
+        value=value,
+        date_field="reference_date",
+    )
+    if not isinstance(parsed, date):
+        raise PermanentActionError("invalid_reference_date")
+    return parsed

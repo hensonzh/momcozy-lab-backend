@@ -44,6 +44,13 @@ class ProfileRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def lock_profile_owner(self, *, owner_user_id: UUID) -> None:
+        await self.session.scalar(
+            select(User.id)
+            .where(User.id == owner_user_id)
+            .with_for_update()
+        )
+
     async def get_user_profile(self, *, user_id: UUID) -> UserProfile | None:
         statement = select(UserProfile).where(UserProfile.user_id == user_id)
         return cast(UserProfile | None, await self.session.scalar(statement))
@@ -58,6 +65,45 @@ class ProfileRepository:
             setattr(profile, field, value)
         await self.session.flush()
         return profile
+
+    async def clear_estimated_due_date_if_postpartum(
+        self,
+        *,
+        owner_user_id: UUID,
+    ) -> bool:
+        delivery_date = await self.session.scalar(
+            select(MaternalProfile.latest_delivery_date).where(
+                MaternalProfile.owner_user_id == owner_user_id,
+                MaternalProfile.latest_delivery_date.is_not(None),
+            )
+        )
+        current_infant_with_birth_date = await self.session.scalar(
+            select(InfantProfile.id)
+            .join(
+                MaternalCurrentDeliveryInfant,
+                MaternalCurrentDeliveryInfant.infant_id == InfantProfile.id,
+            )
+            .join(
+                MaternalProfile,
+                MaternalProfile.id
+                == MaternalCurrentDeliveryInfant.maternal_profile_id,
+            )
+            .where(
+                MaternalProfile.owner_user_id == owner_user_id,
+                InfantProfile.owner_user_id == owner_user_id,
+                InfantProfile.deleted_at.is_(None),
+                InfantProfile.birth_date.is_not(None),
+            )
+            .limit(1)
+        )
+        if delivery_date is None and current_infant_with_birth_date is None:
+            return False
+        profile = await self.get_user_profile(user_id=owner_user_id)
+        if profile is None or profile.estimated_due_date is None:
+            return False
+        profile.estimated_due_date = None
+        await self.session.flush()
+        return True
 
     async def get_maternal_profile(
         self,

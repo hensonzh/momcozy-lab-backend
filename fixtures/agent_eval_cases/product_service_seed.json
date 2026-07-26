@@ -83,7 +83,8 @@
         ],
         "must_not": [
           "claim_cart_saved_before_apply_event",
-          "change_unmentioned_items"
+          "change_unmentioned_items",
+          "model_supplied_idempotency_key"
         ]
       },
       "expected_tool_calls": [
@@ -365,7 +366,8 @@
           "confirmation_card"
         ],
         "must_not": [
-          "apply_without_confirmation"
+          "apply_without_confirmation",
+          "model_supplied_idempotency_key"
         ]
       },
       "expected_tool_calls": [
@@ -521,7 +523,8 @@
         ],
         "must_not": [
           "create_plan_before_analysis",
-          "create_calendar_tasks_without_confirmation"
+          "create_calendar_tasks_without_confirmation",
+          "model_supplied_idempotency_key"
         ]
       },
       "expected_tool_calls": [
@@ -701,6 +704,138 @@
         {
           "contract": "profile_read",
           "timing": "before_final_response"
+        }
+      ]
+    },
+    {
+      "suite": "profile_update_scalar",
+      "name": "explicit maternal profile correction applies once and returns canonical profile",
+      "domain": "milk-management",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Please update my age to 31 and set my current feeding mode to mixed feeding."
+          }
+        ],
+        "fixtures": {
+          "user_profile": {
+            "age": 30
+          },
+          "lactation_profile": {
+            "current_feeding_mode": "exclusive_breastfeeding"
+          }
+        }
+      },
+      "expected_behavior": {
+        "intent": "profile_update_scalar",
+        "route": "synchronous_profile_update",
+        "requires_confirmation_before_write": false,
+        "requires_final_response_after_tools": true,
+        "service_skill_id": "milk-management",
+        "must_include": [
+          "durable_profile_update",
+          "canonical_post_update_profile",
+          "synchronous_action_apply"
+        ],
+        "must_not": [
+          "redundant_operation_argument",
+          "model_supplied_idempotency_key",
+          "claim_saved_before_applied"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "profile_update",
+          "timing": "before_final_response",
+          "args_subset": {
+            "mother": {
+              "age": 31,
+              "current_feeding_mode": "mixed_feeding"
+            }
+          }
+        }
+      ],
+      "expected_events": [
+        {
+          "type": "action.applied",
+          "action_type": "profile.update"
+        }
+      ]
+    },
+    {
+      "suite": "profile_current_infants_replace",
+      "name": "replacing current delivery babies reads stable ids and waits for confirmation",
+      "domain": "milk-management",
+      "owner_team": "agent",
+      "input": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "Set Baby A and Baby B as the babies from my current delivery, in that birth order."
+          }
+        ],
+        "fixtures": {
+          "all_infants": [
+            {
+              "infant_id": "11111111-1111-4111-8111-111111111111",
+              "name": "Baby A"
+            },
+            {
+              "infant_id": "22222222-2222-4222-8222-222222222222",
+              "name": "Baby B"
+            }
+          ],
+          "current_infants": []
+        }
+      },
+      "expected_behavior": {
+        "intent": "profile_current_infants_replace",
+        "route": "confirmation_gated_relationship_replace",
+        "requires_confirmation_before_write": true,
+        "service_skill_id": "milk-management",
+        "must_include": [
+          "stable_infant_ids",
+          "complete_relationship_replacement",
+          "confirmation_card",
+          "freshness_precondition"
+        ],
+        "must_not": [
+          "apply_without_confirmation",
+          "guess_infant_id",
+          "model_supplied_idempotency_key"
+        ]
+      },
+      "expected_tool_calls": [
+        {
+          "contract": "profile_read",
+          "timing": "before_relationship_update",
+          "args_subset": {
+            "infant_scope": "all"
+          }
+        },
+        {
+          "contract": "profile_update",
+          "timing": "before_action_confirmation",
+          "args_subset": {
+            "current_infants": [
+              {
+                "infant_id": "11111111-1111-4111-8111-111111111111",
+                "birth_order": 1
+              },
+              {
+                "infant_id": "22222222-2222-4222-8222-222222222222",
+                "birth_order": 2
+              }
+            ]
+          }
+        }
+      ],
+      "expected_events": [
+        {
+          "type": "action.confirmation_required",
+          "action_type": "profile.current_infants.replace"
         }
       ]
     },

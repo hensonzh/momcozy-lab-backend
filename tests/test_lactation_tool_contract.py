@@ -1,4 +1,8 @@
+import pytest
+
+from app.agent_runtime.tools.validation import validate_tool_input
 from app.agents.cozymate.tools import default_tool_registry
+from app.core.errors import ApiError
 
 
 def test_profile_read_replaces_raw_growth_history_as_direct_tool() -> None:
@@ -86,21 +90,28 @@ def test_profile_update_is_the_described_profile_update_superset() -> None:
 
     assert contract.domain == "profiles"
     assert contract.effect_scope == "user_resource"
+    assert contract.action_types == (
+        "profile.update",
+        "profile.current_infants.replace",
+    )
     assert "action_type" not in type(contract).model_fields
     assert "profile_read" in contract.description
     assert "预产期" in contract.description
+    assert "operation=update" not in contract.description
     schema = contract.input_schema
     assert schema["additionalProperties"] is False
-    assert schema["minProperties"] == 2
-    assert schema["required"] == ["operation"]
+    assert "minProperties" not in schema
+    assert "required" not in schema
+    assert schema["anyOf"] == [
+        {"type": "object", "required": ["mother"]},
+        {"type": "object", "required": ["infants"]},
+        {"type": "object", "required": ["current_infants"]},
+    ]
     assert set(schema["properties"]) == {
-        "operation",
         "mother",
         "infants",
         "current_infants",
-        "idempotency_key",
     }
-    assert schema["properties"]["operation"]["enum"] == ["update"]
     assert {
         "preferred_name",
         "age",
@@ -118,6 +129,7 @@ def test_profile_update_is_the_described_profile_update_superset() -> None:
     ]
     for section in ("mother", "infants", "current_infants"):
         section_schema = schema["properties"][section]
+        assert section_schema.get("description"), f"{section} lacks a description"
         fields = (
             section_schema["properties"]
             if section_schema["type"] == "object"
@@ -128,6 +140,13 @@ def test_profile_update_is_the_described_profile_update_superset() -> None:
 
     output_schema = contract.output_schema
     assert output_schema is not None
+    assert output_schema["properties"]["action_type"]["enum"] == [
+        "profile.update",
+        "profile.current_infants.replace",
+    ]
+    assert output_schema["properties"]["profile"]["anyOf"][0]["$ref"].endswith(
+        "MaternalInfantProfileReadOutput"
+    )
     assert set(output_schema["required"]) == {
         "action_id",
         "action_type",
@@ -143,3 +162,12 @@ def test_profile_update_is_the_described_profile_update_superset() -> None:
     for definition in output_schema["$defs"].values():
         for field_name, field_schema in definition.get("properties", {}).items():
             assert field_schema.get("description"), f"update output {field_name} lacks a description"
+
+
+def test_profile_update_contract_rejects_an_empty_update() -> None:
+    schema = default_tool_registry().get("profile_update").input_schema
+
+    with pytest.raises(ApiError) as exc_info:
+        validate_tool_input(schema=schema, value={})
+
+    assert exc_info.value.code == "tool_input_invalid"

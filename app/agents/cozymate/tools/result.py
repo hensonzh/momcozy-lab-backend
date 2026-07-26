@@ -25,9 +25,30 @@ def cozymate_model_output_from_payload(*, tool_name: str, output: dict[str, Any]
     model_payload.pop(DEFERRED_AGENT_EVENTS_KEY, None)
     if tool_name in _DIARY_TOOLS:
         model_payload = _diary_model_output(model_payload)
+    elif tool_name == "profile_update":
+        model_payload = _profile_update_model_output(model_payload)
     elif tool_name == "hospital_bag_manage":
         model_payload = _hospital_bag_workflow_model_output(model_payload)
     return model_payload
+
+
+def _profile_update_model_output(
+    output: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        key: output[key]
+        for key in (
+            "status",
+            "action_status",
+            "requires_confirmation",
+            "confirmation_policy",
+            "write_succeeded",
+            "error_code",
+            "updated",
+            "profile",
+        )
+        if key in output
+    }
 
 
 def _hospital_bag_workflow_model_output(

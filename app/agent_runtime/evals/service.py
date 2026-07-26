@@ -47,13 +47,9 @@ class AgentEvalSeedAssertionEngine:
         self,
         *,
         write_tool_names: frozenset[str] = frozenset(),
-        wrapper_agent_id: str = "",
-        scene_service_skill_ids: frozenset[str] = frozenset(),
         non_write_tool_actions: Mapping[str, frozenset[str]] | None = None,
     ) -> None:
         self.write_tool_names = write_tool_names
-        self.wrapper_agent_id = wrapper_agent_id
-        self.scene_service_skill_ids = scene_service_skill_ids
         self.non_write_tool_actions = dict(non_write_tool_actions or {})
 
     def evaluate(self, *, case: dict[str, Any], trace: AgentEvalTrace) -> AgentEvalRunResult:
@@ -63,14 +59,7 @@ class AgentEvalSeedAssertionEngine:
         failures.extend(_tool_argument_failures(case=case, trace=trace))
         failures.extend(_forbidden_tool_failures(case=case, trace=trace))
         failures.extend(_required_event_failures(case=case, trace=trace))
-        failures.extend(
-            _service_skill_routing_failures(
-                case=case,
-                trace=trace,
-                wrapper_agent_id=self.wrapper_agent_id,
-                scene_service_skill_ids=self.scene_service_skill_ids,
-            )
-        )
+        failures.extend(_service_skill_routing_failures(case=case, trace=trace))
         failures.extend(_confirmation_failures(case=case, trace=trace))
         failures.extend(
             _forbidden_side_effect_failures(
@@ -98,9 +87,8 @@ class AgentEvalReplayAssertionRunner:
 
 
 class AgentEvalRuntimeTraceCollector:
-    def __init__(self, *, repository: AgentRuntimeRepository, default_service_skill_id: str = "") -> None:
+    def __init__(self, *, repository: AgentRuntimeRepository) -> None:
         self.repository = repository
-        self.default_service_skill_id = default_service_skill_id
 
     async def collect(self, *, run_id: UUID, final_text: str = "") -> AgentEvalTrace:
         tool_calls = await self.repository.list_tool_calls_for_run(run_id=run_id)
@@ -113,11 +101,7 @@ class AgentEvalRuntimeTraceCollector:
             events=[_event_trace(event) for event in events],
             actions=[_action_trace(action) for action in actions],
             final_text=final_text,
-            service_skill_id=_runtime_trace_service_skill_id(
-                run=run,
-                events=events,
-                default_service_skill_id=self.default_service_skill_id,
-            ),
+            service_skill_id=_runtime_trace_service_skill_id(run=run),
         )
 
 
@@ -128,13 +112,9 @@ class AgentEvalRuntimeClient:
         executor: Any,
         repository: AgentRuntimeRepository,
         assertion_engine: AgentEvalSeedAssertionEngine | None = None,
-        default_service_skill_id: str = "",
     ) -> None:
         self.executor = executor
-        self.collector = AgentEvalRuntimeTraceCollector(
-            repository=repository,
-            default_service_skill_id=default_service_skill_id,
-        )
+        self.collector = AgentEvalRuntimeTraceCollector(repository=repository)
         self.assertion_engine = assertion_engine or AgentEvalSeedAssertionEngine()
 
     async def execute_case(self, *, run: Any, case: dict[str, Any]) -> AgentEvalRuntimeCaseResult:
@@ -188,8 +168,8 @@ class AgentEvalService:
         )
 
 
-def _runtime_trace_service_skill_id(*, run: Any, events: list[Any], default_service_skill_id: str = "") -> str:
-    return str(getattr(run, "service_skill_id", "") or "").strip() or default_service_skill_id
+def _runtime_trace_service_skill_id(*, run: Any) -> str:
+    return str(getattr(run, "service_skill_id", "") or "").strip()
 
 
 def _tool_call_trace(tool_call: Any) -> dict[str, Any]:
@@ -392,15 +372,11 @@ def _service_skill_routing_failures(
     *,
     case: dict[str, Any],
     trace: AgentEvalTrace,
-    wrapper_agent_id: str,
-    scene_service_skill_ids: frozenset[str],
 ) -> list[AgentEvalFailure]:
     raw_behavior = case.get("expected_behavior")
     behavior = raw_behavior if isinstance(raw_behavior, dict) else {}
     expected = str(behavior.get("service_skill_id") or "").strip()
-    if not expected or not trace.service_skill_id or trace.service_skill_id == expected:
-        return []
-    if expected in scene_service_skill_ids and trace.service_skill_id == wrapper_agent_id:
+    if not expected or trace.service_skill_id == expected:
         return []
     return [
         AgentEvalFailure(

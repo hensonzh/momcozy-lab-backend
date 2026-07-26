@@ -29,7 +29,10 @@ PRODUCT_AGENT_EVAL_SEED = ROOT / "fixtures" / "agent_eval_cases" / "product_serv
 
 def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> None:
     thread_id = uuid4()
-    run = _run(thread_id=thread_id)
+    run = _run(
+        thread_id=thread_id,
+        service_skill_id=COZYMATE_AGENT_ID,
+    )
     current_user = _message(
         thread_id=thread_id,
         run_id=run.id,
@@ -72,7 +75,6 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             executor=executor,
             repository=repository,
             assertion_engine=create_cozymate_eval_assertion_engine(),
-            default_service_skill_id=COZYMATE_AGENT_ID,
         ).execute_case(run=run, case=case)
     )
 
@@ -92,6 +94,32 @@ def test_agent_eval_trace_uses_run_service_skill_id() -> None:
     trace = asyncio.run(AgentEvalRuntimeTraceCollector(repository=repository).collect(run_id=run.id))
 
     assert trace.service_skill_id == "device-guidance"
+
+
+def test_agent_eval_trace_does_not_invent_a_missing_route() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="Continue.",
+        sequence=1,
+    )
+    repository = FakeEvalRuntimeRepository(
+        run=run,
+        messages=[current_user],
+        current_message=current_user,
+        tool_calls=[],
+    )
+
+    trace = asyncio.run(
+        AgentEvalRuntimeTraceCollector(repository=repository).collect(
+            run_id=run.id
+        )
+    )
+
+    assert trace.service_skill_id == ""
 
 
 class FakeEvalRuntimeRepository:

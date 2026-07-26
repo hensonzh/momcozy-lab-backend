@@ -31,6 +31,11 @@ from app.agents.cozymate.skill_registry import (
     default_service_skill_registry,
     parse_service_skill_file,
 )
+from app.agents.cozymate.routing import (
+    COZYMATE_AGENT_ID,
+    ROUTER_INSTRUCTIONS,
+    default_cozymate_agent_catalog,
+)
 from app.agents.cozymate.tools import (
     ToolContract,
     default_tool_registry,
@@ -181,6 +186,19 @@ def test_agent_worker_entrypoint_is_thin_and_product_wiring_is_agent_owned() -> 
     assert len(worker_source.splitlines()) <= 60
 
 
+def test_production_cozymate_factory_wires_semantic_routing_and_agent_catalog() -> None:
+    factory_source = (
+        PRODUCTION_BACKEND
+        / "app"
+        / "agents"
+        / "cozymate"
+        / "factory.py"
+    ).read_text(encoding="utf-8")
+
+    assert "service_router=CozymateAgentRouter(sdk_runner=model_runner)" in factory_source
+    assert "agent_catalog=default_cozymate_agent_catalog(" in factory_source
+
+
 def test_runtime_constants_define_the_only_supported_pattern() -> None:
     assert SDK_ONLY_RUNTIME_PATTERN == "sdk_only"
     assert DEFAULT_RUNTIME_VERSION == "momcozy-agent-v2"
@@ -200,6 +218,76 @@ def test_service_skill_registry_parses_static_specialist_definitions() -> None:
     assert pregnancy_skill.service_skill_id == "birth-prep"
     assert "制定孕期计划" in pregnancy_skill.prompt_block()
     assert "待产包清单" in pregnancy_skill.prompt_block()
+
+
+def test_cozymate_agent_catalog_has_static_scene_tool_allowlists() -> None:
+    tool_registry = default_tool_registry()
+    catalog = default_cozymate_agent_catalog(tool_registry=tool_registry)
+
+    assert catalog.get(COZYMATE_AGENT_ID).tool_names == (
+        "profile_read",
+        "profile_update",
+        "plan_read",
+        "plan_mutate",
+        "schedule_timeline_read",
+        "schedule_timeline_mutate",
+        "diary_read",
+        "diary_mutate",
+        "conversation_history_image_read",
+    )
+    assert catalog.get("birth-prep").tool_names == (
+        "plan_read",
+        "plan_mutate",
+        "pregnancy_intake_manage",
+        "hospital_bag_manage",
+        "hospital_bag_cart_mutate",
+    )
+    assert catalog.get("milk-management").tool_names == (
+        "profile_read",
+        "profile_update",
+        "plan_read",
+        "plan_mutate",
+        "schedule_timeline_read",
+        "schedule_timeline_mutate",
+        "milk_analysis_manage",
+        "ibclc_consult_card_create",
+    )
+    assert catalog.get("device-guidance").tool_names == (
+        "devices_guidance_manage",
+        "pump_models_read",
+        "support_ticket_create",
+    )
+    assert {
+        tool_name
+        for definition in catalog.list()
+        for tool_name in definition.tool_names
+    } <= set(tool_registry.names_for_sdk())
+
+
+def test_specialist_system_prompts_are_seeded_from_only_their_file_backed_skill() -> None:
+    catalog = default_cozymate_agent_catalog(tool_registry=default_tool_registry())
+
+    main_prompt = catalog.get(COZYMATE_AGENT_ID).instructions
+    birth_prompt = catalog.get("birth-prep").instructions
+    milk_prompt = catalog.get("milk-management").instructions
+    device_prompt = catalog.get("device-guidance").instructions
+
+    assert main_prompt == DEFAULT_STABLE_SYSTEM_PROMPT
+    assert birth_prompt.startswith(DEFAULT_STABLE_SYSTEM_PROMPT)
+    assert milk_prompt.startswith(DEFAULT_STABLE_SYSTEM_PROMPT)
+    assert device_prompt.startswith(DEFAULT_STABLE_SYSTEM_PROMPT)
+    assert "制定孕期计划" in birth_prompt
+    assert "奶量管理仅处理三类任务" not in birth_prompt
+    assert "奶量管理仅处理三类任务" in milk_prompt
+    assert "当前已接入官方资料的型号：Air1" not in milk_prompt
+    assert "当前已接入官方资料的型号：Air1" in device_prompt
+    assert "制定孕期计划" not in device_prompt
+    assert "## 可用 Skill" not in main_prompt
+    assert "load_skill" not in "\n".join(
+        definition.instructions for definition in catalog.list()
+    )
+    assert "本轮只返回 cozymate_service_agent" in ROUTER_INSTRUCTIONS
+    assert "不执行计划、购物车、日记等附带写入" in ROUTER_INSTRUCTIONS
 
 
 def test_service_skills_are_file_backed_skill_directories() -> None:
@@ -299,6 +387,7 @@ def test_production_runtime_does_not_ship_unused_graph_checkpoint_code() -> None
 def test_service_skill_tool_references_are_registered_contracts() -> None:
     registry = default_tool_registry()
     registry_names = set(registry.names_for_sdk())
+    agent_catalog = default_cozymate_agent_catalog(tool_registry=registry)
     allowed_external_helpers: set[str] = set()
     tool_like_suffixes = (
         ".read",
@@ -313,12 +402,18 @@ def test_service_skill_tool_references_are_registered_contracts() -> None:
 
     violations: list[str] = []
     for skill in default_service_skill_registry().list():
+        allowed_tool_names = set(
+            agent_catalog.get(skill.service_skill_id).tool_names
+        )
         for reference in _code_span_references(skill.prompt_block()):
             if reference in allowed_external_helpers:
                 continue
+            if reference in registry_names:
+                if reference not in allowed_tool_names:
+                    violations.append(f"{skill.service_skill_id}: unavailable {reference}")
+                continue
             if any(reference.endswith(suffix) or suffix in reference for suffix in tool_like_suffixes):
-                if reference not in registry_names:
-                    violations.append(f"{skill.service_skill_id}: {reference}")
+                violations.append(f"{skill.service_skill_id}: {reference}")
 
     assert violations == []
 
@@ -548,7 +643,11 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
 @pytest.mark.parametrize(
     ("tool_name", "effect_scope", "action_types"),
     [
-        ("profile_update", "user_resource", ("profile.update",)),
+        (
+            "profile_update",
+            "user_resource",
+            ("profile.update", "profile.current_infants.replace"),
+        ),
         ("profile_read", "none", ()),
         ("schedule_timeline_read", "none", ()),
         (
@@ -707,8 +806,15 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
         },
     }
     assert profile_update_schema["additionalProperties"] is False
-    assert profile_update_schema["required"] == ["operation"]
-    assert profile_update_schema["minProperties"] == 2
+    assert "required" not in profile_update_schema
+    assert "minProperties" not in profile_update_schema
+    assert profile_update_schema["anyOf"] == [
+        {"type": "object", "required": ["mother"]},
+        {"type": "object", "required": ["infants"]},
+        {"type": "object", "required": ["current_infants"]},
+    ]
+    assert "operation" not in profile_update_schema["properties"]
+    assert "idempotency_key" not in profile_update_schema["properties"]
     user_update_schema = profile_update_schema["properties"]["mother"]
     infant_update_schema = profile_update_schema["properties"]["infants"]["items"]
     assert user_update_schema["properties"]["preferred_name"]["anyOf"][0]["maxLength"] == 120
@@ -904,6 +1010,22 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     }.isdisjoint(pump_models_contract.output_schema["properties"])
     assert ibclc_schema["required"] == ["operation", "reason"]
     assert ibclc_schema["properties"]["urgency"]["enum"] == ["routine", "soon", "urgent"]
+
+
+def test_model_tool_contracts_never_expose_runtime_idempotency_keys() -> None:
+    registry = default_tool_registry()
+
+    violations = [
+        contract.name
+        for contract in registry.list()
+        if "idempotency_key" in json.dumps(
+            contract.input_schema,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    ]
+
+    assert violations == []
 
 
 def test_tool_input_schema_properties_do_not_define_instruction_channels() -> None:

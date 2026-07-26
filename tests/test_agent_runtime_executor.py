@@ -38,6 +38,14 @@ from app.agents.cozymate.quick_replies import (
     QuickReplyFinalizer,
     QuickReplyFinalizerConfig,
 )
+from app.agents.cozymate.routing import (
+    COZYMATE_AGENT_ID,
+    COZYMATE_ROUTER_ID,
+    ROUTER_RESPONSE_FORMAT,
+    CozymateAgentRouter,
+    default_cozymate_agent_catalog,
+    parse_route_decision,
+)
 from app.agent_runtime.providers import (
     OpenAIResponsesRunner,
     SdkNodeRequest,
@@ -1348,6 +1356,31 @@ def test_agent_runtime_executor_injects_current_user_text_for_diary_confirmation
     }
 
 
+def test_agent_runtime_executor_injects_local_date_into_profile_updates() -> None:
+    run = _run(thread_id=uuid4())
+    executor = CozymateAgentExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIResponsesRunner(
+            backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))
+        ),
+    )
+    turn_state = executor._initialize_turn_state(run.id)
+    turn_state.local_date = "2026-07-26"
+    turn_state.timezone = "Asia/Shanghai"
+
+    trusted_args = asyncio.run(
+        executor._trusted_tool_args(
+            run=run,
+            contract_name="profile_update",
+        )
+    )
+
+    assert trusted_args == {
+        "runtime_timezone": "Asia/Shanghai",
+        "runtime_local_date": "2026-07-26",
+    }
+
+
 def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loop() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -1839,6 +1872,282 @@ def test_agent_runtime_executor_does_not_inject_dynamic_service_context() -> Non
     assert request.tool_names == ()
 
 
+def test_agent_runtime_routes_to_milk_specialist_with_only_milk_tools() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="帮我分析最近七天奶量，并看看要不要追奶。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"service_skill_ids":["milk-management"]}',
+            ),
+            scripted_sdk_response(final_text="我先结合近期记录做完整奶量分析。"),
+        ]
+    )
+    runner = OpenAIResponsesRunner(backend=backend)
+    tool_registry = default_tool_registry()
+
+    result = asyncio.run(
+        CozymateAgentExecutor(
+            repository=repository,
+            sdk_runner=runner,
+            tool_registry=tool_registry,
+            tool_executor=FakeToolExecutor(safe_output={}),
+            service_router=CozymateAgentRouter(sdk_runner=runner),
+            agent_catalog=default_cozymate_agent_catalog(
+                tool_registry=tool_registry,
+            ),
+        ).execute(run=run)
+    )
+
+    assert result.status == "completed"
+    assert result.final_text == "我先结合近期记录做完整奶量分析。"
+    assert len(backend.requests) == 2
+    route_request, specialist_request = backend.requests
+    assert route_request.service_skill_id == COZYMATE_ROUTER_ID
+    assert route_request.tool_names == ()
+    assert route_request.tools == ()
+    assert route_request.response_text_format == ROUTER_RESPONSE_FORMAT
+    assert specialist_request.service_skill_id == "milk-management"
+    assert specialist_request.tool_names == (
+        "profile_read",
+        "profile_update",
+        "plan_read",
+        "plan_mutate",
+        "schedule_timeline_read",
+        "schedule_timeline_mutate",
+        "milk_analysis_manage",
+        "ibclc_consult_card_create",
+    )
+    assert "奶量管理仅处理三类任务" in specialist_request.instructions
+    assert "制定孕期计划" not in specialist_request.instructions
+    assert run.service_skill_id == "milk-management"
+    routing_events = [
+        event
+        for event in repository.events
+        if event.event_type == "agent.routing.completed"
+    ]
+    assert routing_events[-1].payload == {
+        "mode": "single_specialist",
+        "service_skill_ids": ["milk-management"],
+    }
+
+
+def test_agent_runtime_routes_general_request_to_main_public_tools() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="帮我记录一下今天心情不错。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"service_skill_ids":["cozymate_service_agent"]}',
+            ),
+            scripted_sdk_response(final_text="可以，我来帮你记录。"),
+        ]
+    )
+    runner = OpenAIResponsesRunner(backend=backend)
+    tool_registry = default_tool_registry()
+
+    asyncio.run(
+        CozymateAgentExecutor(
+            repository=repository,
+            sdk_runner=runner,
+            tool_registry=tool_registry,
+            tool_executor=FakeToolExecutor(safe_output={}),
+            service_router=CozymateAgentRouter(sdk_runner=runner),
+            agent_catalog=default_cozymate_agent_catalog(
+                tool_registry=tool_registry,
+            ),
+        ).execute(run=run)
+    )
+
+    main_request = backend.requests[1]
+    assert main_request.service_skill_id == COZYMATE_AGENT_ID
+    assert main_request.instructions == DEFAULT_STABLE_SYSTEM_PROMPT
+    assert main_request.tool_names == (
+        "profile_read",
+        "profile_update",
+        "plan_read",
+        "plan_mutate",
+        "schedule_timeline_read",
+        "schedule_timeline_mutate",
+        "diary_read",
+        "diary_mutate",
+        "conversation_history_image_read",
+    )
+    assert "milk_analysis_manage" not in main_request.tool_names
+    assert "devices_guidance_manage" not in main_request.tool_names
+
+
+def test_agent_runtime_runs_multi_scene_specialists_then_main_synthesis() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="推荐一款吸奶器，并把它加到待产包。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text=(
+                    '{"service_skill_ids":'
+                    '["device-guidance","birth-prep"]}'
+                ),
+            ),
+            scripted_sdk_response(final_text="根据你的偏好，Air1 更合适。"),
+            scripted_sdk_response(final_text="已按你的要求处理待产包购物车。"),
+            scripted_sdk_response(final_text="Air1 更适合你，待产包也已同步处理。"),
+        ]
+    )
+    runner = OpenAIResponsesRunner(backend=backend)
+    tool_registry = default_tool_registry()
+
+    result = asyncio.run(
+        CozymateAgentExecutor(
+            repository=repository,
+            sdk_runner=runner,
+            tool_registry=tool_registry,
+            tool_executor=FakeToolExecutor(safe_output={}),
+            service_router=CozymateAgentRouter(sdk_runner=runner),
+            agent_catalog=default_cozymate_agent_catalog(
+                tool_registry=tool_registry,
+            ),
+        ).execute(run=run)
+    )
+
+    assert result.final_text == "Air1 更适合你，待产包也已同步处理。"
+    assert [request.service_skill_id for request in backend.requests] == [
+        COZYMATE_ROUTER_ID,
+        "device-guidance",
+        "birth-prep",
+        COZYMATE_AGENT_ID,
+    ]
+    assert backend.requests[1].tool_names == (
+        "devices_guidance_manage",
+        "pump_models_read",
+        "support_ticket_create",
+    )
+    assert backend.requests[2].tool_names == (
+        "plan_read",
+        "plan_mutate",
+        "pregnancy_intake_manage",
+        "hospital_bag_manage",
+        "hospital_bag_cart_mutate",
+    )
+    assert backend.requests[3].tool_names == ()
+    assert backend.requests[3].tools == ()
+    assert "根据你的偏好，Air1 更合适。" in json.dumps(
+        backend.requests[2].model_input,
+        ensure_ascii=False,
+    )
+    assert "根据你的偏好，Air1 更合适。" in json.dumps(
+        backend.requests[3].model_input,
+        ensure_ascii=False,
+    )
+    assert run.service_skill_id == COZYMATE_AGENT_ID
+    routing_event = next(
+        event
+        for event in repository.events
+        if event.event_type == "agent.routing.completed"
+    )
+    assert routing_event.payload == {
+        "mode": "multi_specialist",
+        "service_skill_ids": ["device-guidance", "birth-prep"],
+    }
+
+
+def test_agent_runtime_rejects_invalid_route_without_exposing_all_tools() -> None:
+    thread_id = uuid4()
+    run = _run(thread_id=thread_id)
+    current_user = _message(
+        thread_id=thread_id,
+        run_id=run.id,
+        role="user",
+        text="帮我处理一下。",
+        sequence=1,
+    )
+    repository = FakeRuntimeRepository(
+        messages=[current_user],
+        current_message=current_user,
+        run=run,
+    )
+    backend = ScriptedSdkBackend(
+        [
+            scripted_sdk_response(
+                final_text='{"service_skill_ids":["unknown-specialist"]}',
+            ),
+        ]
+    )
+    runner = OpenAIResponsesRunner(backend=backend)
+    tool_registry = default_tool_registry()
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            CozymateAgentExecutor(
+                repository=repository,
+                sdk_runner=runner,
+                tool_registry=tool_registry,
+                tool_executor=FakeToolExecutor(safe_output={}),
+                service_router=CozymateAgentRouter(sdk_runner=runner),
+                agent_catalog=default_cozymate_agent_catalog(
+                    tool_registry=tool_registry,
+                ),
+            ).execute(run=run)
+        )
+
+    assert exc_info.value.code == "service_routing_invalid"
+    assert len(backend.requests) == 1
+    assert backend.requests[0].tool_names == ()
+
+
+@pytest.mark.parametrize(
+    "raw_route",
+    [
+        "",
+        "not-json",
+        '{"service_skill_ids":[]}',
+        '{"service_skill_ids":["milk-management","milk-management"]}',
+        '{"service_skill_ids":["unknown-specialist"]}',
+        '{"service_skill_ids":["milk-management"],"extra":true}',
+    ],
+)
+def test_agent_route_parser_fails_closed(raw_route: str) -> None:
+    with pytest.raises(ApiError) as exc_info:
+        parse_route_decision(raw_route)
+
+    assert exc_info.value.code == "service_routing_invalid"
+
+
 def test_agent_runtime_executor_projects_active_workflow_before_model_selection() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
@@ -2246,6 +2555,12 @@ def test_agent_runtime_executor_auto_continues_verified_hospital_bag_form_withou
         "form_artifact_id": str(form_artifact_id),
         "runtime_workflow_context": workflow.state,
     }
+    assert run.service_skill_id == "birth-prep"
+    assert any(
+        event.event_type == "agent.routing.completed"
+        and event.payload["service_skill_ids"] == ["birth-prep"]
+        for event in repository.events
+    )
 
 
 def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() -> None:
@@ -2356,6 +2671,12 @@ def test_agent_runtime_executor_passes_verified_pregnancy_inputs_only_to_tool() 
     assert captured_args["runtime_structured_workflow_command"] is True
     assert result.final_text == "孕期计划已更新，请按下方当前步骤继续。"
     assert backend.requests == []
+    assert run.service_skill_id == "birth-prep"
+    assert any(
+        event.event_type == "agent.routing.completed"
+        and event.payload["service_skill_ids"] == ["birth-prep"]
+        for event in repository.events
+    )
 
 
 def test_agent_runtime_executor_injects_current_workflow_and_authenticated_checkup_attachment_count() -> None:

@@ -24,6 +24,13 @@ COZYMATE_ACTION_RULES: Mapping[str, AgentActionPolicyRule] = {
         side_effect_level="low",
         requires_confirmation=False,
     ),
+    "profile.current_infants.replace": AgentActionPolicyRule(
+        action_type="profile.current_infants.replace",
+        target_type="profile",
+        side_effect_level="medium",
+        requires_confirmation=True,
+        allows_apply_payload_edit=False,
+    ),
     "diary.entry.save": AgentActionPolicyRule(
         action_type="diary.entry.save",
         target_type="diary_entry",

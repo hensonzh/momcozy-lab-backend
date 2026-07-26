@@ -29,7 +29,10 @@ def test_cozymate_registry_exposes_effect_scopes_and_no_legacy_tool_aliases() ->
     assert "pregnancy_diary.manage" not in registry.names_for_sdk()
 
     assert registry.get("profile_update").effect_scope == "user_resource"
-    assert registry.get("profile_update").action_types == ("profile.update",)
+    assert registry.get("profile_update").action_types == (
+        "profile.update",
+        "profile.current_infants.replace",
+    )
     assert registry.get("diary_read").effect_scope == "none"
     assert registry.get("diary_mutate").action_types == (
         "diary.entry.save",

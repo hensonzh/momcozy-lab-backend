@@ -174,6 +174,16 @@ class AgentRuntimeRepository:
         await self.session.flush()
         return run
 
+    async def set_run_service_skill_id(
+        self,
+        *,
+        run: AgentRun,
+        service_skill_id: str,
+    ) -> AgentRun:
+        run.service_skill_id = service_skill_id
+        await self.session.flush()
+        return run
+
     async def mark_run_completed(self, *, run: AgentRun, completed_at: datetime) -> AgentRun:
         run.status = "completed"
         run.completed_at = completed_at

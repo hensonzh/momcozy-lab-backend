@@ -17,6 +17,9 @@ from app.agents.cozymate.actions.plans import (
     PREGNANCY_PLAN_CREATE_ACTION,
     PregnancyPlanCreateActionHandler,
 )
+from app.agents.cozymate.actions.profiles import (
+    PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
+)
 from app.modules.plans.models import Plan
 from app.agents.cozymate.actions.records import FEEDING_RECORD_CREATE_ACTION, FeedingRecordCreateActionHandler
 from app.modules.records.models import FeedingRecord
@@ -294,6 +297,52 @@ def test_value_bearing_preview_action_still_requires_one_confirmation() -> None:
     assert repository.events[-1].event_type == "action.confirmation_required"
 
 
+def test_current_infant_replacement_requires_confirmation_and_rejects_payload_edits() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
+    run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="Change the current baby",
+        )
+    )
+    original_payload = {
+        "current_infants": [],
+        "expected_current_infants": [],
+        "reference_date": "2026-07-26",
+    }
+    action = asyncio.run(
+        service.propose_action(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type=PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
+            target_type="profile",
+            side_effect_level="medium",
+            apply_payload=original_payload,
+        )
+    )
+    run.status = "waiting_for_confirmation"
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.confirm_action(
+                owner_user_id=owner_user_id,
+                action_id=action.id,
+                edited_apply_payload={
+                    **original_payload,
+                    "current_infants": [
+                        {"infant_id": str(uuid4()), "birth_order": 1},
+                    ],
+                },
+            )
+        )
+
+    assert action.status == "confirmation_required"
+    assert exc_info.value.code == "action_payload_edit_not_allowed"
+
+
 def test_direct_feeding_apply_and_idempotent_replay_do_not_duplicate_domain_write() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
@@ -328,6 +377,68 @@ def test_direct_feeding_apply_and_idempotent_replay_do_not_duplicate_domain_writ
     assert records_service.feedings[0].owner_user_id == owner_user_id
     assert records_service.feedings[0].feed_time == datetime(2026, 7, 4, 8, 30, tzinfo=timezone.utc)
     assert [event.event_type for event in repository.events].count("action.applied") == 1
+
+
+def test_action_idempotency_key_rejects_a_different_apply_payload() -> None:
+    owner_user_id = uuid4()
+    repository = FakeActionRepository()
+    records_service = FakeAgentRecordsService()
+    executor = AgentActionExecutor(
+        action_policy=ACTION_POLICY,
+        repository=repository,
+        handlers={
+            FEEDING_RECORD_CREATE_ACTION: FeedingRecordCreateActionHandler(
+                service=records_service
+            )
+        },
+    )
+    service = AgentRuntimeService(
+        action_policy=ACTION_POLICY,
+        repository=repository,
+        action_executor=executor,
+    )
+    run = asyncio.run(
+        service.create_run(
+            actor_user_id=owner_user_id,
+            thread_id=None,
+            message="Add a bottle feeding",
+        )
+    )
+    base_kwargs = {
+        "owner_user_id": owner_user_id,
+        "run_id": run.id,
+        "action_type": FEEDING_RECORD_CREATE_ACTION,
+        "target_type": "feeding_record",
+        "side_effect_level": "low",
+        "idempotency_key": "same-key",
+    }
+    asyncio.run(
+        service.propose_action_once(
+            **base_kwargs,
+            apply_payload={
+                "feed_time": "2026-07-04T08:30:00Z",
+                "feed_type": "bottle",
+                "volume_ml": 90,
+                "title": "Morning bottle",
+            },
+        )
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.propose_action_once(
+                **base_kwargs,
+                apply_payload={
+                    "feed_time": "2026-07-04T08:30:00Z",
+                    "feed_type": "bottle",
+                    "volume_ml": 120,
+                    "title": "Morning bottle",
+                },
+            )
+        )
+
+    assert exc_info.value.code == "idempotency_conflict"
+    assert len(records_service.feedings) == 1
 
 
 def test_pregnancy_plan_applies_synchronously_and_changed_event_replays_once() -> None:

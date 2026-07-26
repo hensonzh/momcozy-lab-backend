@@ -50,6 +50,7 @@ from .shared import (
     _propose_action_reusing_idempotency,
     _require_pregnancy_plan_thread_id,
     _required_diary_content,
+    _stable_payload_key,
     _text,
     _upsert_pregnancy_plan_workflow,
 )
@@ -145,8 +146,10 @@ class DiarySaveToolHandler(_StandardToolHandler):
             side_effect_level="low",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:diary-save",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:diary-save",
+                apply_payload,
+            ),
         )
         output = _proposal_result(action=action, preview_payload=preview_payload)
         output.update(
@@ -189,8 +192,10 @@ class DiaryDeleteToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:diary-delete",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:diary-delete",
+                apply_payload,
+            ),
         )
         output = _proposal_result(action=action, preview_payload=preview_payload)
         output.update(
@@ -342,7 +347,8 @@ class PlanDeleteProposeToolHandler(_StandardToolHandler):
             plan_id=plan_id,
         )
         preview_payload = _plan_delete_preview_payload(apply_payload)
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PLAN_DELETE_ACTION,
@@ -351,6 +357,9 @@ class PlanDeleteProposeToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key") or f"{context.run_id}:{context.call_id}:plan-delete",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:plan-delete",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)

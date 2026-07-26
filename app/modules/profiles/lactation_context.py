@@ -130,10 +130,18 @@ class LactationContextService:
         postpartum_days = _elapsed_days(delivery_date, today=today)
         infant_contexts: list[dict[str, Any]] = []
         issues = list(infant_issues)
-        latest_growth_by_infant = await self.records_service.list_latest_growth_by_infant_ids(
-            owner_user_id=owner_user_id,
-            infant_ids=[infant.infant_id for _, infant, _ in selected_infants],
-        )
+        latest_growth_by_infant: dict[UUID, Any] = {}
+        selected_infant_ids = [
+            infant.infant_id
+            for _, infant, _ in selected_infants
+        ]
+        for offset in range(0, len(selected_infant_ids), 10):
+            latest_growth_by_infant.update(
+                await self.records_service.list_latest_growth_by_infant_ids(
+                    owner_user_id=owner_user_id,
+                    infant_ids=selected_infant_ids[offset : offset + 10],
+                )
+            )
         for birth_order, infant, is_current_delivery in selected_infants:
             infant_birth_date = infant.birth_date
             infant_age_reference = (
@@ -235,27 +243,55 @@ class LactationContextService:
         owner_user_id: UUID,
         values: dict[str, Any],
         anticipated_infant_birth_dates: dict[UUID, date | None] | None = None,
+        expected_current_infants: list[dict[str, Any]] | None = None,
+        reference_date: date | None = None,
         request_id: str = "",
     ) -> tuple[MaternalLactationProfileView, list[dict[str, Any]]]:
-        normalized = _normalize_maternal_update(values)
+        normalized = _normalize_maternal_update(
+            values,
+            reference_date=reference_date or date.today(),
+        )
+        await self.profile_repository.lock_profile_owner(
+            owner_user_id=owner_user_id,
+        )
         existing_maternal = await self.profile_repository.get_maternal_profile(owner_user_id=owner_user_id)
         existing_lactation = await self.profile_repository.get_lactation_profile(owner_user_id=owner_user_id)
         existing_current_infants = await self.profile_repository.list_current_delivery_infants(owner_user_id=owner_user_id)
-        current_infants = (
-            normalized["current_infants"]
-            if "current_infants" in normalized
-            else [
-                {
-                    "infant_id": link.infant_id,
-                    "birth_order": link.birth_order,
-                }
-                for link, _infant in existing_current_infants
-            ]
-        )
+        existing_current_links = [
+            {
+                "infant_id": link.infant_id,
+                "birth_order": link.birth_order,
+            }
+            for link, _infant in existing_current_infants
+        ]
+        if (
+            expected_current_infants is not None
+            and _normalize_current_infants(expected_current_infants)
+            != existing_current_links
+        ):
+            raise ApiError(
+                code="version_conflict",
+                message="Current delivery infant relationships changed.",
+                status=409,
+            )
+        current_infants: list[dict[str, Any]]
+        if "current_infants" in normalized:
+            current_infants = _normalize_current_infants(
+                normalized["current_infants"]
+            )
+        else:
+            current_infants = existing_current_links
         resolved_infants: list[InfantProfile] = []
         for current_infant in current_infants:
+            infant_id = current_infant.get("infant_id")
+            if not isinstance(infant_id, UUID):
+                raise ApiError(
+                    code="validation_failed",
+                    message="current infant_id must be a UUID.",
+                    status=422,
+                )
             infant = await self.profile_repository.get_infant_for_owner(
-                infant_id=current_infant["infant_id"],
+                infant_id=infant_id,
                 owner_user_id=owner_user_id,
             )
             if infant is None:
@@ -272,6 +308,24 @@ class LactationContextService:
             if existing_maternal is not None
             else None
         )
+        delivery_method = (
+            normalized["current_delivery_method"]
+            if "current_delivery_method" in normalized
+            else existing_maternal.latest_delivery_method
+            if existing_maternal is not None
+            else None
+        )
+        if delivery_method == "cesarean":
+            if normalized.get("has_cesarean_history") is False:
+                raise ApiError(
+                    code="validation_failed",
+                    message=(
+                        "has_cesarean_history cannot be false when "
+                        "current_delivery_method is cesarean."
+                    ),
+                    status=422,
+                )
+            normalized["has_cesarean_history"] = True
         anticipated_birth_dates = anticipated_infant_birth_dates or {}
         for infant in resolved_infants:
             infant_birth_date = (
@@ -318,6 +372,9 @@ class LactationContextService:
                     profile=maternal_profile,
                     current_infants=current_infants,
                 )
+        await self.profile_repository.clear_estimated_due_date_if_postpartum(
+            owner_user_id=owner_user_id,
+        )
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
@@ -347,11 +404,9 @@ class LactationContextService:
 
         infants = await self.profile_repository.list_infant_context_candidates(
             owner_user_id=owner_user_id,
-            limit=2,
+            limit=1,
         )
-        if len(infants) == 1:
-            return [(1, infants[0])], issues
-        if len(infants) > 1:
+        if infants:
             issues.append(
                 {
                     "code": "current_infants_not_selected",
@@ -361,7 +416,11 @@ class LactationContextService:
         return [], issues
 
 
-def _normalize_maternal_update(values: dict[str, Any]) -> dict[str, Any]:
+def _normalize_maternal_update(
+    values: dict[str, Any],
+    *,
+    reference_date: date,
+) -> dict[str, Any]:
     if not values:
         raise ApiError(
             code="validation_failed",
@@ -395,7 +454,10 @@ def _normalize_maternal_update(values: dict[str, Any]) -> dict[str, Any]:
             status=422,
         )
     actual_delivery_date = normalized.get("actual_delivery_date")
-    if actual_delivery_date is not None and (not isinstance(actual_delivery_date, date) or actual_delivery_date > date.today()):
+    if actual_delivery_date is not None and (
+        not isinstance(actual_delivery_date, date)
+        or actual_delivery_date > reference_date
+    ):
         raise ApiError(
             code="validation_failed",
             message="actual_delivery_date must not be in the future.",

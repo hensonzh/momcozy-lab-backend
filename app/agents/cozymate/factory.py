@@ -36,6 +36,10 @@ from .actions import build_cozymate_action_handlers, cozymate_action_policy
 from .context import BusinessFactsProjector
 from .context.client import sanitize_cozymate_client_context
 from .executor import CozymateAgentExecutor
+from .routing import (
+    CozymateAgentRouter,
+    default_cozymate_agent_catalog,
+)
 from .tools import CozymateToolExecutor, build_default_tool_handlers, default_tool_registry
 
 
@@ -170,6 +174,10 @@ def build_cozymate_runtime(
         repository=repository,
         tool_registry=tool_registry,
         tool_executor=tool_executor,
+        service_router=CozymateAgentRouter(sdk_runner=model_runner),
+        agent_catalog=default_cozymate_agent_catalog(
+            tool_registry=tool_registry,
+        ),
         event_sink=event_sink,
         business_facts_projector=BusinessFactsProjector(handlers=tool_handlers),
         transient_stream=transient_stream,

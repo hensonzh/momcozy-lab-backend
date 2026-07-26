@@ -44,7 +44,6 @@ from .shared import (
     _deferred_artifact_created_event,
     _dict,
     _hospital_bag_cart_apply_payload,
-    _hospital_bag_cart_idempotency_key,
     _hospital_bag_cart_preview_payload,
     _interrupt_pregnancy_plan_for_safety,
     _ibclc_consult_card_payload,
@@ -59,6 +58,7 @@ from .shared import (
     _support_ticket_creation_confirmed,
     _support_ticket_draft,
     _support_ticket_followup_message,
+    _stable_payload_key,
     _text,
     _upsert_hospital_bag_workflow,
     _upsert_pregnancy_plan_workflow,
@@ -169,8 +169,10 @@ class HospitalBagCartUpdateProposeToolHandler(_StandardToolHandler):
             "side_effect_level": "low",
             "preview_payload": preview_payload,
             "apply_payload": apply_payload,
-            "idempotency_key": _text(handler_args, "idempotency_key")
-            or _hospital_bag_cart_idempotency_key(run_id=context.run_id, cart_update=cart_update),
+            "idempotency_key": _stable_payload_key(
+                f"{context.run_id}:hospital-bag-cart-update",
+                apply_payload,
+            ),
         }
         propose_once = getattr(self.runtime_service, "propose_action_once", None)
         if callable(propose_once):

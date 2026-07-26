@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from .service_skills import ServiceSkillId
@@ -72,6 +73,7 @@ def default_service_skill_registry() -> AgentServiceSkillRegistry:
     return AgentServiceSkillRegistry(skills=skills, default_skill_id=ServiceSkillId.BIRTH_PREP.value)
 
 
+@lru_cache(maxsize=1)
 def _load_default_service_skills() -> tuple[AgentServiceSkill, ...]:
     skill_paths = tuple(sorted(SERVICE_SKILLS_ROOT.glob(f"*/{SERVICE_SKILL_FILE_NAME}")))
     if not skill_paths:

@@ -50,6 +50,7 @@ from app.agents.cozymate.actions.records import (
     PumpingRecordUpdateActionHandler,
 )
 from app.agents.cozymate.actions.profiles import (
+    PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
     PROFILE_UPDATE_ACTION,
     MaternalInfantProfileUpdateActionHandler,
 )
@@ -66,12 +67,14 @@ def build_cozymate_action_handlers(
     diary_service: Any,
     support_service: Any,
 ) -> dict[str, AgentActionApplyHandler]:
+    profile_update_handler = MaternalInfantProfileUpdateActionHandler(
+        profile_service=profile_service,
+        lactation_context_service=lactation_context_service,
+    )
     return {
         HOSPITAL_BAG_CART_UPDATE_ACTION: HospitalBagCartUpdateActionHandler(),
-        PROFILE_UPDATE_ACTION: MaternalInfantProfileUpdateActionHandler(
-            profile_service=profile_service,
-            lactation_context_service=lactation_context_service,
-        ),
+        PROFILE_UPDATE_ACTION: profile_update_handler,
+        PROFILE_CURRENT_INFANTS_REPLACE_ACTION: profile_update_handler,
         DIARY_SAVE_ACTION: DiarySaveActionHandler(service=diary_service),
         DIARY_DELETE_ACTION: DiaryDeleteActionHandler(service=diary_service),
         MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),

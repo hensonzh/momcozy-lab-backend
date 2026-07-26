@@ -20,6 +20,7 @@ PRODUCT_AGENT_EVAL_SEED = ROOT / "fixtures" / "agent_eval_cases" / "product_serv
 def test_agent_eval_seed_assertion_engine_passes_live_run_without_memory_side_effect() -> None:
     case = _case("memory_preference_capture")
     trace = AgentEvalTrace(
+        service_skill_id=_expected_service_skill_id(case),
         final_text="好的，接下来我会尽量用简短的方式提醒你。",
     )
 
@@ -33,6 +34,7 @@ def test_agent_eval_seed_assertion_engine_reports_profile_update_for_memory_requ
     case = _case("memory_sensitive_rejection")
     trace = AgentEvalTrace(
         tool_calls=[{"tool_name": "profile_update", "status": "completed"}],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Saved to profile.",
     )
 
@@ -97,6 +99,7 @@ def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> N
                 "safe_args": {"operation": "create"},
             }
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Saved.",
     )
 
@@ -133,6 +136,7 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
                 "safe_args": {"operation": "create"},
             },
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Saved.",
     )
 
@@ -161,6 +165,7 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
                 "safe_args": {"operation": "create"},
             }
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="",
     )
 
@@ -184,6 +189,7 @@ def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases
                 "safe_args": {"operation": "create"},
             }
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Saved.",
     )
 
@@ -203,6 +209,7 @@ def test_agent_eval_seed_assertion_engine_passes_critical_response_trace(suite: 
     case = _case(suite)
     trace = AgentEvalTrace(
         actions=[],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Please seek immediate professional or crisis support.",
     )
 
@@ -218,6 +225,7 @@ def test_agent_eval_seed_assertion_engine_blocks_side_effects_in_safety_only_flo
         tool_calls=[{"tool_name": "hospital_bag_cart_mutate", "status": "completed"}],
         events=[{"type": "action.confirmation_required"}],
         actions=[{"action_type": "hospital_bag.cart.update", "status": "confirmation_required"}],
+        service_skill_id=_expected_service_skill_id(case),
     )
 
     result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
@@ -243,6 +251,7 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
             {"type": "hospital_bag.cart.changed", "payload": {"operation": "updated"}},
         ],
         actions=[{"action_type": "hospital_bag.cart.update", "status": "applied"}],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="I updated that cart.",
     )
 
@@ -252,7 +261,7 @@ def test_agent_eval_seed_assertion_engine_passes_hospital_bag_cart_trace() -> No
     assert result.failures == []
 
 
-def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_skill_expectation() -> None:
+def test_agent_eval_seed_assertion_engine_rejects_wrapper_for_scene_skill_expectation() -> None:
     case = _case("milk_daily_summary")
     trace = AgentEvalTrace(
         tool_calls=[
@@ -268,8 +277,34 @@ def test_agent_eval_seed_assertion_engine_treats_cozymate_as_wrapper_for_scene_s
 
     result = create_cozymate_eval_assertion_engine().evaluate(case=case, trace=trace)
 
-    assert result.passed is True
-    assert result.failures == []
+    assert result.passed is False
+    assert result.failures[0].category == "routing_mismatch"
+    assert result.failures[0].expected == "milk-management"
+    assert result.failures[0].observed == "cozymate_service_agent"
+
+
+def test_agent_eval_seed_assertion_engine_reports_missing_scene_route() -> None:
+    case = _case("milk_daily_summary")
+    trace = AgentEvalTrace(
+        tool_calls=[
+            {
+                "tool_name": "schedule_timeline_read",
+                "status": "completed",
+                "args": {"domains": ["lactation"]},
+            }
+        ],
+        final_text="Here is your milk summary.",
+    )
+
+    result = create_cozymate_eval_assertion_engine().evaluate(
+        case=case,
+        trace=trace,
+    )
+
+    assert result.passed is False
+    assert result.failures[0].category == "routing_mismatch"
+    assert result.failures[0].expected == "milk-management"
+    assert result.failures[0].observed == "<none>"
 
 
 def test_agent_eval_seed_assertion_engine_reports_wrong_scene_skill_when_trace_has_route() -> None:
@@ -298,6 +333,7 @@ def test_agent_eval_seed_assertion_engine_passes_known_device_guidance_trace() -
     case = _case("device_known_guidance")
     trace = AgentEvalTrace(
         tool_calls=[{"tool_name": "devices_guidance_manage", "status": "completed"}],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="I checked the official Air1 guidance assets.",
     )
 
@@ -317,6 +353,7 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
                 "safe_args": {},
             }
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="M9 best matches work, quiet operation, app control, and your budget.",
     )
     cart_mutation_trace = AgentEvalTrace(
@@ -335,6 +372,7 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
                 },
             },
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="M9 fits, and I added it to your cart.",
     )
 
@@ -370,6 +408,7 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
                 },
             }
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Let us stay on this step and find the missing cable.",
     )
     advance_trace = AgentEvalTrace(
@@ -383,6 +422,7 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
                 },
             }
         ],
+        service_skill_id=_expected_service_skill_id(case),
         final_text="Here is the next step.",
     )
 
@@ -406,7 +446,10 @@ def test_agent_eval_seed_assertion_engine_requires_expected_application_event() 
 
     missing = create_cozymate_eval_assertion_engine().evaluate(
         case=case,
-        trace=AgentEvalTrace(final_text="Answer without sources."),
+        trace=AgentEvalTrace(
+            service_skill_id=_expected_service_skill_id(case),
+            final_text="Answer without sources.",
+        ),
     )
     observed = create_cozymate_eval_assertion_engine().evaluate(
         case=case,
@@ -417,6 +460,7 @@ def test_agent_eval_seed_assertion_engine_requires_expected_application_event() 
                     "payload": {"name": "momcozy.web_search.citations"},
                 }
             ],
+            service_skill_id=_expected_service_skill_id(case),
             final_text="Answer with sources.",
         ),
     )
@@ -437,6 +481,9 @@ def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
         "events": [],
         "tool_calls": [],
         "actions": [],
+        "run": {
+            "service_skill_id": _expected_service_skill_id(case),
+        },
     }
 
     trace = agent_eval_trace_from_replay_bundle(replay_bundle)
@@ -448,3 +495,7 @@ def test_agent_eval_replay_runner_evaluates_replay_bundle_trace() -> None:
 
 def _case(suite: str) -> dict:
     return next(case for case in load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED) if case["suite"] == suite)
+
+
+def _expected_service_skill_id(case: dict) -> str:
+    return str(case["expected_behavior"]["service_skill_id"])

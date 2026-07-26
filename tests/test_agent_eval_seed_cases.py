@@ -73,7 +73,11 @@ def test_product_agent_eval_seed_mutation_calls_always_assert_operation() -> Non
 
     for case in cases:
         for tool_call in case["expected_tool_calls"]:
-            if tool_call["contract"].endswith(("_mutate", "_create", "_update", "_delete")):
+            if tool_call["contract"] == "profile_update":
+                assert "operation" not in tool_call.get("args_subset", {})
+            elif tool_call["contract"].endswith(
+                ("_mutate", "_create", "_update", "_delete")
+            ):
                 assert "operation" in tool_call.get("args_subset", {}), (
                     case["suite"],
                     tool_call["contract"],
@@ -174,6 +178,26 @@ def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
     }
 
 
+def test_product_agent_eval_seed_keeps_tool_idempotency_runtime_owned() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+
+    for suite in (
+        "hospital_bag_cart_mutate",
+        "milk_schedule_management",
+        "milk_plan_creation",
+    ):
+        case = by_suite[suite]
+        assert (
+            "model_supplied_idempotency_key"
+            in case["expected_behavior"]["must_not"]
+        )
+        assert all(
+            "idempotency_key" not in call.get("args_subset", {})
+            for call in case["expected_tool_calls"]
+        )
+
+
 def test_product_agent_eval_seed_covers_profile_read() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
@@ -190,6 +214,32 @@ def test_product_agent_eval_seed_covers_profile_read() -> None:
     assert "return_delivery_history" in case["expected_behavior"]["must_not"]
     assert "estimated_due_date_hidden_after_actual_delivery" in case["expected_behavior"]["must_include"]
     assert "dynamic_path_strings_in_missing_or_quality_fields" in case["expected_behavior"]["must_not"]
+
+
+def test_product_agent_eval_seed_covers_profile_update_risk_split() -> None:
+    cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
+    by_suite = {case["suite"]: case for case in cases}
+    scalar = by_suite["profile_update_scalar"]
+    relationship = by_suite["profile_current_infants_replace"]
+
+    assert scalar["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert scalar["expected_tool_calls"][0]["args_subset"] == {
+        "mother": {
+            "age": 31,
+            "current_feeding_mode": "mixed_feeding",
+        }
+    }
+    assert relationship["expected_behavior"]["requires_confirmation_before_write"] is True
+    assert [call["contract"] for call in relationship["expected_tool_calls"]] == [
+        "profile_read",
+        "profile_update",
+    ]
+    assert relationship["expected_events"] == [
+        {
+            "type": "action.confirmation_required",
+            "action_type": "profile.current_infants.replace",
+        }
+    ]
 
 
 def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> None:

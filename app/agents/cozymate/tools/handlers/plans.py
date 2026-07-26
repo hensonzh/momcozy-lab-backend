@@ -14,7 +14,14 @@ from app.modules.plans.service import PlansService
 from .base import _StandardToolHandler
 from .milk import MilkPlanProposeToolHandler
 from .plans_diary import PlanDeleteProposeToolHandler, PregnancyPlanProposeToolHandler
-from .shared import _limit, _optional_uuid_arg, _proposal_result, _text
+from .shared import (
+    _limit,
+    _optional_uuid_arg,
+    _proposal_result,
+    _propose_action_reusing_idempotency,
+    _stable_payload_key,
+    _text,
+)
 
 
 class PlanReadToolHandler(_StandardToolHandler):
@@ -187,7 +194,8 @@ class PlanMutateToolHandler(_StandardToolHandler):
             "expected_version": expected_version,
             "fields": sorted(set(apply_payload) - {"plan_id", "expected_version"}),
         }
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=PLAN_UPDATE_ACTION,
@@ -196,8 +204,10 @@ class PlanMutateToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:plan-update:{expected_version}",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:plan-update",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 

@@ -6,11 +6,10 @@ from typing import Any
 
 from app.agent_runtime.evals.service import AgentEvalSeedAssertionEngine
 
-from .service_skills import ServiceSkillId
+from .routing import COZYMATE_AGENT_ID as COZYMATE_AGENT_ID
 from .tools import default_tool_registry
 
 
-COZYMATE_AGENT_ID = "cozymate_service_agent"
 PRODUCT_AGENT_EVAL_SEED_SCHEMA_VERSION = "agent_eval_seed.v2"
 REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "birth_prep",
@@ -60,8 +59,6 @@ def create_cozymate_eval_assertion_engine() -> AgentEvalSeedAssertionEngine:
             for contract in registry.list()
             if contract.effect_scope in {"user_resource", "external_resource"}
         ),
-        wrapper_agent_id=COZYMATE_AGENT_ID,
-        scene_service_skill_ids=frozenset(skill_id.value for skill_id in ServiceSkillId),
         non_write_tool_actions={},
     )
 

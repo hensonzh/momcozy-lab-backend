@@ -41,7 +41,11 @@ class ProfileService:
 
     async def update_user_profile(self, *, user_id: UUID, values: dict[str, Any], request_id: str = "") -> UserProfile:
         normalized_values = _normalize_user_profile_update(values)
+        await self.repository.lock_profile_owner(owner_user_id=user_id)
         profile = await self.repository.upsert_user_profile(user_id=user_id, values=normalized_values)
+        await self.repository.clear_estimated_due_date_if_postpartum(
+            owner_user_id=user_id,
+        )
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=user_id,
@@ -59,11 +63,13 @@ class ProfileService:
         user_id: UUID,
         user_values: dict[str, Any] | None = None,
         infant_updates: list[dict[str, Any]] | None = None,
+        reference_date: date | None = None,
         request_id: str = "",
     ) -> tuple[UserProfile | None, list[InfantProfile]]:
         if not user_values and not infant_updates:
             raise ApiError(code="validation_failed", message="At least one profile update is required.", status=422)
 
+        await self.repository.lock_profile_owner(owner_user_id=user_id)
         normalized_user_values = _normalize_user_profile_update(user_values) if user_values else {}
         prepared_infant_updates: list[tuple[InfantProfile, dict[str, Any]]] = []
         seen_infant_ids: set[UUID] = set()
@@ -79,7 +85,10 @@ class ProfileService:
             values = update["values"]
             if not isinstance(values, dict):
                 raise ApiError(code="validation_failed", message="Infant update values are invalid.", status=422)
-            normalized_values = _normalize_infant_profile_update(values)
+            normalized_values = _normalize_infant_profile_update(
+                values,
+                reference_date=reference_date or date.today(),
+            )
             infant = await self.repository.get_infant_for_owner(
                 infant_id=infant_id,
                 owner_user_id=user_id,
@@ -109,6 +118,9 @@ class ProfileService:
         if normalized_user_values:
             profile = await self.repository.upsert_user_profile(user_id=user_id, values=normalized_user_values)
         updated_infants = [await self.repository.update_infant(infant=infant, values=values) for infant, values in prepared_infant_updates]
+        await self.repository.clear_estimated_due_date_if_postpartum(
+            owner_user_id=user_id,
+        )
 
         if self.audit_service is not None:
             details: dict[str, Any] = {}
@@ -242,7 +254,11 @@ def _normalize_user_profile_update(values: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _normalize_infant_profile_update(values: dict[str, Any]) -> dict[str, Any]:
+def _normalize_infant_profile_update(
+    values: dict[str, Any],
+    *,
+    reference_date: date,
+) -> dict[str, Any]:
     if not values:
         raise ApiError(code="validation_failed", message="At least one infant profile field is required.", status=422)
     if set(values) - INFANT_PROFILE_UPDATE_FIELDS:
@@ -266,7 +282,7 @@ def _normalize_infant_profile_update(values: dict[str, Any]) -> dict[str, Any]:
         birth_date = normalized["birth_date"]
         if birth_date is not None and not isinstance(birth_date, date):
             raise ApiError(code="validation_failed", message="birth_date must be a date.", status=422)
-        if birth_date is not None and birth_date > date.today():
+        if birth_date is not None and birth_date > reference_date:
             raise ApiError(code="validation_failed", message="birth_date must not be in the future.", status=422)
 
     if "birth_weight_kg" in normalized:

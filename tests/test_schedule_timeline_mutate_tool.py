@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -88,6 +89,36 @@ def test_schedule_timeline_mutate_creates_cross_domain_schedule_with_persisted_d
         schema=default_tool_registry().get("schedule_timeline_mutate").output_schema,
         value=result,
     )
+
+
+def test_schedule_timeline_mutate_uses_runtime_owned_stable_idempotency() -> None:
+    runtime = FakeRuntimeService()
+    handler = ScheduleTimelineMutateToolHandler(
+        runtime_service=runtime,
+        plans_service=FakePlansService(plan_type="pregnancy"),
+    )
+    context = _context(
+        args={
+            "operation": "create",
+            "entry_type": "schedule",
+            "domain": "pregnancy",
+            "event_type": "appointment",
+            "task_date": "2026-07-25",
+            "title": "产检",
+            "idempotency_key": "model-controlled-key",
+        }
+    )
+
+    asyncio.run(handler.execute(context))
+    asyncio.run(handler.execute(replace(context, call_id="timeline-retry-call")))
+
+    keys = [call["idempotency_key"] for call in runtime.calls]
+    assert keys[0] == keys[1]
+    assert keys[0] != "model-controlled-key"
+    assert context.call_id not in keys[0]
+    assert "timeline-retry-call" not in keys[0]
+    assert len(runtime.propose_once_calls) == 2
+    assert all(call["reuse_existing"] is True for call in runtime.propose_once_calls)
 
 
 def test_schedule_timeline_mutate_persists_lactation_task_type_for_compatibility() -> None:
@@ -331,9 +362,39 @@ def test_schedule_timeline_mutate_creates_unplanned_lactation_execution() -> Non
     )
 
 
+def test_schedule_execution_mutation_uses_runtime_owned_stable_idempotency() -> None:
+    runtime = FakeRuntimeService()
+    handler = ScheduleTimelineMutateToolHandler(
+        runtime_service=runtime,
+        plans_service=FakePlansService(),
+    )
+    context = _context(
+        args={
+            "operation": "create",
+            "entry_type": "execution",
+            "record_type": "pumping",
+            "occurred_at": "2026-07-24T09:10:00+08:00",
+            "milk_volume_ml": 95,
+            "idempotency_key": "model-controlled-key",
+        }
+    )
+
+    asyncio.run(handler.execute(context))
+    asyncio.run(handler.execute(replace(context, call_id="execution-retry-call")))
+
+    keys = [call["idempotency_key"] for call in runtime.calls]
+    assert keys[0] == keys[1]
+    assert keys[0] != "model-controlled-key"
+    assert context.call_id not in keys[0]
+    assert "execution-retry-call" not in keys[0]
+    assert len(runtime.propose_once_calls) == 2
+    assert all(call["reuse_existing"] is True for call in runtime.propose_once_calls)
+
+
 class FakeRuntimeService:
     def __init__(self) -> None:
         self.calls: list[dict] = []
+        self.propose_once_calls: list[dict] = []
 
     async def propose_action(self, **kwargs):
         self.calls.append(kwargs)
@@ -351,6 +412,10 @@ class FakeRuntimeService:
             idempotency_key=kwargs["idempotency_key"],
             error_code="",
         )
+
+    async def propose_action_once(self, **kwargs):
+        self.propose_once_calls.append(kwargs)
+        return await self.propose_action(**kwargs), True
 
 
 class FakePlansService:

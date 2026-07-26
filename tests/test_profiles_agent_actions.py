@@ -6,6 +6,7 @@ import pytest
 
 from app.agent_runtime.runs.models import AgentAction
 from app.agents.cozymate.actions.profiles import (
+    PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
     PROFILE_UPDATE_ACTION,
     MaternalInfantProfileUpdateActionHandler,
 )
@@ -39,7 +40,10 @@ def test_maternal_infant_profile_update_action_composes_profile_services() -> No
                 }
             ],
             "current_infants": [{"infant_id": str(infant_id), "birth_order": 1}],
-        }
+            "expected_current_infants": [],
+            "reference_date": "2026-07-26",
+        },
+        action_type=PROFILE_CURRENT_INFANTS_REPLACE_ACTION,
     )
 
     result = asyncio.run(
@@ -60,6 +64,8 @@ def test_maternal_infant_profile_update_action_composes_profile_services() -> No
             "current_infants": [{"infant_id": infant_id, "birth_order": 1}],
         },
         "anticipated_infant_birth_dates": {infant_id: date(2026, 1, 10)},
+        "expected_current_infants": [],
+        "reference_date": date(2026, 7, 26),
         "request_id": f"agent-action:{action.id}",
     }
     assert profile_service.kwargs == {
@@ -81,6 +87,7 @@ def test_maternal_infant_profile_update_action_composes_profile_services() -> No
                 },
             }
         ],
+        "reference_date": date(2026, 7, 26),
         "request_id": f"agent-action:{action.id}",
     }
     assert result.resource_type == "profile"
@@ -124,6 +131,25 @@ def test_maternal_infant_profile_update_action_rejects_empty_values() -> None:
     assert exc_info.value.code == "missing_profile_updates"
 
 
+def test_profile_update_action_keeps_legacy_current_infant_payload_compatible() -> None:
+    lactation_service = FakeLactationContextService()
+    action = _action(
+        {"current_infants": []},
+        action_type=PROFILE_UPDATE_ACTION,
+    )
+
+    asyncio.run(
+        MaternalInfantProfileUpdateActionHandler(
+            profile_service=FakeProfileService(),
+            lactation_context_service=lactation_service,
+        )(action)
+    )
+
+    assert lactation_service.kwargs["values"] == {"current_infants": []}
+    assert lactation_service.kwargs["expected_current_infants"] is None
+    assert isinstance(lactation_service.kwargs["reference_date"], date)
+
+
 class FakeProfileService:
     def __init__(self) -> None:
         self.kwargs: dict = {}
@@ -142,16 +168,24 @@ class FakeLactationContextService:
         return None, []
 
 
-def _action(apply_payload: dict) -> AgentAction:
+def _action(
+    apply_payload: dict,
+    *,
+    action_type: str = PROFILE_UPDATE_ACTION,
+) -> AgentAction:
     return AgentAction(
         id=uuid4(),
         run_id=uuid4(),
         actor_user_id=uuid4(),
-        action_type=PROFILE_UPDATE_ACTION,
+        action_type=action_type,
         target_type="profile",
         target_id="",
         status="confirmed",
-        side_effect_level="low",
+        side_effect_level=(
+            "medium"
+            if action_type == PROFILE_CURRENT_INFANTS_REPLACE_ACTION
+            else "low"
+        ),
         preview_payload={},
         apply_payload=apply_payload,
         idempotency_key="profile-action",

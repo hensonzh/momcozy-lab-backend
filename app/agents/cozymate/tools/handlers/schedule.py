@@ -39,6 +39,8 @@ from .shared import (
     _plan_task_update_fields,
     _plan_task_update_preview_payload,
     _proposal_result,
+    _propose_action_reusing_idempotency,
+    _stable_payload_key,
     _text,
 )
 
@@ -394,7 +396,8 @@ class ScheduleTimelineMutateToolHandler(_StandardToolHandler):
         preview_payload: dict[str, Any],
         key_suffix: str,
     ) -> dict[str, Any]:
-        action = await self.runtime_service.propose_action(
+        action = await _propose_action_reusing_idempotency(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             action_type=action_type,
@@ -403,8 +406,10 @@ class ScheduleTimelineMutateToolHandler(_StandardToolHandler):
             side_effect_level="medium",
             preview_payload=preview_payload,
             apply_payload=apply_payload,
-            idempotency_key=_text(context.args, "idempotency_key")
-            or f"{context.run_id}:{context.call_id}:{key_suffix}",
+            idempotency_key=_stable_payload_key(
+                f"{context.run_id}:{key_suffix}",
+                apply_payload,
+            ),
         )
         return _proposal_result(action=action, preview_payload=preview_payload)
 
