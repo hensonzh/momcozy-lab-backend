@@ -27,7 +27,7 @@ REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "milk_trend_analysis",
     "pregnancy_plan_creation",
     "pregnancy_task_completion",
-    "pregnancy_diary_entry",
+    "diary_pregnancy_entry",
     "general_diary_entry",
     "postpartum_recovery_checkin",
     "postpartum_recovery_task",

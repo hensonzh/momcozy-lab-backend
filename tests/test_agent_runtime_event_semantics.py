@@ -220,7 +220,7 @@ def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_pl
         ("diary_read", "entry_not_found", "已经更新好"),
     ],
 )
-def test_pregnancy_diary_no_op_completion_does_not_claim_write_success(
+def test_diary_no_op_completion_does_not_claim_write_success(
     tool_name: str,
     status: str,
     forbidden_success_copy: str,

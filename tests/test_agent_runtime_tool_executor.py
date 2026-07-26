@@ -221,7 +221,7 @@ def test_tool_executor_emits_deferred_artifact_events_after_tool_completed() -> 
     assert repository.events[-1].payload["tool_call_id"] == str(repository.tool_call.id)
 
 
-def test_pregnancy_diary_mutate_safe_args_omit_health_narrative() -> None:
+def test_diary_mutate_safe_args_omit_health_narrative() -> None:
     actor = _user()
     repository = FakeToolRepository()
 
@@ -262,7 +262,7 @@ def test_pregnancy_diary_mutate_safe_args_omit_health_narrative() -> None:
     assert repository.tool_call.safe_args["entry_date"] == "2026-07-04"
 
 
-def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -> None:
+def test_diary_read_keeps_private_content_in_ephemeral_tool_output() -> None:
     actor = _user()
     repository = FakeToolRepository()
     executor = CozymateToolExecutor(
@@ -289,7 +289,7 @@ def test_pregnancy_diary_read_keeps_private_content_in_ephemeral_tool_output() -
     assert model_output["_meta"]["trust"] == "untrusted_user_data"
 
 
-def test_pregnancy_diary_ephemeral_model_output_is_bounded_and_omits_attachment_payloads() -> None:
+def test_diary_ephemeral_model_output_is_bounded_and_omits_attachment_payloads() -> None:
     actor = _user()
     repository = FakeToolRepository()
     diary_service = FakeDiaryMutationService(owner_user_id=actor.user_id)

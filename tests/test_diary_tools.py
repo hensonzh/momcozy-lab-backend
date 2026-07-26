@@ -26,12 +26,12 @@ def test_generic_diary_tools_are_directly_model_visible() -> None:
     assert "diary.entry_upsert.propose" not in registry.names_for_sdk()
 
 
-def test_pregnancy_diary_mutates_use_the_action_policy() -> None:
+def test_diary_mutates_use_the_action_policy() -> None:
     assert "diary.entry.save" in COZYMATE_ACTION_RULES
     assert "diary.entry.delete" in COZYMATE_ACTION_RULES
 
 
-def test_pregnancy_diary_action_backed_writes_wait_for_real_database_result() -> None:
+def test_diary_action_backed_writes_wait_for_real_database_result() -> None:
     registry = default_tool_registry()
     write_contract = registry.get("diary_mutate")
 
@@ -59,7 +59,7 @@ def test_diary_schema_separates_read_from_consolidated_write() -> None:
     assert registry.get("diary_mutate").output_schema is not None
 
 
-def test_pregnancy_diary_behavior_is_owned_by_global_safety_and_tool_descriptions() -> None:
+def test_diary_behavior_is_owned_by_global_safety_and_tool_descriptions() -> None:
     instructions = BASE_AGENT_INSTRUCTIONS
     registry = default_tool_registry()
     write_description = registry.get("diary_mutate").description
@@ -74,7 +74,7 @@ def test_pregnancy_diary_behavior_is_owned_by_global_safety_and_tool_description
     assert "confirmation_evidence" in write_description
 
 
-def test_pregnancy_diary_conflict_contract_requires_complete_rewrite() -> None:
+def test_diary_conflict_contract_requires_complete_rewrite() -> None:
     description = default_tool_registry().get("diary_mutate").description
 
     assert "先调用 diary_read" in description

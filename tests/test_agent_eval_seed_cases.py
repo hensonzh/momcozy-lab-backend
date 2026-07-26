@@ -201,7 +201,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     analysis_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_intake_analysis"]["expected_tool_calls"]}
     followup_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_plan_personalized_followup"]["expected_tool_calls"]}
     task_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_task_completion"]["expected_tool_calls"]}
-    diary_contracts = {tool_call["contract"] for tool_call in by_suite["pregnancy_diary_entry"]["expected_tool_calls"]}
+    diary_contracts = {tool_call["contract"] for tool_call in by_suite["diary_pregnancy_entry"]["expected_tool_calls"]}
 
     assert plan_contracts == {"plan_mutate"}
     assert by_suite["pregnancy_plan_creation"]["expected_tool_calls"][-1]["args_subset"] == {
@@ -261,8 +261,8 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     ]
     assert "schedule_timeline_mutate" in task_contracts
     assert diary_contracts == {"diary_mutate"}
-    assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
-    assert by_suite["pregnancy_diary_entry"]["expected_behavior"]["requires_confirmation_before_write"] is False
+    assert by_suite["diary_pregnancy_entry"]["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
+    assert by_suite["diary_pregnancy_entry"]["expected_behavior"]["requires_confirmation_before_write"] is False
     assert by_suite["general_diary_entry"]["expected_tool_calls"] == [
         {
             "contract": "diary_mutate",
@@ -276,7 +276,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
     assert "plan_task_update_proposal" not in task_contracts
     assert "diary_entry_upsert_proposal" not in diary_contracts
 
-    diary_delete = by_suite["pregnancy_diary_mutate_exact"]
+    diary_delete = by_suite["diary_mutate_exact"]
     assert diary_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
     assert diary_delete["input"]["fixtures"]["explicit_delete_intent"] is True
     assert "oral_confirmation_complete" not in diary_delete["input"]["fixtures"]
@@ -292,8 +292,8 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
             },
         }
     ]
-    assert by_suite["pregnancy_diary_mutate_ambiguous"]["expected_tool_calls"] == []
-    assert by_suite["pregnancy_diary_mutate_ambiguous"]["forbidden_tool_calls"] == [{"contract": "diary_mutate"}]
+    assert by_suite["diary_mutate_ambiguous"]["expected_tool_calls"] == []
+    assert by_suite["diary_mutate_ambiguous"]["forbidden_tool_calls"] == [{"contract": "diary_mutate"}]
 
     plan_delete = by_suite["pregnancy_plan_delete_exact"]
     assert plan_delete["input"]["fixtures"]["trusted_exact_target"]["owner_scoped"] is True
@@ -382,16 +382,16 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     by_suite = {case["suite"]: case for case in cases}
     diary_save = "diary_mutate"
 
-    implicit = by_suite["pregnancy_diary_implicit_entry"]
+    implicit = by_suite["diary_pregnancy_implicit_entry"]
     assert {call["contract"] for call in implicit["expected_tool_calls"]} == {diary_save}
     assert implicit["expected_tool_calls"][0]["args_subset"] == {"operation": "create"}
     assert "require_explicit_save_phrase" in implicit["expected_behavior"]["must_not"]
     assert implicit["expected_behavior"]["requires_confirmation_before_write"] is False
 
-    for suite in ("pregnancy_diary_entry", "pregnancy_diary_implicit_entry", "pregnancy_diary_existing_entry"):
+    for suite in ("diary_pregnancy_entry", "diary_pregnancy_implicit_entry", "diary_pregnancy_existing_entry"):
         assert by_suite[suite]["forbidden_tool_calls"] == []
 
-    existing = by_suite["pregnancy_diary_existing_entry"]
+    existing = by_suite["diary_pregnancy_existing_entry"]
     assert [call["contract"] for call in existing["expected_tool_calls"]] == [
         diary_save,
         "diary_read",
@@ -410,13 +410,13 @@ def test_product_agent_eval_seed_covers_implicit_opt_out_negative_and_health_mix
     assert "append_increment_or_supplement" in existing["expected_behavior"]["must_not"]
     assert existing["expected_behavior"]["requires_final_response_after_tools"] is True
 
-    for suite in ("pregnancy_diary_opt_out", "pregnancy_diary_negative", "pregnancy_diary_plan_intent"):
+    for suite in ("diary_pregnancy_opt_out", "diary_pregnancy_negative", "diary_pregnancy_plan_intent"):
         case = by_suite[suite]
         assert case["expected_tool_calls"] == []
         assert {call["contract"] for call in case["forbidden_tool_calls"]} == {diary_save}
         assert "claim_diary_saved" in case["expected_behavior"]["must_not"]
 
-    mixed = by_suite["pregnancy_diary_health_mixed"]
+    mixed = by_suite["diary_pregnancy_health_mixed"]
     assert {call["contract"] for call in mixed["expected_tool_calls"]} == {diary_save}
     assert mixed["expected_behavior"]["service_skill_id"] == "cozymate_service_agent"
     assert mixed["expected_behavior"]["requires_final_response_after_tools"] is True

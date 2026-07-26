@@ -8,8 +8,6 @@ legacy-route comparison documents do not belong here.
 
 - `main-agent-design.md`: discussion draft for the simplified main-agent,
   bounded capability tools, specialist handoffs, and response ownership.
-- `agent-context-construction-design.md`: proposed context projection,
-  conversation-continuity state, and durable-workflow boundaries.
 - `agent-tool-catalog.md`: model-visible tools, static allowlists, action
   boundaries, and internal non-model handlers.
 - `product/momcozy-mai-integrated-prd.md`: current product requirements and

@@ -88,7 +88,7 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_plan_calls_by_type() 
 
 
 def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> None:
-    case = _case("pregnancy_diary_entry")
+    case = _case("diary_pregnancy_entry")
     trace = AgentEvalTrace(
         tool_calls=[
             {
@@ -108,7 +108,7 @@ def test_agent_eval_seed_assertion_engine_accepts_synchronous_diary_write() -> N
 
 def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_update_order() -> None:
     case = {
-        **_case("pregnancy_diary_entry"),
+        **_case("diary_pregnancy_entry"),
         "expected_tool_calls": [
             {
                 "contract": "diary_mutate",
@@ -147,9 +147,9 @@ def test_agent_eval_seed_assertion_engine_enforces_diary_write_then_complete_upd
 
 def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after_diary_write() -> None:
     case = {
-        **_case("pregnancy_diary_health_mixed"),
+        **_case("diary_pregnancy_health_mixed"),
         "expected_behavior": {
-            **_case("pregnancy_diary_health_mixed")["expected_behavior"],
+            **_case("diary_pregnancy_health_mixed")["expected_behavior"],
             "requires_final_response_after_tools": True,
         },
     }
@@ -172,7 +172,7 @@ def test_agent_eval_seed_assertion_engine_requires_health_flow_to_continue_after
 
 @pytest.mark.parametrize(
     "suite",
-    ["pregnancy_diary_opt_out", "pregnancy_diary_negative", "pregnancy_diary_plan_intent"],
+    ["diary_pregnancy_opt_out", "diary_pregnancy_negative", "diary_pregnancy_plan_intent"],
 )
 def test_agent_eval_seed_assertion_engine_rejects_diary_write_for_negative_cases(suite: str) -> None:
     case = _case(suite)

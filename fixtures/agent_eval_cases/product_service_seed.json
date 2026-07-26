@@ -1052,9 +1052,9 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_mutate_exact",
+      "suite": "diary_mutate_exact",
       "name": "explicit delete intent with exact owner scoped diary target executes without redundant confirmation",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1073,7 +1073,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_mutate_exact",
+        "intent": "diary_mutate_exact",
         "route": "synchronous_exact_target_delete",
         "requires_confirmation_before_write": false,
         "requires_final_response_after_tools": true,
@@ -1103,9 +1103,9 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_mutate_ambiguous",
+      "suite": "diary_mutate_ambiguous",
       "name": "ambiguous diary target asks one clarification and never guesses",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1123,7 +1123,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_mutate_ambiguous",
+        "intent": "diary_mutate_ambiguous",
         "route": "clarify_target_without_write",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
@@ -1232,9 +1232,9 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_entry",
-      "name": "diary entry save uses the independent namespace",
-      "domain": "pregnancy-diary",
+      "suite": "diary_pregnancy_entry",
+      "name": "pregnancy diary entry save uses the unified diary resource",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1248,8 +1248,8 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_entry",
-        "route": "independent_namespace_action",
+        "intent": "diary_pregnancy_entry",
+        "route": "generic_diary_action",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
@@ -1312,9 +1312,9 @@
       "forbidden_tool_calls": []
     },
     {
-      "suite": "pregnancy_diary_implicit_entry",
+      "suite": "diary_pregnancy_implicit_entry",
       "name": "concrete first person pregnancy narrative is diary worthy without a save phrase",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1329,8 +1329,8 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_implicit_entry",
-        "route": "independent_namespace_action",
+        "intent": "diary_pregnancy_implicit_entry",
+        "route": "generic_diary_action",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
         "must_include": [
@@ -1355,9 +1355,9 @@
       "forbidden_tool_calls": []
     },
     {
-      "suite": "pregnancy_diary_existing_entry",
+      "suite": "diary_pregnancy_existing_entry",
       "name": "write conflict continues with a complete rewritten update before the final response",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1372,8 +1372,8 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_existing_entry",
-        "route": "independent_namespace_action",
+        "intent": "diary_pregnancy_existing_entry",
+        "route": "generic_diary_action",
         "requires_confirmation_before_write": false,
         "requires_final_response_after_tools": true,
         "service_skill_id": "cozymate_service_agent",
@@ -1413,9 +1413,9 @@
       "forbidden_tool_calls": []
     },
     {
-      "suite": "pregnancy_diary_opt_out",
+      "suite": "diary_pregnancy_opt_out",
       "name": "explicit diary opt out prevents an otherwise diary worthy write",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1429,7 +1429,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_opt_out",
+        "intent": "diary_pregnancy_opt_out",
         "route": "normal_response_without_write",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
@@ -1450,9 +1450,9 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_negative",
+      "suite": "diary_pregnancy_negative",
       "name": "general pregnancy question is not silently turned into a diary entry",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1464,7 +1464,7 @@
         "fixtures": {}
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_negative",
+        "intent": "diary_pregnancy_negative",
         "route": "health_guidance_without_diary_write",
         "requires_confirmation_before_write": false,
         "service_skill_id": "cozymate_service_agent",
@@ -1485,9 +1485,9 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_plan_intent",
+      "suite": "diary_pregnancy_plan_intent",
       "name": "pregnancy planning intent is not silently stored as a diary entry",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1501,7 +1501,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_plan_intent",
+        "intent": "diary_pregnancy_plan_intent",
         "route": "pregnancy_planning_without_diary_write",
         "requires_confirmation_before_write": false,
         "service_skill_id": "birth-prep",
@@ -1522,9 +1522,9 @@
       ]
     },
     {
-      "suite": "pregnancy_diary_health_mixed",
+      "suite": "diary_pregnancy_health_mixed",
       "name": "diary write remains adjunct to an active health consultation",
-      "domain": "pregnancy-diary",
+      "domain": "diary",
       "owner_team": "agent",
       "input": {
         "messages": [
@@ -1543,7 +1543,7 @@
         }
       },
       "expected_behavior": {
-        "intent": "pregnancy_diary_health_mixed",
+        "intent": "diary_pregnancy_health_mixed",
         "route": "health_guidance_with_adjunct_diary_write",
         "requires_confirmation_before_write": false,
         "requires_final_response_after_tools": true,
