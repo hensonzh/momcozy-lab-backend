@@ -10,6 +10,7 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.auth import CurrentUser, issue_access_token
 from app.modules.voice.router import get_voice_service
+from tests.auth_key_material import auth_settings
 
 
 def test_transcribe_chunk_requires_current_user() -> None:
@@ -96,13 +97,7 @@ def test_realtime_voice_stream_prefetches_before_sending_pcm_headers() -> None:
 
 def test_realtime_voice_session_sends_disabled_error_frame() -> None:
     user_id = uuid4()
-    settings = Settings(
-        app_env="test",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
-        auth_jwt_issuer="momcozy-test",
-        auth_jwt_audience="momcozy-app",
-        voice_provider="disabled",
-    )
+    settings = auth_settings(voice_provider="disabled")
     token, _expires_in = issue_access_token(user_id=user_id, session_id=uuid4(), settings=settings)
     client = TestClient(create_app(settings))
 

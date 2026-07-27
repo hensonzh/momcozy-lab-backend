@@ -12,25 +12,34 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "alembic",
         "/v1/health/ready",
         "check_backup_restore_hooks.py",
-        "Worker Backlog",
-        "Agent Run Recovery",
         "Security Incident",
         "Backup And Restore Drill",
         "Credential Rotation Drill",
-        "Provider Eval Budget",
+        "/.well-known/jwks.json",
+        "/v1/internal/agent/",
+        "AGENT_RUNTIME_SERVICE_API_KEY",
+        "Idempotency-Key",
+        "actor_user_id",
         "make backend-productization-status",
         "make backend-test-smoke",
-        "make backend-worker-backlog",
-        "make backend-agent-recover-stuck-runs",
-        "recover_stuck_agent_runs.py --apply",
-        "AGENT_PROVIDER_EVAL_MAX_CASES",
-        "AGENT_PROVIDER_EVAL_COST_BUDGET_USD",
-        "actor_service",
+        "make backend-prod-readiness",
+        "20260723_0047",
+        "20260727_0048",
+        "Do not stamp",
     ]:
         assert phrase in text
 
+    for retired in [
+        "make backend-worker-backlog",
+        "make backend-agent-recover-stuck-runs",
+        "recover_stuck_agent_runs.py",
+        "AGENT_PROVIDER_EVAL_MAX_CASES",
+        "AGENT_PROVIDER_EVAL_COST_BUDGET_USD",
+    ]:
+        assert retired not in text
 
-def test_release_smoke_checklist_covers_auth_core_agent_and_observability() -> None:
+
+def test_release_smoke_checklist_covers_product_and_runtime_boundary() -> None:
     text = (DOCS / "release-smoke-checklist.md").read_text()
 
     for phrase in [
@@ -40,13 +49,21 @@ def test_release_smoke_checklist_covers_auth_core_agent_and_observability() -> N
         "/v1/admin/invite-codes/{code}/disable",
         "/v1/files/upload",
         "Idempotency-Key",
-        "/v1/agent/runs/{run_id}/stream",
+        "/.well-known/jwks.json",
+        "/v1/internal/agent/",
+        "AGENT_RUNTIME_SERVICE_API_KEY",
         "/v1/health/metrics",
         "make backend-productization-status",
         "make backend-smoke",
-        "test_agent_task8_observed_eval.py",
-        "--trace-fixtures <observed-traces.json>",
-        "make backend-worker-backlog",
+        "make backend-prod-readiness",
         "OpenAPI snapshot",
     ]:
         assert phrase in text
+
+    for retired in [
+        "/v1/agent/runs/",
+        "test_agent_task8_observed_eval.py",
+        "make backend-worker-backlog",
+        "run_agent_fact_eval.py",
+    ]:
+        assert retired not in text

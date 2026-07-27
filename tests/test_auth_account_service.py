@@ -12,6 +12,7 @@ from app.modules.auth.passwords import hash_password, verify_password
 from app.modules.auth.service import CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
 from app.modules.invites.models import InviteCode
 from app.modules.users.models import AuthIdentity, User
+from tests.auth_key_material import auth_settings
 
 
 def test_signup_creates_email_identity_hashes_password_and_issues_tokens() -> None:
@@ -251,13 +252,7 @@ def test_refresh_rotates_token_and_issues_access_for_session_user() -> None:
 
 
 def _settings(*, auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)) -> Settings:
-    return Settings(
-        app_env="test",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
-        auth_jwt_issuer="momcozy-test",
-        auth_jwt_audience="momcozy-app",
-        auth_invite_codes=auth_invite_codes,
-    )
+    return auth_settings(auth_invite_codes=auth_invite_codes)
 
 
 class FakeAccountRepository:

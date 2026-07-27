@@ -1,25 +1,24 @@
 # Product Asset Storage
 
-Large product assets such as device guidance images, videos, and PDFs should not
-be packaged into API or worker images. The backend keeps only a small manifest
-in git and reads asset bytes from object storage.
+Large device-guidance images, videos, and PDFs are not packaged into the Product
+API image. Git stores a small allowlist manifest; object storage stores bytes.
 
-## Runtime Model
+## Storage Model
 
 ```text
 product-assets.manifest.json
   -> asset id, label, content type, size, object_key
-  -> ObjectStorage provider
-  -> local filesystem / MinIO / S3 / OSS / COS
+  -> Product ObjectStorage provider
+  -> MinIO / S3 / OSS / COS
 ```
 
-Postgres is not the authority for product asset bytes. Object storage stores the
-content, while the manifest controls the public allowlist exposed by
-`/v1/assets`.
+The manifest controls the allowlist exposed by `GET /v1/assets` and
+`GET /v1/assets/{asset_id}`. Clients use asset ids and never construct URLs from
+filesystem paths or object keys.
 
-## Build Manifest
+## Build And Verify
 
-Given a local source directory before upload:
+Build a manifest from the publication source:
 
 ```bash
 python scripts/build_product_asset_manifest.py \
@@ -28,21 +27,18 @@ python scripts/build_product_asset_manifest.py \
   --object-key-prefix product-assets/device-guidance/assets
 ```
 
-Upload the same directory to the configured object storage prefix. The generated
-`object_key` values must match the upload destination.
-
-Verify the manifest and storage contents after upload:
+Upload the same directory to the configured prefix, then verify:
 
 ```bash
 python scripts/check_product_asset_storage.py
 ```
 
-The check validates that every manifest `object_key` exists in the configured
-object storage provider and that the stored byte size matches `size_bytes`.
+The check confirms every allowlisted object exists and its stored byte size
+matches `size_bytes`.
 
 ## Local Development
 
-The default local profile uses MinIO object storage:
+The local profile uses the `momcozy-local` MinIO bucket:
 
 ```env
 OBJECT_STORAGE_PROVIDER=minio
@@ -53,47 +49,21 @@ OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin
 PRODUCT_ASSET_MANIFEST_PATH=assets/product-assets.manifest.json
 ```
 
-For local development, upload the product asset files into the matching object
-storage prefix in the `momcozy-local` MinIO bucket:
+Publish asset bytes under:
 
 ```text
 momcozy-local/product-assets/...
 ```
 
-Start MinIO through Compose before running storage checks:
+Run storage checks after MinIO starts:
 
 ```bash
 make backend-local-minio
 set -a; . env/compose.local.env.example; set +a
 python scripts/check_object_storage_profile.py
+python scripts/check_product_asset_storage.py
 ```
 
-Large product asset blobs still stay out of the repository and worker images;
-the manifest is committed, while bytes are published to object storage.
-
-## Worker Boundary
-
-Agent workers receive the same `ObjectStorage` provider as the API process, but
-they do not need product asset blobs on disk. This keeps worker
-images small and makes asset rollout an object-storage operation instead of an
-application redeploy.
-
-## Agent Reference Documents
-
-Structured reference documents are published separately from the public product
-asset manifest. The pump model publication source is
-`assets/agent-references/pump-models.md`; publish it with:
-
-```bash
-make backend-publish-pump-models-reference \
-  BACKEND_ENV_FILE=env/compose.prod.env
-```
-
-The command validates the embedded `pump_models.reference.v1` payload before
-uploading it to `agent-references/device-service/pump-models.md`. Agent runtime
-reads only that object key and does not fall back to a packaged file or Python
-catalog. Local and test Compose profiles seed the same validated publication
-source into their MinIO buckets during `minio-init`; managed production storage
-still uses the explicit publish command as part of the release process.
-`backend-check-infra` runs `check_pump_models_reference.py` so readiness fails
-when the object is missing or its embedded schema is invalid.
+Only the manifest belongs in the application repository and image. Runtime
+reference documents, model knowledge, and specialist content are owned and
+published from the Agent Runtime repository; they are not Product assets.

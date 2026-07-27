@@ -88,3 +88,28 @@ class NotificationsRepository:
         notification.status = "archived"
         await self.session.flush()
         return notification
+
+    async def get_milk_reminder_for_owner(
+        self,
+        *,
+        reminder_id: UUID,
+        owner_user_id: UUID,
+    ) -> Notification | None:
+        statement = select(Notification).where(
+            Notification.id == reminder_id,
+            Notification.owner_user_id == owner_user_id,
+            Notification.notification_type == "milk_reminder",
+            Notification.status != "archived",
+        )
+        return cast(Notification | None, await self.session.scalar(statement))
+
+    async def delete_milk_reminder(
+        self,
+        *,
+        reminder: Notification,
+    ) -> None:
+        await self.session.delete(reminder)
+        await self.session.flush()
+
+    async def flush(self) -> None:
+        await self.session.flush()

@@ -8,18 +8,24 @@ from sqlalchemy import text
 from ...core.errors import ApiError
 from ...core.settings import Settings
 from ..surface import SurfaceAPIRouter, api_surface
-from ...agent_runtime.api.router import router as agent_runtime_router
 from ...modules.assets.router import router as assets_router
 from ...modules.auth import authenticate_service_key
 from ...modules.auth.router import router as auth_router
 from ...modules.devices.router import router as devices_router
 from ...modules.diary.router import router as diary_router
+from ...modules.diary.agent_router import router as agent_diary_router
 from ...modules.files.router import router as files_router
+from ...modules.files.agent_router import router as agent_files_router
 from ...modules.invites.router import router as invites_router
+from ...modules.notifications.agent_router import router as agent_notifications_router
 from ...modules.notifications.router import router as notifications_router
+from ...modules.plans.agent_router import router as agent_plans_router
 from ...modules.plans.router import router as plans_router
+from ...modules.profiles.agent_router import router as agent_profiles_router
 from ...modules.profiles.router import router as profiles_router
+from ...modules.records.agent_router import router as agent_records_router
 from ...modules.records.router import router as records_router
+from ...modules.support.agent_router import router as agent_support_router
 from ...modules.support.router import router as support_router
 from ...modules.voice.router import router as voice_router
 
@@ -27,17 +33,23 @@ router = SurfaceAPIRouter(
     prefix="/v1",
     api_surface_metadata=api_surface("infra_probe_api", owner="platform", clients=["load-balancer", "monitoring"]),
 )
-router.include_router(agent_runtime_router)
 router.include_router(assets_router)
 router.include_router(auth_router)
 router.include_router(devices_router)
 router.include_router(diary_router)
+router.include_router(agent_diary_router)
 router.include_router(files_router)
+router.include_router(agent_files_router)
 router.include_router(invites_router)
+router.include_router(agent_notifications_router)
 router.include_router(notifications_router)
+router.include_router(agent_plans_router)
 router.include_router(plans_router)
+router.include_router(agent_profiles_router)
 router.include_router(profiles_router)
+router.include_router(agent_records_router)
 router.include_router(records_router)
+router.include_router(agent_support_router)
 router.include_router(support_router)
 router.include_router(voice_router)
 

@@ -136,12 +136,7 @@ def test_logout_revokes_current_access_token_session() -> None:
 
 def _app(*, fake_service: "FakeAuthAccountService"):
     app = create_app(
-        Settings(
-            app_env="test",
-            auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
-            auth_jwt_issuer="momcozy-test",
-            auth_jwt_audience="momcozy-app",
-        )
+        Settings(app_env="test")
     )
     app.dependency_overrides[get_auth_account_service] = lambda: fake_service
     return app

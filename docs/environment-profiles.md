@@ -1,16 +1,19 @@
-# Environment Profiles
+# Product Backend Environment Profiles
 
-The backend is configured by environment variables. Keep real secrets outside
-the repository and copy the example files into your deployment secret manager or
-local `.env` files.
+Keep real secrets outside the repository. Copy example files into local private
+files or the deployment secret manager.
 
 ## Profiles
 
 | Profile | File | Purpose |
 |---|---|---|
-| Local compose | `env/compose.local.env` | Run API and workers with `docker-compose.local.yml`; service hosts are `postgres`, `redis`, and `minio`. Copy it from `env/compose.local.env.example`. |
-| Server test compose | `env/compose.test.env.example` | Run API, workers, Postgres, Redis, and MinIO with `docker-compose.test.yml` on a test server. |
-| Production compose | `env/compose.prod.env.example` | Run API and workers with `docker-compose.prod.yml`; managed Postgres, Redis, and OSS/S3 are supplied through env. |
+| Local compose | `env/compose.local.env.example` | Product API with Compose Postgres, Redis, and MinIO. |
+| Server test compose | `env/compose.test.env.example` | Product API and isolated infrastructure on a test server. |
+| Production compose | `env/compose.prod.env.example` | Product API with managed Postgres, Redis, and object storage. |
+
+The Product compose profiles build and run only `migrate`, `api`, and the
+profile-appropriate infrastructure. Agent Runtime has a separate configuration,
+deployment, and repository.
 
 ## Common Commands
 
@@ -19,90 +22,89 @@ make backend-local-up
 make backend-check-infra
 ```
 
-`backend-local-up` first builds `migrate`, `api`, `agent-worker`, and
-`memory-worker` from the current source tree, then starts local infrastructure,
-runs migrations, and starts the API plus both workers with recreated
-containers. `backend-local-migrate` and `backend-local-workers` remain available
-for explicit maintenance, retries, and debugging; they also build the relevant
-runtime image before running. Use `BACKEND_BUILD_FLAGS=--no-cache` when you want
-to bypass the Docker build cache completely.
+`backend-local-up` builds the Product image, starts local infrastructure, runs
+migrations, and recreates the API. `backend-check-infra` loads
+`BACKEND_ENV_FILE` and checks:
 
-`backend-check-infra` loads `BACKEND_ENV_FILE`, then runs database, Redis, and
-object storage diagnostics against the configured services.
+- PostgreSQL connectivity.
+- Redis connectivity with a generic `PING`.
+- Object-storage write/read/delete behavior.
+- Product asset manifest objects.
 
-It checks:
+Redis run locks, stream cursors, model configuration, Agent workers, memory, and
+eval settings are Runtime-owned and must not be added to Product profiles.
 
-- PostgreSQL connectivity with `select 1`.
-- Redis agent runtime controls, stream cursor, cancel flag, and lock semantics.
-- Object storage `put_bytes`, `get_bytes`, and `delete` semantics.
+## Product Configuration
 
-## Production Rules
-
-When `APP_ENV=production`, startup validation rejects implicit localhost
-Postgres or Redis URLs, rejects local filesystem object storage, and requires
-managed object storage bucket, credentials, service key, JWT secret, and trusted
-hosts.
-
-The production compose file starts only application processes. Postgres, Redis,
-and object storage are selected through `compose.prod.env` and should point at
-managed infrastructure.
-
-## Environment Switching
-
-All environment-specific infrastructure is selected through variables:
+The shared shape across environments is:
 
 ```env
+APP_ENV=local|test|production
 DATABASE_URL=...
 REDIS_URL=...
+
 OBJECT_STORAGE_PROVIDER=minio|s3|oss|cos
 OBJECT_STORAGE_BUCKET=...
 OBJECT_STORAGE_ENDPOINT_URL=...
 OBJECT_STORAGE_ACCESS_KEY_ID=...
 OBJECT_STORAGE_SECRET_ACCESS_KEY=...
+
+AUTH_JWT_PRIVATE_KEY_B64=...
+AUTH_JWT_ISSUER=...
+AUTH_JWT_PRODUCT_AUDIENCE=momcozy-product-api
+AUTH_JWT_RUNTIME_AUDIENCE=momcozy-agent-runtime
+
+SERVICE_API_KEY=...
+AGENT_RUNTIME_SERVICE_API_KEY=...
+AGENT_IMAGE_SIGNED_URL_TTL_SECONDS=...
+
 OPENAI_API_KEY=...
-OPENAI_MODEL=gpt-5.6-terra
-OPENAI_REASONING_EFFORT=low
-OPENAI_RESPONSES_STORE=false
-AGENT_QUICK_REPLY_MODEL=gpt-5.4-nano
-AGENT_QUICK_REPLY_TIMEOUT_SECONDS=3.0
-AGENT_FACT_EXTRACTION_ENABLED=true
-AGENT_FACT_EXTRACTION_MODEL=gpt-5.4-nano
-AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS=5.0
-AGENT_FACT_EXTRACTION_VERSION=turn-fact-extractor-v2
-AGENT_FACT_WORKER_CONCURRENCY=2
-AGENT_FACT_WORKER_BATCH_LIMIT=10
-AGENT_FACT_WORKER_IDLE_SECONDS=0.5
-AGENT_FACT_WORKER_LEASE_SECONDS=30
-AGENT_FACT_WORKER_MAX_ATTEMPTS=3
-AGENT_MEMORY_CONSOLIDATION_MODEL=gpt-5.4-nano
-AGENT_MEMORY_CONSOLIDATION_TIMEZONE=Asia/Shanghai
-AGENT_MEMORY_CONSOLIDATION_HOUR=3
 VISION_PROVIDER=disabled|openai
 VISION_OPENAI_MODEL=gpt-5.4-mini
 VISION_REQUEST_TIMEOUT_SECONDS=20
 ```
 
-The Agent runtime uses the native OpenAI Responses runner exclusively. `OPENAI_RESPONSES_STORE=false`
-keeps conversation authority in the application database, while the runtime
-round-trips required response and reasoning items within the active run.
+`OPENAI_API_KEY` in this repository is used only by Product-owned provider
+adapters such as vision or speech. Agent model/provider settings belong to the
+Runtime configuration.
 
-The main agent uses `OPENAI_MODEL` and `OPENAI_REASONING_EFFORT`. Quick replies
-use `AGENT_QUICK_REPLY_MODEL` as a separate lightweight finalizer and do not
-persist to the message database. Turn-level form-prefill fact extraction is a
-separate OpenAI Responses lane inside `agent-worker` and requires
-`OPENAI_API_KEY`. Its lease must remain greater than its model request timeout.
-Long-term memory extraction is also outside
-the live run path: the independent `memory-worker` reads only completed
-conversations for the previous local day, uses
-`AGENT_MEMORY_CONSOLIDATION_MODEL`, and publishes a bounded database snapshot
-that the live worker reads with one primary-key query.
+## Product And Runtime Trust
 
-The vision adapter is independent from the Agent worker. `VISION_PROVIDER=openai`
-reuses `OPENAI_API_KEY`, sends the owner-scoped object bytes to the Responses API
-with `store=false`, and uses `VISION_OPENAI_MODEL` plus a hard
-`VISION_REQUEST_TIMEOUT_SECONDS` bound. Keep it disabled until the release smoke
-in `vision-provider-integration.md` passes with deployment-owned credentials.
+- The Product Backend owns `AUTH_JWT_PRIVATE_KEY_B64`.
+- Product publishes its public key through `GET /.well-known/jwks.json`.
+- Product and Runtime use the same `AUTH_JWT_ISSUER` and Runtime audience.
+- Runtime receives no JWT private key.
+- `AGENT_RUNTIME_SERVICE_API_KEY` authenticates only Runtime calls to
+  `/v1/internal/agent/*`.
+- Every hostname used by Runtime in `PRODUCT_BACKEND_BASE_URL` and
+  `AUTH_JWKS_URL` must also appear in Product `TRUSTED_HOSTS`; the production
+  templates use `product-api.internal`.
+- Authenticated `/v1/internal/agent/*` traffic uses the independent
+  `AGENT_RUNTIME_RATE_LIMIT_REQUESTS` /
+  `AGENT_RUNTIME_RATE_LIMIT_WINDOW_SECONDS` bucket. Size it from Agent
+  concurrency and tool-call load tests instead of sharing the public API
+  credential limit.
+- `SERVICE_API_KEY` remains the operator/admin credential and must not be reused
+  as the Runtime key.
+- The Product Backend validates `actor_user_id`, owner scope, action payload,
+  action-bound idempotency, and audit fields for every Runtime-originated
+  business operation.
 
-Local and server-test development use Docker Compose managed Postgres, Redis,
-and MinIO. Production should point the same variables at managed Postgres,
-managed Redis, and OSS-compatible object storage without code changes.
+## Production Rules
+
+Production startup rejects implicit localhost Postgres/Redis, filesystem object
+storage, missing managed storage credentials, missing service keys, missing RSA
+signing material, and wildcard trust settings.
+
+The production compose starts only application processes. Infrastructure URLs
+must point to managed services. `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL`, when
+configured for Runtime image access, must be HTTPS and reachable from the
+Runtime/model provider path.
+
+`VISION_PROVIDER=openai` reads owner-scoped Product file bytes and sends a
+bounded request with `store=false` and a hard timeout. Keep it disabled until
+`vision-provider-integration.md` passes with deployment-owned credentials.
+
+Local and server-test profiles use Compose-managed Postgres, Redis, and MinIO.
+Production changes only environment values; Product business code and internal
+Agent API contracts remain the same.

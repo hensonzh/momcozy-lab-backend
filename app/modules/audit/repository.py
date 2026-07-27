@@ -5,6 +5,7 @@ from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import AuditLog, IdempotencyKey
@@ -64,17 +65,20 @@ class AuditRepository:
         key: str,
         request_hash: str,
         expires_at: datetime,
-    ) -> IdempotencyKey:
-        idempotency_key = IdempotencyKey(
-            actor_user_id=actor_user_id,
-            scope=scope,
-            key=key,
-            request_hash=request_hash,
-            expires_at=expires_at,
+    ) -> IdempotencyKey | None:
+        statement = (
+            postgresql_insert(IdempotencyKey)
+            .values(
+                actor_user_id=actor_user_id,
+                scope=scope,
+                key=key,
+                request_hash=request_hash,
+                expires_at=expires_at,
+            )
+            .on_conflict_do_nothing(constraint="uq_idempotency_actor_scope_key")
+            .returning(IdempotencyKey)
         )
-        self.session.add(idempotency_key)
-        await self.session.flush()
-        return idempotency_key
+        return cast(IdempotencyKey | None, await self.session.scalar(statement))
 
     async def mark_idempotency_completed(
         self,

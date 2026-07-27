@@ -5,13 +5,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.core.errors import ApiError
-from app.core.settings import Settings
 from app.modules.auth import authenticate_access_token
 from app.modules.auth.account_service import AuthAccountService, DeviceContext
 from app.modules.auth.models import DeviceSession, RefreshToken
 from app.modules.auth.passwords import verify_password
 from app.modules.auth.service import AuthSessionService, refresh_token_hash
 from app.modules.users.models import AuthIdentity, User
+from tests.auth_key_material import auth_settings
 
 
 def test_email_auth_main_flow_rotates_refresh_tokens_and_revokes_reuse() -> None:
@@ -23,12 +23,7 @@ def test_invite_auth_main_flow_reuses_device_identity_and_rotates_refresh() -> N
 
 
 async def _run_email_auth_main_flow() -> None:
-    settings = Settings(
-        app_env="test",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
-        auth_jwt_issuer="momcozy-test",
-        auth_jwt_audience="momcozy-app",
-    )
+    settings = auth_settings()
     account_repository = InMemoryAuthAccountRepository()
     session_repository = InMemoryAuthSessionRepository()
     session_service = AuthSessionService(
@@ -87,13 +82,7 @@ async def _run_email_auth_main_flow() -> None:
 
 
 async def _run_invite_auth_main_flow() -> None:
-    settings = Settings(
-        app_env="test",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
-        auth_jwt_issuer="momcozy-test",
-        auth_jwt_audience="momcozy-app",
-        auth_invite_codes=("MOMCOZY-BETA",),
-    )
+    settings = auth_settings(auth_invite_codes=("MOMCOZY-BETA",))
     account_repository = InMemoryAuthAccountRepository()
     session_repository = InMemoryAuthSessionRepository()
     session_service = AuthSessionService(

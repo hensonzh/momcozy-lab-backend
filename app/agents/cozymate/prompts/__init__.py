@@ -1,9 +1,0 @@
-from .instructions import (
-    BASE_AGENT_INSTRUCTIONS,
-    DEFAULT_STABLE_SYSTEM_PROMPT,
-)
-
-__all__ = [
-    "BASE_AGENT_INSTRUCTIONS",
-    "DEFAULT_STABLE_SYSTEM_PROMPT",
-]

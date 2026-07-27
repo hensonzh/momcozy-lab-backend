@@ -31,7 +31,7 @@ repository.py
 
 Add `domain.py` when a module has rules that are:
 
-- reused by service, agent action handlers, evals, or background workers;
+- reused by public and internal application services;
 - complex enough to deserve direct unit tests;
 - stable business rules rather than persistence mechanics;
 - calculations over records, state transitions, or payload normalization.
@@ -40,7 +40,33 @@ For small CRUD-only modules, `domain.py` can wait until rules emerge.
 
 ## Agent Integration Boundary
 
-Business modules expose models, domain rules, repositories, and application services. Agent-specific Action handlers and Tool handlers live under `app/agents/cozymate/` and call those services; business modules do not import `app.agent_runtime`, `app.agents`, or `app.workers`. Shared execution contracts belong to `app/agent_runtime/`, and background process mechanics belong to `app/workers/`.
+Agent Runtime is an external service. Product business modules may expose a
+small internal adapter next to the owning module:
+
+```text
+agent_router.py
+  /v1/internal/agent/* HTTP adapter and Runtime service authentication.
+
+agent_contracts.py
+  Bounded Product request/response schemas for the internal service API.
+
+agent_service.py
+  Owner-scope, action-bound idempotency, audit, and business-service reuse.
+```
+
+These files are Product integration adapters, not an Agent loop. They must not
+contain prompts, tool routing, model calls, conversation state, confirmation
+workflow, memory, or Runtime recovery logic. They call the same application
+services used by Product routes and preserve the same domain invariants.
+
+The Product repository must not import Agent Runtime packages or access its
+database. The Runtime must not import Product modules or access Product tables;
+all cross-service access goes through the authenticated internal HTTP contract.
+
+Read adapters receive explicit `actor_user_id` and enforce owner scope. Action
+adapters require `X-Service-Key`, `action_id`, and
+`Idempotency-Key: agent-action:<action_id>`, then record the Runtime service as
+the audited actor service.
 
 ## Current Example
 

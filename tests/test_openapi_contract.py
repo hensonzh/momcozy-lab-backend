@@ -50,14 +50,21 @@ def test_openapi_operations_declare_api_surface_metadata() -> None:
     assert invalid == []
 
 
-def test_public_app_api_paths_are_separate_from_ops_and_infra_surfaces() -> None:
+def test_public_product_internal_and_infra_surfaces_are_separate() -> None:
     schema = build_openapi_schema()
 
     assert schema["paths"]["/v1/profile/me"]["get"][API_SURFACE_FIELD] == "public_app_api"
-    assert schema["paths"]["/v1/agent/runs/{run_id}/stream"]["get"][API_SURFACE_FIELD] == "runtime_stream_api"
-    assert schema["paths"]["/v1/agent/admin/runs/{run_id}/replay"]["get"][API_SURFACE_FIELD] == "admin_ops_api"
-    assert schema["paths"]["/v1/notifications"]["post"][API_SURFACE_FIELD] == "internal_service_api"
+    assert schema["paths"]["/v1/internal/agent/profile"]["get"][API_SURFACE_FIELD] == "internal_service_api"
     assert schema["paths"]["/v1/health/ready"]["get"][API_SURFACE_FIELD] == "infra_probe_api"
+
+
+def test_jwks_is_an_unauthenticated_agent_runtime_auth_contract() -> None:
+    operation = build_openapi_schema()["paths"]["/.well-known/jwks.json"]["get"]
+
+    assert operation[API_SURFACE_FIELD] == "internal_service_api"
+    assert operation[API_OWNER_FIELD] == "auth"
+    assert operation[API_CLIENT_FIELD] == ["agent-runtime"]
+    assert "security" not in operation
 
 
 def test_openapi_contains_core_flutter_handoff_paths() -> None:
@@ -86,17 +93,30 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/devices/pump-energy-target",
         "/v1/speech/transcribe-chunk",
         "/v1/realtime-voice-stream",
-        "/v1/agent/artifacts/{artifact_id}",
-        "/v1/agent/memories",
-        "/v1/agent/memories/settings",
-        "/v1/agent/memories/{memory_id}",
-        "/v1/agent/facts",
-        "/v1/agent/facts/{fact_id}",
-        "/v1/agent/runs",
-        "/v1/agent/runs/{run_id}/client-events",
-        "/v1/agent/runs/{run_id}/stream",
     ]:
         assert path in paths
+
+
+def test_openapi_contains_runtime_to_product_internal_contracts_only() -> None:
+    paths = build_openapi_schema()["paths"]
+    expected = {
+        "/v1/internal/agent/actions/lactation.record/apply",
+        "/v1/internal/agent/actions/notifications.milk_reminder/apply",
+        "/v1/internal/agent/actions/plans/apply",
+        "/v1/internal/agent/actions/pregnancy-diary.entry/apply",
+        "/v1/internal/agent/actions/profile.update/apply",
+        "/v1/internal/agent/actions/support.ticket/apply",
+        "/v1/internal/agent/files/resolve",
+        "/v1/internal/agent/lactation/milk-analysis-snapshot",
+        "/v1/internal/agent/lactation/timeline",
+        "/v1/internal/agent/plans/calendar",
+        "/v1/internal/agent/plans/current",
+        "/v1/internal/agent/pregnancy-diary",
+        "/v1/internal/agent/profile",
+    }
+
+    assert expected <= set(paths)
+    assert not any(path.startswith("/v1/agent/") or path == "/v1/agent" for path in paths)
 
 
 def test_openapi_excludes_retired_legacy_pump_fallback_paths() -> None:
@@ -120,23 +140,6 @@ def test_openapi_excludes_retired_legacy_pump_fallback_paths() -> None:
         "/v1/status-page/today",
     ]:
         assert retired_path not in paths
-
-
-def test_agent_stream_contract_keeps_tokens_out_of_query_parameters() -> None:
-    operation = build_openapi_schema()["paths"]["/v1/agent/runs/{run_id}/stream"]["get"]
-    parameters = operation.get("parameters", [])
-    query_names = {parameter["name"] for parameter in parameters if parameter.get("in") == "query"}
-    poll_interval = next(
-        parameter
-        for parameter in parameters
-        if parameter.get("in") == "query"
-        and parameter["name"] == "poll_interval_seconds"
-    )
-
-    assert "token" not in query_names
-    assert {"after_sequence", "limit"} <= query_names
-    assert poll_interval["schema"]["default"] == 0.1
-    assert poll_interval["schema"]["minimum"] == 0.01
 
 
 def test_file_vision_stream_contract_keeps_tokens_out_of_query_parameters() -> None:
@@ -163,10 +166,13 @@ def test_retryable_writes_declare_idempotency_header() -> None:
         ("post", "/v1/devices/pump-workstate"),
         ("post", "/v1/devices/pump-threshold"),
         ("post", "/v1/devices/pump-health"),
-        ("post", "/v1/notifications"),
         ("post", "/v1/support/tickets"),
-        ("post", "/v1/agent/runs"),
-        ("post", "/v1/agent/actions/{action_id}/confirm"),
+        ("post", "/v1/internal/agent/actions/lactation.record/apply"),
+        ("post", "/v1/internal/agent/actions/notifications.milk_reminder/apply"),
+        ("post", "/v1/internal/agent/actions/plans/apply"),
+        ("post", "/v1/internal/agent/actions/pregnancy-diary.entry/apply"),
+        ("post", "/v1/internal/agent/actions/profile.update/apply"),
+        ("post", "/v1/internal/agent/actions/support.ticket/apply"),
     ]:
         operation = schema["paths"][path][method]
         header_names = {parameter["name"] for parameter in operation.get("parameters", []) if parameter.get("in") == "header"}

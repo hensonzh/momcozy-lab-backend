@@ -87,7 +87,19 @@ class IdempotencyService:
                 request_hash=request_hash,
                 expires_at=expires_at,
             )
-            return IdempotencyDecision(status="reserved", record=created)
+            if created is not None:
+                return IdempotencyDecision(status="reserved", record=created)
+            existing = await self.repository.get_idempotency_key(
+                actor_user_id=actor_user_id,
+                scope=normalized_scope,
+                key=normalized_key,
+            )
+            if existing is None:
+                raise ApiError(
+                    code="internal_error",
+                    message="Idempotency reservation could not be resolved.",
+                    status=500,
+                )
 
         if _is_expired(existing.expires_at):
             raise ApiError(code="idempotency_key_expired", message="Idempotency key has expired; retry with a new key.", status=409)

@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field
 
 
 DeliveryMethod = Literal["vaginal", "cesarean", "assisted_vaginal", "other", "unknown"]
@@ -138,10 +138,6 @@ class LatestInfantMeasurementOutput(_StrictOutputModel):
         description="最近一次有效生长记录的测量时间，为带时区偏移的 ISO 8601 日期时间。",
     )
 
-    @field_serializer("measured_at")
-    def serialize_measured_at(self, value: datetime) -> str:
-        return value.isoformat()
-
 
 class LactationInfantContextOutput(_StrictOutputModel):
     """一个宝宝的基础信息及其与当前这次分娩的关系。"""
@@ -260,73 +256,4 @@ class MaternalInfantProfileReadOutput(_StrictOutputModel):
     )
     data_quality_issues: list[LactationDataQualityIssueOutput] = Field(
         description="已发现但不阻断读取的数据质量问题；空数组表示未发现已知问题。",
-    )
-
-
-class InfantProfileUpdateSummary(_StrictOutputModel):
-    """一个宝宝实际提交更新的字段摘要。"""
-
-    infant_id: UUID = Field(
-        description="被更新宝宝的稳定 UUID。",
-    )
-    fields: list[str] = Field(
-        description="该宝宝实际提交更新的字段名，按字母顺序返回。",
-    )
-
-
-class MaternalInfantProfileUpdateSummary(_StrictOutputModel):
-    """本次妈妈与宝宝基础资料更新的字段摘要。"""
-
-    mother_fields: list[str] = Field(
-        default_factory=list,
-        description="妈妈侧实际提交更新的字段名，按字母顺序返回。",
-    )
-    infants: list[InfantProfileUpdateSummary] = Field(
-        default_factory=list,
-        description="按宝宝列出的实际提交字段；未更新宝宝资料时为空数组。",
-    )
-    current_infants_updated: bool = Field(
-        default=False,
-        description="本次是否完整替换了当前分娩宝宝及其出生顺序关联。",
-    )
-
-
-class MaternalInfantProfileUpdateOutput(_StrictOutputModel):
-    """profile_write 的 Action 提交或执行结果。"""
-
-    action_id: UUID = Field(
-        description="本次持久化 Action 的稳定 UUID。",
-    )
-    action_type: Literal["profile.update"] = Field(
-        description="固定为 profile.update，表示受保护的基础资料更新 Action。",
-    )
-    action_status: str = Field(
-        description="Action 当前状态，例如 applied、confirmation_required 或 failed。",
-    )
-    requires_confirmation: bool = Field(
-        description="当前 Action 是否仍需用户确认后才能执行。",
-    )
-    confirmation_policy: Literal["always", "explicit_intent"] = Field(
-        description="确认策略；always=必须再次确认，explicit_intent=明确更新意图即可执行。",
-    )
-    user_visible: bool = Field(
-        description="是否需要向用户展示确认界面。",
-    )
-    write_succeeded: bool = Field(
-        description="本次资料写入是否已经成功应用。",
-    )
-    preview_payload: dict[str, object] = Field(
-        description="执行前生成的结构化更新摘要，不代表写入已经成功。",
-    )
-    status: Literal["maternal_infant_profile_updated", "action_failed"] | None = Field(
-        default=None,
-        description="工具级结果；写入成功、失败时分别返回固定状态，尚待确认时为 null 或省略。",
-    )
-    error_code: str | None = Field(
-        default=None,
-        description="Action 失败时的稳定错误码；未失败时为 null 或省略。",
-    )
-    updated: MaternalInfantProfileUpdateSummary | None = Field(
-        default=None,
-        description="写入成功后的字段摘要；未成功应用时为 null 或省略。",
     )

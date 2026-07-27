@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import optional_idempotency_key, require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
-from ...core.errors import ApiError
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
@@ -42,17 +41,6 @@ async def create_support_ticket(
     current_user: CurrentUser = Depends(require_current_user),
     service: SupportTicketsService = Depends(get_support_tickets_service),
 ) -> SupportTicketRead:
-    if payload.source == "agent_form":
-        submit_agent_form = getattr(request.app.state, "support_agent_form_submitter", None)
-        if not callable(submit_agent_form):
-            raise ApiError(code="agent_runtime_not_configured", message="Agent runtime is unavailable.", status=503)
-        ticket = await submit_agent_form(
-            payload=payload,
-            current_user=current_user,
-            service=service,
-            idempotency_key=idempotency_key,
-        )
-        return SupportTicketRead.model_validate(ticket)
     ticket = await service.create_ticket(
         owner_user_id=current_user.user_id,
         issue_type=payload.issue_type or "other",

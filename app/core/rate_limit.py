@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
@@ -12,6 +13,7 @@ from .settings import Settings
 
 
 RATE_LIMIT_EXEMPT_PATHS = {
+    "/.well-known/jwks.json",
     "/docs",
     "/openapi.json",
     "/redoc",
@@ -61,14 +63,18 @@ async def check_rate_limit(request: Request, settings: Settings) -> RateLimitDec
             retry_after_seconds=0,
         )
 
-    key = _rate_limit_key(request)
-    count = await _increment_counter(request=request, key=key, window_seconds=settings.rate_limit_window_seconds)
-    remaining = max(settings.rate_limit_requests - count, 0)
+    key, limit, window_seconds = _rate_limit_profile(request, settings)
+    count = await _increment_counter(
+        request=request,
+        key=key,
+        window_seconds=window_seconds,
+    )
+    remaining = max(limit - count, 0)
     return RateLimitDecision(
-        allowed=count <= settings.rate_limit_requests,
-        limit=settings.rate_limit_requests,
+        allowed=count <= limit,
+        limit=limit,
         remaining=remaining,
-        retry_after_seconds=settings.rate_limit_window_seconds if count > settings.rate_limit_requests else 0,
+        retry_after_seconds=window_seconds if count > limit else 0,
     )
 
 
@@ -96,6 +102,30 @@ def _rate_limit_key(request: Request) -> str:
         return f"rate-limit:credential:{credential}"
     client_host = request.client.host if request.client else "unknown"
     return f"rate-limit:ip:{client_host}"
+
+
+def _rate_limit_profile(
+    request: Request,
+    settings: Settings,
+) -> tuple[str, int, int]:
+    service_key = request.headers.get("x-service-key", "")
+    configured_key = settings.agent_runtime_service_api_key
+    if (
+        request.url.path.startswith("/v1/internal/agent/")
+        and service_key
+        and configured_key
+        and hmac.compare_digest(service_key, configured_key)
+    ):
+        return (
+            f"rate-limit:agent-runtime:{_stable_hash(service_key)}",
+            settings.agent_runtime_rate_limit_requests,
+            settings.agent_runtime_rate_limit_window_seconds,
+        )
+    return (
+        _rate_limit_key(request),
+        settings.rate_limit_requests,
+        settings.rate_limit_window_seconds,
+    )
 
 
 def _credential_identity(request: Request) -> str:

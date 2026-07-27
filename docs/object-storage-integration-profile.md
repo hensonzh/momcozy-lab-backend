@@ -1,18 +1,24 @@
-# Object Storage Integration Profile
+# Product Object Storage Integration Profile
 
-The default local backend uses MinIO so development exercises the same
-S3-compatible object storage semantics as staging and production. Production
-uses a managed S3-compatible provider selected through environment variables.
+Local development uses MinIO to exercise the same S3-compatible semantics as
+staging and production. Production selects a managed provider through
+environment variables.
 
-## Runtime Boundary
+## Ownership Boundary
 
-Object storage stores large files and agent artifacts. Postgres stores metadata,
-owner scope, audit, and lifecycle. Business code should never infer permission
-or ownership from object keys alone.
+Object storage holds Product uploads and product-asset bytes. Postgres stores metadata,
+owner scope, audit, and lifecycle state. Business code never
+infers permission from an object key alone.
+
+Agent Runtime does not receive Product object-storage credentials. For an
+attachment, it calls `POST /v1/internal/agent/files/resolve` with its service
+key, `actor_user_id`, stable Product `file_id`, and purpose. Product validates
+ownership and returns a bounded signed URL. The signed URL is transport data,
+not durable identity.
 
 ## CI Profile
 
-The `object-storage-integration` CI job starts a MinIO container and runs:
+The `object-storage-integration` check starts MinIO and runs:
 
 ```bash
 OBJECT_STORAGE_PROVIDER=minio \
@@ -23,35 +29,36 @@ OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin \
 python scripts/check_object_storage_profile.py
 ```
 
-The script ensures the bucket exists, writes a diagnostic object, reads it back,
-verifies the body, and deletes the generated object.
+The script ensures the bucket exists, writes a diagnostic object, reads it,
+verifies the bytes, and deletes it.
 
 ## Local Profile
 
-Local Docker Compose starts MinIO and creates the `momcozy-local` bucket before
-the API and workers start:
+Local Docker Compose starts MinIO and creates the `momcozy-local` bucket before the
+Product API starts:
 
 ```bash
 make backend-local-up
 ```
 
-The command builds the current local backend images before creating or
-recreating runtime containers, so object-storage and migration code changes are
-picked up on each startup.
-
-Containerized API and worker processes use the Compose service hostname:
+The containerized API uses:
 
 ```env
-OBJECT_STORAGE_PROVIDER=minio \
-OBJECT_STORAGE_BUCKET=momcozy-local \
-OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000 \
-OBJECT_STORAGE_ACCESS_KEY_ID=minioadmin \
+OBJECT_STORAGE_PROVIDER=minio
+OBJECT_STORAGE_BUCKET=momcozy-local
+OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000
+OBJECT_STORAGE_ACCESS_KEY_ID=minioadmin
 OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin
 ```
 
-Host-side scripts use the same bucket through the exposed localhost port:
+Host-side checks use the exposed localhost port:
 
 ```bash
 set -a; . env/compose.local.env.example; set +a
 python scripts/check_object_storage_profile.py
 ```
+
+When Agent Runtime or a model provider must fetch a signed URL, configure
+`OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` as a stable HTTPS origin reachable from
+that network. Never expose the MinIO administration endpoint or storage
+credentials to Runtime or mobile clients.

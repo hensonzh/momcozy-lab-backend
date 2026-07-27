@@ -16,25 +16,6 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
-| GET | `/v1/agent/actions/{action_id}` | agent-runtime | flutter | stable | Get Action |
-| POST | `/v1/agent/actions/{action_id}/confirm` | agent-runtime | flutter | stable | Confirm Action |
-| POST | `/v1/agent/actions/{action_id}/reject` | agent-runtime | flutter | stable | Reject Action |
-| DELETE | `/v1/agent/artifacts/{artifact_id}` | agent-runtime | flutter | stable | Delete Artifact |
-| DELETE | `/v1/agent/facts` | agent-runtime | flutter | stable | Clear Facts |
-| GET | `/v1/agent/facts` | agent-runtime | flutter | stable | List Facts |
-| DELETE | `/v1/agent/facts/{fact_id}` | agent-runtime | flutter | stable | Delete Fact |
-| GET | `/v1/agent/memories` | agent-runtime | flutter | stable | List Memories |
-| GET | `/v1/agent/memories/settings` | agent-runtime | flutter | stable | Get Memory Settings |
-| PUT | `/v1/agent/memories/settings` | agent-runtime | flutter | stable | Update Memory Settings |
-| DELETE | `/v1/agent/memories/{memory_id}` | agent-runtime | flutter | stable | Delete Memory |
-| POST | `/v1/agent/runs` | agent-runtime | flutter | stable | Create Run |
-| GET | `/v1/agent/runs/{run_id}` | agent-runtime | flutter | stable | Get Run |
-| POST | `/v1/agent/runs/{run_id}/cancel` | agent-runtime | flutter | stable | Cancel Run |
-| POST | `/v1/agent/runs/{run_id}/client-events` | agent-runtime | flutter | stable | Record Client Event |
-| GET | `/v1/agent/runs/{run_id}/events` | agent-runtime | flutter | stable | List Run Events |
-| GET | `/v1/agent/threads` | agent-runtime | flutter | stable | List Threads |
-| POST | `/v1/agent/threads` | agent-runtime | flutter | stable | Create Thread |
-| GET | `/v1/agent/threads/{thread_id}` | agent-runtime | flutter | stable | Get Thread |
 | GET | `/v1/assets` | product-assets | flutter | stable | List Product Assets |
 | GET | `/v1/assets/{asset_id}` | product-assets | flutter | stable | Get Product Asset |
 | POST | `/v1/auth/invite-login` | auth | flutter | stable | Invite Login |
@@ -103,7 +84,6 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
-| GET | `/v1/agent/runs/{run_id}/stream` | agent-runtime | flutter | stable | Stream Run Events |
 | GET | `/v1/files/{file_id}/vision/events/stream` | files | flutter | stable | Stream File Vision Events |
 | GET | `/v1/realtime-voice-stream` | voice | flutter | stable | Realtime Voice Stream |
 
@@ -111,7 +91,20 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
-| POST | `/v1/notifications` | notifications | agent-worker | stable | Create Notification |
+| GET | `/.well-known/jwks.json` | auth | agent-runtime | stable | Jwks |
+| POST | `/v1/internal/agent/actions/lactation.record/apply` | records | agent-runtime | stable | Apply Agent Lactation Record |
+| POST | `/v1/internal/agent/actions/notifications.milk_reminder/apply` | notifications | agent-runtime | stable | Apply Agent Milk Reminder Action |
+| POST | `/v1/internal/agent/actions/plans/apply` | plans | agent-runtime | stable | Apply Agent Plans Action |
+| POST | `/v1/internal/agent/actions/pregnancy-diary.entry/apply` | pregnancy-diary | agent-runtime | stable | Apply Agent Diary Action |
+| POST | `/v1/internal/agent/actions/profile.update/apply` | profiles | agent-runtime | stable | Apply Agent Profile Update |
+| POST | `/v1/internal/agent/actions/support.ticket/apply` | support | agent-runtime | stable | Apply Agent Support Ticket Action |
+| POST | `/v1/internal/agent/files/resolve` | files | agent-runtime | stable | Resolve Agent File |
+| GET | `/v1/internal/agent/lactation/milk-analysis-snapshot` | records | agent-runtime | stable | Read Agent Milk Analysis Snapshot |
+| GET | `/v1/internal/agent/lactation/timeline` | records | agent-runtime | stable | Read Agent Lactation Timeline |
+| GET | `/v1/internal/agent/plans/calendar` | plans | agent-runtime | stable | Read Agent Plan Calendar |
+| GET | `/v1/internal/agent/plans/current` | plans | agent-runtime | stable | Read Agent Current Plans |
+| GET | `/v1/internal/agent/pregnancy-diary` | pregnancy-diary | agent-runtime | stable | Read Agent Diary |
+| GET | `/v1/internal/agent/profile` | profiles | agent-runtime | stable | Read Agent Profile |
 
 ## admin_ops_api
 
@@ -121,8 +114,6 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/admin/invite-codes` | auth | admin-console | stable | Create Invite Code |
 | GET | `/v1/admin/invite-codes/ui` | auth | admin-console | stable | Invite Codes Admin Ui |
 | POST | `/v1/admin/invite-codes/{code}/disable` | auth | admin-console | stable | Disable Invite Code |
-| POST | `/v1/agent/admin/runs/{run_id}/eval-cases` | agent-runtime | ops-console, eval-runner | stable | Create Eval Case From Run |
-| GET | `/v1/agent/admin/runs/{run_id}/replay` | agent-runtime | ops-console, eval-runner | stable | Export Run Replay Bundle |
 
 ## infra_probe_api
 

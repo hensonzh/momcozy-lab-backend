@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from math import isfinite
 from urllib.parse import urlparse
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 
 LOCAL_DATABASE_URL = "postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy"
@@ -13,7 +17,6 @@ LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = ".local/object_storage"
 LOCAL_PRODUCT_ASSET_MANIFEST_PATH = "assets/product-assets.manifest.json"
 DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
-DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES = 32 * 1024
 DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60
 DEFAULT_DOUBAO_TTS_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
 DEFAULT_DOUBAO_TTS_RESOURCE_ID = "seed-tts-2.0"
@@ -24,15 +27,13 @@ DEFAULT_DOUBAO_TTS_SPEED_RATIO = 1.1
 DEFAULT_DOUBAO_TTS_FIRST_CHUNK_TIMEOUT_SECONDS = 20
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
 PRODUCTION_ENVS = {"prod", "production"}
-SUPPORTED_AUTH_JWT_ALGORITHMS = {"HS256"}
 SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub", "doubao", "volcengine"}
 SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub", "openai"}
-SUPPORTED_OPENAI_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str = "MomCozy Production Backend"
+    app_name: str = "Backend"
     app_version: str = "0.1.0"
     app_env: str = "local"
     database_url: str = LOCAL_DATABASE_URL
@@ -48,13 +49,14 @@ class Settings:
     product_asset_manifest_path: str = LOCAL_PRODUCT_ASSET_MANIFEST_PATH
     product_asset_local_root: str = ""
     file_upload_max_bytes: int = DEFAULT_FILE_UPLOAD_MAX_BYTES
-    auth_jwt_secret: str = ""
+    auth_jwt_private_key_b64: str = field(default="", repr=False)
     auth_jwt_issuer: str = ""
-    auth_jwt_audience: str = ""
-    auth_jwt_algorithm: str = "HS256"
+    auth_jwt_product_audience: str = ""
+    auth_jwt_runtime_audience: str = ""
     auth_require_active_session: bool = False
     auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)
     service_api_key: str = ""
+    agent_runtime_service_api_key: str = ""
     readiness_check_infrastructure: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
     trusted_hosts: tuple[str, ...] = ()
@@ -65,39 +67,11 @@ class Settings:
     rate_limit_enabled: bool = False
     rate_limit_requests: int = 120
     rate_limit_window_seconds: int = 60
+    agent_runtime_rate_limit_requests: int = 6_000
+    agent_runtime_rate_limit_window_seconds: int = 60
     metrics_require_service_key: bool = False
-    agent_runtime_worker_enabled: bool = False
-    agent_runtime_worker_batch_limit: int = 10
-    agent_runtime_worker_concurrency: int = 1
-    agent_runtime_worker_idle_seconds: float = 0.1
-    agent_runtime_interrupt_running_older_than_seconds: int = 900
-    agent_runtime_max_inline_payload_bytes: int = DEFAULT_AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES
     agent_image_signed_url_ttl_seconds: int = DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS
     openai_api_key: str = ""
-    openai_model: str = "gpt-5.6-terra"
-    openai_reasoning_effort: str = "low"
-    openai_responses_store: bool = False
-    openai_agent_max_turns: int = 10
-    openai_agent_timeout_seconds: int = 60
-    agent_quick_reply_model: str = "gpt-5.4-nano"
-    agent_quick_reply_timeout_seconds: float = 3.0
-    agent_fact_extraction_enabled: bool = True
-    agent_fact_extraction_model: str = "gpt-5.4-nano"
-    agent_fact_extraction_timeout_seconds: float = 5.0
-    agent_fact_extraction_version: str = "turn-fact-extractor-v2"
-    agent_fact_worker_concurrency: int = 2
-    agent_fact_worker_batch_limit: int = 10
-    agent_fact_worker_idle_seconds: float = 0.5
-    agent_fact_worker_lease_seconds: int = 30
-    agent_fact_worker_max_attempts: int = 3
-    agent_memory_consolidation_enabled: bool = False
-    agent_memory_consolidation_model: str = "gpt-5.4-nano"
-    agent_memory_consolidation_timeout_seconds: float = 30.0
-    agent_memory_consolidation_timezone: str = "Asia/Shanghai"
-    agent_memory_consolidation_hour: int = 3
-    agent_memory_consolidation_max_users: int = 500
-    agent_memory_consolidation_message_limit: int = 200
-    agent_memory_consolidation_extractor_version: str = "memory-extractor-v1"
     voice_provider: str = "disabled"
     voice_api_key: str = ""
     voice_app_id: str = ""
@@ -139,13 +113,17 @@ class Settings:
             product_asset_manifest_path=_env("PRODUCT_ASSET_MANIFEST_PATH", cls.product_asset_manifest_path),
             product_asset_local_root=_env("PRODUCT_ASSET_LOCAL_ROOT", cls.product_asset_local_root),
             file_upload_max_bytes=_env_int("FILE_UPLOAD_MAX_BYTES", cls.file_upload_max_bytes),
-            auth_jwt_secret=_env("AUTH_JWT_SECRET", cls.auth_jwt_secret),
+            auth_jwt_private_key_b64=_env("AUTH_JWT_PRIVATE_KEY_B64", cls.auth_jwt_private_key_b64),
             auth_jwt_issuer=_env("AUTH_JWT_ISSUER", cls.auth_jwt_issuer),
-            auth_jwt_audience=_env("AUTH_JWT_AUDIENCE", cls.auth_jwt_audience),
-            auth_jwt_algorithm=_env("AUTH_JWT_ALGORITHM", cls.auth_jwt_algorithm),
+            auth_jwt_product_audience=_env("AUTH_JWT_PRODUCT_AUDIENCE", cls.auth_jwt_product_audience),
+            auth_jwt_runtime_audience=_env("AUTH_JWT_RUNTIME_AUDIENCE", cls.auth_jwt_runtime_audience),
             auth_require_active_session=_env_bool("AUTH_REQUIRE_ACTIVE_SESSION", cls.auth_require_active_session),
             auth_invite_codes=_env_csv("AUTH_INVITE_CODES", cls.auth_invite_codes),
             service_api_key=_env("SERVICE_API_KEY", cls.service_api_key),
+            agent_runtime_service_api_key=_env(
+                "AGENT_RUNTIME_SERVICE_API_KEY",
+                cls.agent_runtime_service_api_key,
+            ),
             readiness_check_infrastructure=_env_bool(
                 "READINESS_CHECK_INFRASTRUCTURE",
                 cls.readiness_check_infrastructure,
@@ -159,102 +137,20 @@ class Settings:
             rate_limit_enabled=_env_bool("RATE_LIMIT_ENABLED", cls.rate_limit_enabled),
             rate_limit_requests=_env_int("RATE_LIMIT_REQUESTS", cls.rate_limit_requests),
             rate_limit_window_seconds=_env_int("RATE_LIMIT_WINDOW_SECONDS", cls.rate_limit_window_seconds),
+            agent_runtime_rate_limit_requests=_env_int(
+                "AGENT_RUNTIME_RATE_LIMIT_REQUESTS",
+                cls.agent_runtime_rate_limit_requests,
+            ),
+            agent_runtime_rate_limit_window_seconds=_env_int(
+                "AGENT_RUNTIME_RATE_LIMIT_WINDOW_SECONDS",
+                cls.agent_runtime_rate_limit_window_seconds,
+            ),
             metrics_require_service_key=_env_bool("METRICS_REQUIRE_SERVICE_KEY", cls.metrics_require_service_key),
-            agent_runtime_worker_enabled=_env_bool("AGENT_RUNTIME_WORKER_ENABLED", cls.agent_runtime_worker_enabled),
-            agent_runtime_worker_batch_limit=_env_int("AGENT_RUNTIME_WORKER_BATCH_LIMIT", cls.agent_runtime_worker_batch_limit),
-            agent_runtime_worker_concurrency=_env_int("AGENT_RUNTIME_WORKER_CONCURRENCY", cls.agent_runtime_worker_concurrency),
-            agent_runtime_worker_idle_seconds=_env_float("AGENT_RUNTIME_WORKER_IDLE_SECONDS", cls.agent_runtime_worker_idle_seconds),
-            agent_runtime_interrupt_running_older_than_seconds=_env_int(
-                "AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS",
-                cls.agent_runtime_interrupt_running_older_than_seconds,
-            ),
-            agent_runtime_max_inline_payload_bytes=_env_int(
-                "AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES",
-                cls.agent_runtime_max_inline_payload_bytes,
-            ),
             agent_image_signed_url_ttl_seconds=_env_int(
                 "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS",
                 cls.agent_image_signed_url_ttl_seconds,
             ),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
-            openai_model=_env("OPENAI_MODEL", cls.openai_model),
-            openai_reasoning_effort=_env("OPENAI_REASONING_EFFORT", cls.openai_reasoning_effort).lower(),
-            openai_responses_store=_env_bool("OPENAI_RESPONSES_STORE", cls.openai_responses_store),
-            openai_agent_max_turns=_env_int("OPENAI_AGENT_MAX_TURNS", cls.openai_agent_max_turns),
-            openai_agent_timeout_seconds=_env_int("OPENAI_AGENT_TIMEOUT_SECONDS", cls.openai_agent_timeout_seconds),
-            agent_quick_reply_model=_env("AGENT_QUICK_REPLY_MODEL", cls.agent_quick_reply_model),
-            agent_quick_reply_timeout_seconds=_env_float(
-                "AGENT_QUICK_REPLY_TIMEOUT_SECONDS",
-                cls.agent_quick_reply_timeout_seconds,
-            ),
-            agent_fact_extraction_enabled=_env_bool(
-                "AGENT_FACT_EXTRACTION_ENABLED",
-                cls.agent_fact_extraction_enabled,
-            ),
-            agent_fact_extraction_model=_env(
-                "AGENT_FACT_EXTRACTION_MODEL",
-                cls.agent_fact_extraction_model,
-            ),
-            agent_fact_extraction_timeout_seconds=_env_float(
-                "AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS",
-                cls.agent_fact_extraction_timeout_seconds,
-            ),
-            agent_fact_extraction_version=_env(
-                "AGENT_FACT_EXTRACTION_VERSION",
-                cls.agent_fact_extraction_version,
-            ),
-            agent_fact_worker_concurrency=_env_int(
-                "AGENT_FACT_WORKER_CONCURRENCY",
-                cls.agent_fact_worker_concurrency,
-            ),
-            agent_fact_worker_batch_limit=_env_int(
-                "AGENT_FACT_WORKER_BATCH_LIMIT",
-                cls.agent_fact_worker_batch_limit,
-            ),
-            agent_fact_worker_idle_seconds=_env_float(
-                "AGENT_FACT_WORKER_IDLE_SECONDS",
-                cls.agent_fact_worker_idle_seconds,
-            ),
-            agent_fact_worker_lease_seconds=_env_int(
-                "AGENT_FACT_WORKER_LEASE_SECONDS",
-                cls.agent_fact_worker_lease_seconds,
-            ),
-            agent_fact_worker_max_attempts=_env_int(
-                "AGENT_FACT_WORKER_MAX_ATTEMPTS",
-                cls.agent_fact_worker_max_attempts,
-            ),
-            agent_memory_consolidation_enabled=_env_bool(
-                "AGENT_MEMORY_CONSOLIDATION_ENABLED",
-                cls.agent_memory_consolidation_enabled,
-            ),
-            agent_memory_consolidation_model=_env(
-                "AGENT_MEMORY_CONSOLIDATION_MODEL",
-                cls.agent_memory_consolidation_model,
-            ),
-            agent_memory_consolidation_timeout_seconds=_env_float(
-                "AGENT_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS",
-                cls.agent_memory_consolidation_timeout_seconds,
-            ),
-            agent_memory_consolidation_timezone=_env(
-                "AGENT_MEMORY_CONSOLIDATION_TIMEZONE",
-                cls.agent_memory_consolidation_timezone,
-            ),
-            agent_memory_consolidation_hour=_env_int(
-                "AGENT_MEMORY_CONSOLIDATION_HOUR",
-                cls.agent_memory_consolidation_hour,
-            ),
-            agent_memory_consolidation_max_users=_env_int(
-                "AGENT_MEMORY_CONSOLIDATION_MAX_USERS",
-                cls.agent_memory_consolidation_max_users,
-            ),
-            agent_memory_consolidation_message_limit=_env_int(
-                "AGENT_MEMORY_CONSOLIDATION_MESSAGE_LIMIT",
-                cls.agent_memory_consolidation_message_limit,
-            ),
-            agent_memory_consolidation_extractor_version=_env(
-                "AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION",
-                cls.agent_memory_consolidation_extractor_version,
-            ),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             voice_api_key=_env("VOICE_API_KEY", cls.voice_api_key),
             voice_app_id=_env("VOICE_APP_ID", cls.voice_app_id),
@@ -298,26 +194,44 @@ class Settings:
             errors.append("REDIS_URL is required")
         if provider not in SUPPORTED_OBJECT_STORAGE_PROVIDERS:
             errors.append(f"OBJECT_STORAGE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_OBJECT_STORAGE_PROVIDERS))}")
-        if self.auth_jwt_algorithm not in SUPPORTED_AUTH_JWT_ALGORITHMS:
-            errors.append(f"AUTH_JWT_ALGORITHM must be one of {', '.join(sorted(SUPPORTED_AUTH_JWT_ALGORITHMS))}")
-        if self.auth_jwt_secret and len(self.auth_jwt_secret.encode("utf-8")) < 32:
-            errors.append("AUTH_JWT_SECRET must be at least 32 bytes")
+        jwt_configured = any(
+            (
+                self.auth_jwt_private_key_b64,
+                self.auth_jwt_issuer,
+                self.auth_jwt_product_audience,
+                self.auth_jwt_runtime_audience,
+            )
+        )
+        if jwt_configured:
+            if not self.auth_jwt_private_key_b64:
+                errors.append("AUTH_JWT_PRIVATE_KEY_B64 is required when authentication is configured")
+            else:
+                try:
+                    load_auth_jwt_private_key(self.auth_jwt_private_key_b64)
+                except ValueError as exc:
+                    errors.append(str(exc))
+            if not self.auth_jwt_issuer:
+                errors.append("AUTH_JWT_ISSUER is required when authentication is configured")
+            if not self.auth_jwt_product_audience:
+                errors.append("AUTH_JWT_PRODUCT_AUDIENCE is required when authentication is configured")
+            if not self.auth_jwt_runtime_audience:
+                errors.append("AUTH_JWT_RUNTIME_AUDIENCE is required when authentication is configured")
+            if (
+                self.auth_jwt_product_audience
+                and self.auth_jwt_runtime_audience
+                and self.auth_jwt_product_audience == self.auth_jwt_runtime_audience
+            ):
+                errors.append("AUTH_JWT_PRODUCT_AUDIENCE and AUTH_JWT_RUNTIME_AUDIENCE must differ")
         if self.service_api_key and len(self.service_api_key.encode("utf-8")) < 32:
             errors.append("SERVICE_API_KEY must be at least 32 bytes")
+        if self.agent_runtime_service_api_key and len(self.agent_runtime_service_api_key.encode("utf-8")) < 32:
+            errors.append("AGENT_RUNTIME_SERVICE_API_KEY must be at least 32 bytes")
+        if self.agent_runtime_service_api_key and self.agent_runtime_service_api_key == self.service_api_key:
+            errors.append("AGENT_RUNTIME_SERVICE_API_KEY must differ from SERVICE_API_KEY")
         if self.file_upload_max_bytes < 1:
             errors.append("FILE_UPLOAD_MAX_BYTES must be positive")
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
-        if self.agent_runtime_worker_batch_limit < 1:
-            errors.append("AGENT_RUNTIME_WORKER_BATCH_LIMIT must be positive")
-        if self.agent_runtime_worker_concurrency < 1:
-            errors.append("AGENT_RUNTIME_WORKER_CONCURRENCY must be positive")
-        if self.agent_runtime_worker_idle_seconds < 0:
-            errors.append("AGENT_RUNTIME_WORKER_IDLE_SECONDS must be non-negative")
-        if self.agent_runtime_interrupt_running_older_than_seconds < 1:
-            errors.append("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS must be positive")
-        if self.agent_runtime_max_inline_payload_bytes < 1:
-            errors.append("AGENT_RUNTIME_MAX_INLINE_PAYLOAD_BYTES must be positive")
         if not 60 <= self.agent_image_signed_url_ttl_seconds <= DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS:
             errors.append("AGENT_IMAGE_SIGNED_URL_TTL_SECONDS must be between 60 and 604800")
         if self.object_storage_public_endpoint_url:
@@ -328,60 +242,14 @@ class Settings:
             errors.append("RATE_LIMIT_REQUESTS must be positive")
         if self.rate_limit_window_seconds < 1:
             errors.append("RATE_LIMIT_WINDOW_SECONDS must be positive")
+        if self.agent_runtime_rate_limit_requests < 1:
+            errors.append("AGENT_RUNTIME_RATE_LIMIT_REQUESTS must be positive")
+        if self.agent_runtime_rate_limit_window_seconds < 1:
+            errors.append(
+                "AGENT_RUNTIME_RATE_LIMIT_WINDOW_SECONDS must be positive"
+            )
         if self.metrics_require_service_key and not self.service_api_key:
             errors.append("SERVICE_API_KEY is required when METRICS_REQUIRE_SERVICE_KEY is true")
-        if (self.agent_runtime_worker_enabled or self.agent_memory_consolidation_enabled) and not self.openai_api_key:
-            errors.append("OPENAI_API_KEY is required when the agent runtime or memory consolidation worker is enabled")
-        if not self.openai_model:
-            errors.append("OPENAI_MODEL is required")
-        if self.openai_reasoning_effort not in SUPPORTED_OPENAI_REASONING_EFFORTS:
-            errors.append("OPENAI_REASONING_EFFORT must be one of " + ", ".join(sorted(SUPPORTED_OPENAI_REASONING_EFFORTS)))
-        if self.openai_agent_max_turns < 1:
-            errors.append("OPENAI_AGENT_MAX_TURNS must be positive")
-        if self.openai_agent_timeout_seconds < 1:
-            errors.append("OPENAI_AGENT_TIMEOUT_SECONDS must be positive")
-        if self.agent_quick_reply_timeout_seconds <= 0:
-            errors.append("AGENT_QUICK_REPLY_TIMEOUT_SECONDS must be positive")
-        if self.agent_fact_extraction_enabled and not self.agent_fact_extraction_model:
-            errors.append("AGENT_FACT_EXTRACTION_MODEL is required when fact extraction is enabled")
-        if not isfinite(self.agent_fact_extraction_timeout_seconds) or self.agent_fact_extraction_timeout_seconds <= 0:
-            errors.append("AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS must be finite and positive")
-        if not self.agent_fact_extraction_version or len(self.agent_fact_extraction_version) > 80:
-            errors.append("AGENT_FACT_EXTRACTION_VERSION must be between 1 and 80 characters")
-        if self.agent_fact_worker_concurrency < 1:
-            errors.append("AGENT_FACT_WORKER_CONCURRENCY must be positive")
-        if self.agent_fact_worker_batch_limit < 1:
-            errors.append("AGENT_FACT_WORKER_BATCH_LIMIT must be positive")
-        if not isfinite(self.agent_fact_worker_idle_seconds) or self.agent_fact_worker_idle_seconds < 0:
-            errors.append("AGENT_FACT_WORKER_IDLE_SECONDS must be finite and non-negative")
-        if self.agent_fact_worker_lease_seconds < 1:
-            errors.append("AGENT_FACT_WORKER_LEASE_SECONDS must be positive")
-        elif self.agent_fact_worker_lease_seconds <= self.agent_fact_extraction_timeout_seconds:
-            errors.append(
-                "AGENT_FACT_WORKER_LEASE_SECONDS must be greater than AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS"
-            )
-        if self.agent_fact_worker_max_attempts < 1:
-            errors.append("AGENT_FACT_WORKER_MAX_ATTEMPTS must be positive")
-        if self.agent_runtime_worker_enabled and self.agent_fact_extraction_enabled and not self.openai_api_key:
-            errors.append("OPENAI_API_KEY is required when agent fact extraction is enabled")
-        if self.agent_memory_consolidation_enabled and not self.agent_memory_consolidation_model:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_MODEL is required when memory consolidation is enabled")
-        if self.agent_memory_consolidation_timeout_seconds <= 0:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS must be positive")
-        if self.agent_memory_consolidation_hour < 0 or self.agent_memory_consolidation_hour > 23:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_HOUR must be between 0 and 23")
-        if self.agent_memory_consolidation_max_users < 1:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_MAX_USERS must be positive")
-        if self.agent_memory_consolidation_message_limit < 1 or self.agent_memory_consolidation_message_limit > 1000:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_MESSAGE_LIMIT must be between 1 and 1000")
-        if not self.agent_memory_consolidation_extractor_version:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION is required")
-        elif len(self.agent_memory_consolidation_extractor_version) > 80:
-            errors.append("AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION must be at most 80 characters")
-        try:
-            ZoneInfo(self.agent_memory_consolidation_timezone)
-        except (ZoneInfoNotFoundError, ValueError):
-            errors.append("AGENT_MEMORY_CONSOLIDATION_TIMEZONE must be a valid IANA timezone")
         if self.voice_provider not in SUPPORTED_VOICE_PROVIDERS:
             errors.append(f"VOICE_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VOICE_PROVIDERS))}")
         if self.voice_provider in {"doubao", "volcengine"} and not self.voice_api_key and not (self.voice_app_id and self.voice_access_key):
@@ -434,10 +302,18 @@ class Settings:
                 errors.append("OBJECT_STORAGE_ACCESS_KEY_ID is required for managed object storage")
             if provider != "local" and not self.object_storage_secret_access_key:
                 errors.append("OBJECT_STORAGE_SECRET_ACCESS_KEY is required for managed object storage")
-            if not self.auth_jwt_secret:
-                errors.append("AUTH_JWT_SECRET is required in production")
+            if not self.auth_jwt_private_key_b64:
+                errors.append("AUTH_JWT_PRIVATE_KEY_B64 is required in production")
+            if not self.auth_jwt_issuer:
+                errors.append("AUTH_JWT_ISSUER is required in production")
+            if not self.auth_jwt_product_audience:
+                errors.append("AUTH_JWT_PRODUCT_AUDIENCE is required in production")
+            if not self.auth_jwt_runtime_audience:
+                errors.append("AUTH_JWT_RUNTIME_AUDIENCE is required in production")
             if not self.service_api_key:
                 errors.append("SERVICE_API_KEY is required in production for protected operational endpoints")
+            if not self.agent_runtime_service_api_key:
+                errors.append("AGENT_RUNTIME_SERVICE_API_KEY is required in production")
             if self.voice_provider == "local_stub":
                 errors.append("VOICE_PROVIDER=local_stub cannot be used in production")
             if self.vision_provider == "local_stub":
@@ -450,6 +326,25 @@ class Settings:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings.from_env()
+
+
+@lru_cache(maxsize=8)
+def load_auth_jwt_private_key(private_key_b64: str) -> rsa.RSAPrivateKey:
+    try:
+        private_key_pem = base64.b64decode(private_key_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("AUTH_JWT_PRIVATE_KEY_B64 must be valid base64") from exc
+    if not private_key_pem.startswith(b"-----BEGIN PRIVATE KEY-----"):
+        raise ValueError("AUTH_JWT_PRIVATE_KEY_B64 must contain an unencrypted PKCS#8 RSA private key")
+    try:
+        private_key = serialization.load_pem_private_key(private_key_pem, password=None)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("AUTH_JWT_PRIVATE_KEY_B64 must contain an unencrypted PKCS#8 RSA private key") from exc
+    if not isinstance(private_key, rsa.RSAPrivateKey):
+        raise ValueError("AUTH_JWT_PRIVATE_KEY_B64 must contain an unencrypted PKCS#8 RSA private key")
+    if private_key.key_size < 2048:
+        raise ValueError("AUTH_JWT_PRIVATE_KEY_B64 RSA key must be at least 2048 bits")
+    return private_key
 
 
 def _env(name: str, default: str) -> str:

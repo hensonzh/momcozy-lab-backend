@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.errors import ApiError
 from ..core.settings import Settings
 from ..infrastructure.object_storage import ObjectStorage
-from ..modules.auth import CurrentUser, ServiceClient, authenticate_access_token, authenticate_service_key
+from ..modules.auth import (
+    CurrentUser,
+    ServiceClient,
+    authenticate_access_token,
+    authenticate_agent_runtime_service_key,
+    authenticate_service_key,
+)
 from ..modules.auth.repository import AuthSessionRepository
 
 
@@ -88,3 +94,12 @@ async def require_service_client(
     if not service_key:
         raise ApiError(code="authentication_required", message="X-Service-Key is required.", status=401)
     return authenticate_service_key(service_key, request.app.state.settings)
+
+
+async def require_agent_runtime_client(
+    request: Request,
+    service_key: str | None = Header(default=None, alias="X-Service-Key"),
+) -> ServiceClient:
+    if not service_key:
+        raise ApiError(code="authentication_required", message="X-Service-Key is required.", status=401)
+    return authenticate_agent_runtime_service_key(service_key, request.app.state.settings)

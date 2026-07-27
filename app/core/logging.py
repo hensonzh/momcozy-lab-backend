@@ -9,7 +9,6 @@ from .settings import Settings
 
 HTTP_LOGGER_NAME = "production_backend.http"
 ERROR_LOGGER_NAME = "production_backend.errors"
-AGENT_RUNTIME_LOGGER_NAME = "production_backend.agent_runtime"
 
 
 def configure_logging(settings: Settings) -> None:
@@ -61,17 +60,6 @@ def log_unhandled_exception(
                 "path": path,
                 "route": route,
                 "exception_type": exception_type,
-            }
-        )
-    )
-
-
-def log_agent_runtime_event(event: str, **payload: Any) -> None:
-    logging.getLogger(AGENT_RUNTIME_LOGGER_NAME).info(
-        _json_line(
-            {
-                "event": event,
-                **payload,
             }
         )
     )

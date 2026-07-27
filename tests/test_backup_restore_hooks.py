@@ -12,6 +12,7 @@ from app.core.backup_restore import (
     validate_backup_restore_hooks,
 )
 from app.core.settings import Settings
+from tests.auth_key_material import TEST_RSA_PRIVATE_KEY_B64
 
 
 def test_non_production_backup_restore_hooks_are_documented_but_not_required() -> None:
@@ -85,7 +86,10 @@ def _production_managed_settings(**overrides: str) -> Settings:
         "object_storage_bucket": "momcozy-prod",
         "object_storage_access_key_id": "access",
         "object_storage_secret_access_key": "secret",
-        "auth_jwt_secret": "test-secret-value-with-at-least-32-bytes",
+        "auth_jwt_private_key_b64": TEST_RSA_PRIVATE_KEY_B64,
+        "auth_jwt_issuer": "momcozy-test",
+        "auth_jwt_product_audience": "momcozy-product-api",
+        "auth_jwt_runtime_audience": "momcozy-agent-runtime",
     }
     values.update(overrides)
     return Settings(**values)
@@ -102,7 +106,10 @@ def _script_env() -> dict[str, str]:
         "OBJECT_STORAGE_BUCKET": "momcozy-prod",
         "OBJECT_STORAGE_ACCESS_KEY_ID": "access",
         "OBJECT_STORAGE_SECRET_ACCESS_KEY": "secret",
-        "AUTH_JWT_SECRET": "test-secret-value-with-at-least-32-bytes",
+        "AUTH_JWT_PRIVATE_KEY_B64": TEST_RSA_PRIVATE_KEY_B64,
+        "AUTH_JWT_ISSUER": "momcozy-test",
+        "AUTH_JWT_PRODUCT_AUDIENCE": "momcozy-product-api",
+        "AUTH_JWT_RUNTIME_AUDIENCE": "momcozy-agent-runtime",
     }
 
 

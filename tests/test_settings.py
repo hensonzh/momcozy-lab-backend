@@ -1,26 +1,63 @@
 import pytest
 
 from app.core.settings import Settings
+from tests.auth_key_material import TEST_RSA_1024_PRIVATE_KEY_B64, TEST_RSA_PRIVATE_KEY_B64, auth_settings
 
 
 SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
+AGENT_RUNTIME_SERVICE_KEY = "agent-runtime-service-key-with-at-least-32-bytes"
 
 
-def test_settings_use_current_openai_model_defaults() -> None:
+def test_settings_from_env_reads_asymmetric_jwt_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_JWT_PRIVATE_KEY_B64", TEST_RSA_PRIVATE_KEY_B64)
+    monkeypatch.setenv("AUTH_JWT_ISSUER", "https://auth.example.test")
+    monkeypatch.setenv("AUTH_JWT_PRODUCT_AUDIENCE", "product-api")
+    monkeypatch.setenv("AUTH_JWT_RUNTIME_AUDIENCE", "runtime-api")
+
+    settings = Settings.from_env()
+
+    assert settings.auth_jwt_private_key_b64 == TEST_RSA_PRIVATE_KEY_B64
+    assert settings.auth_jwt_issuer == "https://auth.example.test"
+    assert settings.auth_jwt_product_audience == "product-api"
+    assert settings.auth_jwt_runtime_audience == "runtime-api"
+
+
+@pytest.mark.parametrize(
+    ("private_key", "expected_error"),
+    [
+        ("not-base64", "AUTH_JWT_PRIVATE_KEY_B64 must be valid base64"),
+        ("bm90IGEgcHJpdmF0ZSBrZXk=", "AUTH_JWT_PRIVATE_KEY_B64 must contain an unencrypted PKCS#8 RSA private key"),
+        (TEST_RSA_1024_PRIVATE_KEY_B64, "AUTH_JWT_PRIVATE_KEY_B64 RSA key must be at least 2048 bits"),
+    ],
+)
+def test_settings_reject_invalid_jwt_private_key(private_key: str, expected_error: str) -> None:
+    settings = auth_settings(auth_jwt_private_key_b64=private_key)
+
+    with pytest.raises(ValueError, match=expected_error):
+        settings.validate_for_startup()
+
+
+def test_settings_reject_matching_product_and_runtime_audiences() -> None:
+    settings = auth_settings(auth_jwt_runtime_audience="momcozy-product-api")
+
+    with pytest.raises(ValueError, match="must differ"):
+        settings.validate_for_startup()
+
+
+def test_settings_accept_valid_asymmetric_jwt_configuration() -> None:
+    auth_settings().validate_for_startup()
+
+
+def test_settings_repr_does_not_expose_jwt_private_key() -> None:
+    settings = auth_settings()
+
+    assert TEST_RSA_PRIVATE_KEY_B64 not in repr(settings)
+    assert "auth_jwt_private_key_b64" not in repr(settings)
+
+
+def test_settings_use_current_vision_defaults() -> None:
     settings = Settings()
 
-    assert settings.openai_model == "gpt-5.6-terra"
-    assert settings.agent_quick_reply_model == "gpt-5.4-nano"
-    assert settings.agent_fact_extraction_enabled is True
-    assert settings.agent_fact_extraction_model == "gpt-5.4-nano"
-    assert settings.agent_fact_extraction_version == "turn-fact-extractor-v2"
-    assert settings.agent_fact_worker_concurrency == 2
-    assert settings.agent_fact_worker_batch_limit == 10
-    assert settings.agent_fact_worker_idle_seconds == 0.5
-    assert settings.agent_fact_worker_lease_seconds == 30
-    assert settings.agent_fact_worker_max_attempts == 3
-    assert settings.agent_memory_consolidation_model == "gpt-5.4-nano"
-    assert settings.agent_memory_consolidation_enabled is False
     assert settings.vision_openai_model == "gpt-5.4-mini"
     assert settings.vision_request_timeout_seconds == 20.0
 
@@ -58,6 +95,14 @@ def test_settings_from_env_reads_file_upload_limit(monkeypatch: pytest.MonkeyPat
     settings = Settings.from_env()
 
     assert settings.file_upload_max_bytes == 12345
+
+
+def test_settings_from_env_reads_agent_runtime_service_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_RUNTIME_SERVICE_API_KEY", AGENT_RUNTIME_SERVICE_KEY)
+
+    settings = Settings.from_env()
+
+    assert settings.agent_runtime_service_api_key == AGENT_RUNTIME_SERVICE_KEY
 
 
 def test_settings_from_env_reads_agent_image_signed_url_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,6 +145,8 @@ def test_settings_from_env_reads_rate_limit_controls(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
     monkeypatch.setenv("RATE_LIMIT_REQUESTS", "42")
     monkeypatch.setenv("RATE_LIMIT_WINDOW_SECONDS", "15")
+    monkeypatch.setenv("AGENT_RUNTIME_RATE_LIMIT_REQUESTS", "900")
+    monkeypatch.setenv("AGENT_RUNTIME_RATE_LIMIT_WINDOW_SECONDS", "30")
     monkeypatch.setenv("METRICS_REQUIRE_SERVICE_KEY", "true")
 
     settings = Settings.from_env()
@@ -107,6 +154,8 @@ def test_settings_from_env_reads_rate_limit_controls(monkeypatch: pytest.MonkeyP
     assert settings.rate_limit_enabled is True
     assert settings.rate_limit_requests == 42
     assert settings.rate_limit_window_seconds == 15
+    assert settings.agent_runtime_rate_limit_requests == 900
+    assert settings.agent_runtime_rate_limit_window_seconds == 30
     assert settings.metrics_require_service_key is True
 
 
@@ -131,103 +180,6 @@ def test_settings_from_env_reads_trusted_hosts(monkeypatch: pytest.MonkeyPatch) 
     settings = Settings.from_env()
 
     assert settings.trusted_hosts == ("api.example.test", "admin.example.test")
-
-
-def test_settings_from_env_reads_agent_worker_controls(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AGENT_RUNTIME_WORKER_ENABLED", "true")
-    monkeypatch.setenv("AGENT_RUNTIME_WORKER_BATCH_LIMIT", "25")
-    monkeypatch.setenv("AGENT_RUNTIME_WORKER_CONCURRENCY", "4")
-    monkeypatch.setenv("AGENT_RUNTIME_WORKER_IDLE_SECONDS", "0.25")
-    monkeypatch.setenv("AGENT_RUNTIME_INTERRUPT_RUNNING_OLDER_THAN_SECONDS", "120")
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-    monkeypatch.setenv("OPENAI_MODEL", "gpt-test")
-    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "low")
-    monkeypatch.setenv("OPENAI_RESPONSES_STORE", "false")
-    monkeypatch.setenv("OPENAI_AGENT_MAX_TURNS", "7")
-    monkeypatch.setenv("OPENAI_AGENT_TIMEOUT_SECONDS", "45")
-    monkeypatch.setenv("OPENAI_AGENT_PROMPT_VERSION", "prompt-v2")
-    monkeypatch.setenv("AGENT_QUICK_REPLY_MODEL", "quick-reply-test")
-    monkeypatch.setenv("AGENT_QUICK_REPLY_TIMEOUT_SECONDS", "0.8")
-    monkeypatch.setenv("AGENT_FACT_EXTRACTION_ENABLED", "true")
-    monkeypatch.setenv("AGENT_FACT_EXTRACTION_MODEL", "fact-test")
-    monkeypatch.setenv("AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS", "1.5")
-    monkeypatch.setenv("AGENT_FACT_EXTRACTION_VERSION", "fact-v2")
-    monkeypatch.setenv("AGENT_FACT_WORKER_CONCURRENCY", "3")
-    monkeypatch.setenv("AGENT_FACT_WORKER_BATCH_LIMIT", "12")
-    monkeypatch.setenv("AGENT_FACT_WORKER_IDLE_SECONDS", "0.4")
-    monkeypatch.setenv("AGENT_FACT_WORKER_LEASE_SECONDS", "25")
-    monkeypatch.setenv("AGENT_FACT_WORKER_MAX_ATTEMPTS", "4")
-
-    settings = Settings.from_env()
-
-    assert settings.agent_runtime_worker_enabled is True
-    assert settings.agent_runtime_worker_batch_limit == 25
-    assert settings.agent_runtime_worker_concurrency == 4
-    assert settings.agent_runtime_worker_idle_seconds == 0.25
-    assert settings.agent_runtime_interrupt_running_older_than_seconds == 120
-    assert settings.openai_api_key == "sk-test"
-    assert settings.openai_model == "gpt-test"
-    assert settings.openai_reasoning_effort == "low"
-    assert settings.openai_responses_store is False
-    assert settings.openai_agent_max_turns == 7
-    assert settings.openai_agent_timeout_seconds == 45
-    assert not hasattr(settings, "openai_agent_prompt_version")
-    assert settings.agent_quick_reply_model == "quick-reply-test"
-    assert settings.agent_quick_reply_timeout_seconds == 0.8
-    assert settings.agent_fact_extraction_enabled is True
-    assert settings.agent_fact_extraction_model == "fact-test"
-    assert settings.agent_fact_extraction_timeout_seconds == 1.5
-    assert settings.agent_fact_extraction_version == "fact-v2"
-    assert settings.agent_fact_worker_concurrency == 3
-    assert settings.agent_fact_worker_batch_limit == 12
-    assert settings.agent_fact_worker_idle_seconds == 0.4
-    assert settings.agent_fact_worker_lease_seconds == 25
-    assert settings.agent_fact_worker_max_attempts == 4
-
-
-@pytest.mark.parametrize(
-    ("overrides", "expected_error"),
-    [
-        ({"agent_fact_worker_concurrency": 0}, "AGENT_FACT_WORKER_CONCURRENCY must be positive"),
-        ({"agent_fact_worker_batch_limit": 0}, "AGENT_FACT_WORKER_BATCH_LIMIT must be positive"),
-        ({"agent_fact_worker_idle_seconds": -0.1}, "AGENT_FACT_WORKER_IDLE_SECONDS must be finite and non-negative"),
-        ({"agent_fact_worker_idle_seconds": float("nan")}, "AGENT_FACT_WORKER_IDLE_SECONDS must be finite"),
-        ({"agent_fact_worker_idle_seconds": float("inf")}, "AGENT_FACT_WORKER_IDLE_SECONDS must be finite"),
-        ({"agent_fact_extraction_timeout_seconds": float("nan")}, "AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS must be finite"),
-        ({"agent_fact_extraction_timeout_seconds": float("inf")}, "AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS must be finite"),
-        ({"agent_fact_worker_lease_seconds": 0}, "AGENT_FACT_WORKER_LEASE_SECONDS must be positive"),
-        ({"agent_fact_worker_max_attempts": 0}, "AGENT_FACT_WORKER_MAX_ATTEMPTS must be positive"),
-        (
-            {"agent_fact_extraction_timeout_seconds": 5.0, "agent_fact_worker_lease_seconds": 5},
-            "AGENT_FACT_WORKER_LEASE_SECONDS must be greater than AGENT_FACT_EXTRACTION_TIMEOUT_SECONDS",
-        ),
-    ],
-)
-def test_settings_validate_fact_worker_controls(overrides: dict, expected_error: str) -> None:
-    with pytest.raises(ValueError, match=expected_error):
-        Settings(app_env="test", **overrides).validate_for_startup()
-
-
-def test_settings_from_env_reads_memory_consolidation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_ENABLED", "true")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_MODEL", "memory-test")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_TIMEOUT_SECONDS", "12.5")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_TIMEZONE", "Asia/Shanghai")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_HOUR", "2")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_MAX_USERS", "250")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_MESSAGE_LIMIT", "120")
-    monkeypatch.setenv("AGENT_MEMORY_CONSOLIDATION_EXTRACTOR_VERSION", "memory-extractor-v2")
-
-    settings = Settings.from_env()
-
-    assert settings.agent_memory_consolidation_enabled is True
-    assert settings.agent_memory_consolidation_model == "memory-test"
-    assert settings.agent_memory_consolidation_timeout_seconds == 12.5
-    assert settings.agent_memory_consolidation_timezone == "Asia/Shanghai"
-    assert settings.agent_memory_consolidation_hour == 2
-    assert settings.agent_memory_consolidation_max_users == 250
-    assert settings.agent_memory_consolidation_message_limit == 120
-    assert settings.agent_memory_consolidation_extractor_version == "memory-extractor-v2"
 
 
 def test_settings_from_env_reads_voice_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -310,57 +262,41 @@ def test_settings_from_env_reads_active_session_auth_gate(monkeypatch: pytest.Mo
     assert settings.auth_require_active_session is True
 
 
-def test_settings_from_env_ignores_retired_agent_recover_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AGENT_RUNTIME_RECOVER_RUNNING_OLDER_THAN_SECONDS", "180")
+def test_settings_do_not_expose_embedded_agent_runtime_controls() -> None:
+    settings = Settings()
 
-    settings = Settings.from_env()
-
-    assert settings.agent_runtime_interrupt_running_older_than_seconds == 900
-
-
-def test_settings_reject_invalid_agent_worker_controls() -> None:
-    settings = Settings(agent_runtime_worker_batch_limit=0)
-
-    with pytest.raises(ValueError, match="AGENT_RUNTIME_WORKER_BATCH_LIMIT"):
-        settings.validate_for_startup()
-
-    settings = Settings(agent_runtime_worker_concurrency=0)
-
-    with pytest.raises(ValueError, match="AGENT_RUNTIME_WORKER_CONCURRENCY"):
-        settings.validate_for_startup()
-
-
-def test_settings_requires_openai_key_when_agent_worker_is_enabled() -> None:
-    settings = Settings(agent_runtime_worker_enabled=True, openai_api_key="")
-
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        settings.validate_for_startup()
-
-
-def test_settings_requires_openai_key_when_memory_consolidation_is_enabled() -> None:
-    settings = Settings(agent_memory_consolidation_enabled=True, openai_api_key="")
-
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        settings.validate_for_startup()
-
-
-def test_settings_reject_invalid_openai_agent_controls() -> None:
-    with pytest.raises(ValueError, match="OPENAI_AGENT_MAX_TURNS"):
-        Settings(openai_agent_max_turns=0).validate_for_startup()
-    with pytest.raises(ValueError, match="OPENAI_AGENT_TIMEOUT_SECONDS"):
-        Settings(openai_agent_timeout_seconds=0).validate_for_startup()
-    with pytest.raises(ValueError, match="AGENT_QUICK_REPLY_TIMEOUT_SECONDS"):
-        Settings(agent_quick_reply_timeout_seconds=0).validate_for_startup()
-    with pytest.raises(ValueError, match="AGENT_MEMORY_CONSOLIDATION_HOUR"):
-        Settings(agent_memory_consolidation_hour=24).validate_for_startup()
-    with pytest.raises(ValueError, match="AGENT_MEMORY_CONSOLIDATION_TIMEZONE"):
-        Settings(agent_memory_consolidation_timezone="Mars/Base").validate_for_startup()
+    for retired_field in (
+        "agent_runtime_worker_enabled",
+        "agent_runtime_max_inline_payload_bytes",
+        "openai_model",
+        "openai_agent_max_turns",
+        "agent_quick_reply_model",
+        "agent_fact_extraction_enabled",
+        "agent_memory_consolidation_enabled",
+    ):
+        assert not hasattr(settings, retired_field)
 
 
 def test_settings_reject_invalid_rate_limit_controls() -> None:
     settings = Settings(rate_limit_requests=0)
 
     with pytest.raises(ValueError, match="RATE_LIMIT_REQUESTS"):
+        settings.validate_for_startup()
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "agent_runtime_rate_limit_requests",
+        "agent_runtime_rate_limit_window_seconds",
+    ),
+)
+def test_settings_reject_invalid_agent_runtime_rate_limit_controls(
+    field: str,
+) -> None:
+    settings = Settings(**{field: 0})
+
+    with pytest.raises(ValueError, match="AGENT_RUNTIME_RATE_LIMIT"):
         settings.validate_for_startup()
 
 
@@ -443,7 +379,10 @@ def test_production_settings_reject_wildcard_cors_origin() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
         cors_allowed_origins=("*",),
         trusted_hosts=("api.example.test",),
     )
@@ -461,7 +400,10 @@ def test_production_settings_require_trusted_hosts() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
     )
 
     with pytest.raises(ValueError, match="TRUSTED_HOSTS"):
@@ -477,11 +419,36 @@ def test_production_settings_require_service_key_for_operational_endpoints() -> 
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
+        agent_runtime_service_api_key=AGENT_RUNTIME_SERVICE_KEY,
         trusted_hosts=("api.example.test",),
     )
 
     with pytest.raises(ValueError, match="SERVICE_API_KEY"):
+        settings.validate_for_startup()
+
+
+def test_production_settings_require_agent_runtime_service_key() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
+        redis_url="redis://redis.internal:6379/0",
+        object_storage_provider="s3",
+        object_storage_bucket="bucket",
+        object_storage_access_key_id="access",
+        object_storage_secret_access_key="secret",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
+        service_api_key=SERVICE_KEY,
+        trusted_hosts=("api.example.test",),
+    )
+
+    with pytest.raises(ValueError, match="AGENT_RUNTIME_SERVICE_API_KEY"):
         settings.validate_for_startup()
 
 
@@ -494,7 +461,10 @@ def test_production_settings_reject_wildcard_trusted_hosts() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
         trusted_hosts=("*",),
     )
 
@@ -516,7 +486,10 @@ def test_production_rejects_implicit_local_database_and_redis_urls() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
     )
 
     with pytest.raises(ValueError, match="DATABASE_URL must be explicitly configured"):
@@ -532,8 +505,12 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
         service_api_key=SERVICE_KEY,
+        agent_runtime_service_api_key=AGENT_RUNTIME_SERVICE_KEY,
         trusted_hosts=("api.example.test",),
     )
 
@@ -549,8 +526,12 @@ def test_production_accepts_configured_openai_vision_provider() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
         service_api_key=SERVICE_KEY,
+        agent_runtime_service_api_key=AGENT_RUNTIME_SERVICE_KEY,
         trusted_hosts=("api.example.test",),
         vision_provider="openai",
         openai_api_key="test-key",
@@ -569,7 +550,10 @@ def test_production_rejects_local_stub_voice_provider() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
         trusted_hosts=("api.example.test",),
         voice_provider="local_stub",
     )
@@ -587,7 +571,10 @@ def test_production_rejects_local_stub_vision_provider() -> None:
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
         object_storage_secret_access_key="secret",
-        auth_jwt_secret="test-secret-value-with-at-least-32-bytes",
+        auth_jwt_private_key_b64=TEST_RSA_PRIVATE_KEY_B64,
+        auth_jwt_issuer="momcozy-test",
+        auth_jwt_product_audience="momcozy-product-api",
+        auth_jwt_runtime_audience="momcozy-agent-runtime",
         trusted_hosts=("api.example.test",),
         vision_provider="local_stub",
     )

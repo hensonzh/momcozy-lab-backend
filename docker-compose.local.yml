@@ -1,4 +1,4 @@
-name: momcozy-production-backend
+name: backend
 
 services:
   api:
@@ -36,40 +36,6 @@ services:
       - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
     profiles:
       - tools
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  agent-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: python -m scripts.run_agent_worker
-    env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
-    environment:
-      AGENT_RUNTIME_WORKER_ENABLED: "true"
-    profiles:
-      - workers
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-
-  memory-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: python -m scripts.run_memory_consolidation
-    env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
-    environment:
-      AGENT_MEMORY_CONSOLIDATION_ENABLED: "true"
-    profiles:
-      - workers
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,11 +91,9 @@ services:
       done;
       mc mb --ignore-existing local/momcozy-local;
       mc mirror --overwrite /seed/product-assets local/momcozy-local/product-assets;
-      mc cp --overwrite /seed/agent-references/pump-models.md local/momcozy-local/agent-references/device-service/pump-models.md;
       "
     volumes:
       - ./.local/object_storage/product-assets:/seed/product-assets:ro
-      - ./assets/agent-references:/seed/agent-references:ro
 
 volumes:
   postgres_data:

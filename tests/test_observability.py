@@ -5,8 +5,6 @@ from fastapi.testclient import TestClient
 
 from app.core.settings import Settings
 from app.factory import create_app
-from app.core.metrics import RequestMetrics
-from app.core.logging import log_agent_runtime_event
 
 
 SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
@@ -65,33 +63,7 @@ def test_request_log_is_structured_and_uses_request_id(caplog) -> None:
     }.items() <= payloads[-1].items()
 
 
-def test_agent_runtime_log_is_structured(caplog) -> None:
-    caplog.set_level(logging.INFO, logger="production_backend.agent_runtime")
+def test_backend_metrics_are_product_http_metrics_only() -> None:
+    snapshot = TestClient(create_app(Settings(app_env="test"))).get("/v1/health/metrics").json()
 
-    log_agent_runtime_event("agent.run.executor_turn", run_id="run_1", duration_ms=12.345)
-
-    payloads = [json.loads(record.getMessage()) for record in caplog.records if record.name == "production_backend.agent_runtime"]
-    assert payloads[-1] == {
-        "duration_ms": 12.345,
-        "event": "agent.run.executor_turn",
-        "run_id": "run_1",
-    }
-
-
-def test_backend_metrics_record_tool_and_sdk_operations() -> None:
-    metrics = RequestMetrics()
-
-    metrics.record_agent_tool(
-        tool_name="profile_read",
-        outcome="failed",
-        error_code="permission_denied",
-        duration_ms=3.0,
-    )
-    metrics.record_agent_sdk(node_name="openai_responses", outcome="failed", error_code="dependency_not_configured", duration_ms=4.0)
-
-    snapshot = metrics.snapshot()
-
-    assert "workers" not in snapshot
-    assert snapshot["agent_tools"][0]["error_code_counts"]["permission_denied"] == 1
-    assert snapshot["agent_sdk"][0]["error_code_counts"]["dependency_not_configured"] == 1
-    assert "agent_safety" not in snapshot
+    assert set(snapshot) == {"status", "requests", "routes"}

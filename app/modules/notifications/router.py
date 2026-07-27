@@ -5,14 +5,14 @@ from uuid import UUID
 from fastapi import Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import optional_idempotency_key, require_current_user, require_service_client
+from ...api.dependencies import require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
-from ..auth import CurrentUser, ServiceClient
+from ..auth import CurrentUser
 from .repository import NotificationsRepository
-from .schemas import NotificationListResponse, NotificationRead, NotificationReadStateUpdate, NotificationServiceCreate
+from .schemas import NotificationListResponse, NotificationRead, NotificationReadStateUpdate
 from .service import NotificationsService
 
 
@@ -30,34 +30,6 @@ def get_notifications_service(session: AsyncSession = Depends(get_session)) -> N
         audit_service=AuditService(repository=audit_repository),
         idempotency_service=IdempotencyService(repository=audit_repository),
     )
-
-
-@router.post(
-    "",
-    response_model=NotificationRead,
-    status_code=status.HTTP_201_CREATED,
-    openapi_extra=api_surface("internal_service_api", owner="notifications", clients=["agent-worker"]),
-)
-async def create_notification(
-    payload: NotificationServiceCreate,
-    request: Request,
-    idempotency_key: str | None = Depends(optional_idempotency_key),
-    service_client: ServiceClient = Depends(require_service_client),
-    service: NotificationsService = Depends(get_notifications_service),
-) -> NotificationRead:
-    notification = await service.create_notification(
-        owner_user_id=payload.owner_user_id,
-        notification_type=payload.notification_type,
-        title=payload.title or "",
-        body=payload.body or "",
-        source=payload.source or "system",
-        payload=payload.payload,
-        delivered_at=payload.delivered_at,
-        request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=idempotency_key,
-        actor_service=service_client.name,
-    )
-    return NotificationRead.model_validate(notification)
 
 
 @router.get("", response_model=NotificationListResponse)

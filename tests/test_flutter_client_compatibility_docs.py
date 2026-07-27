@@ -16,14 +16,16 @@ def test_flutter_client_compatibility_doc_names_contract_sources() -> None:
         assert phrase in text
 
 
-def test_flutter_client_compatibility_doc_protects_token_and_agent_contracts() -> None:
+def test_flutter_client_compatibility_doc_protects_token_and_service_boundaries() -> None:
     text = DOC.read_text()
 
     for phrase in [
         "Never put access tokens",
         "POST /v1/auth/refresh",
         "Idempotency-Key",
-        "after_sequence",
-        "action_id",
+        "Agent base URL",
+        "Agent Runtime",
     ]:
         assert phrase in text
+
+    assert "/v1/agent/runs" not in text

@@ -17,11 +17,11 @@ PUBLIC_STEPS = {
 SENSITIVE_QUERY_NAMES = {"token", "access_token", "refresh_token", "service_key", "api_key"}
 
 
-def test_flutter_smoke_flows_cover_auth_core_and_agent() -> None:
+def test_flutter_smoke_flows_cover_public_product_contracts() -> None:
     payload = json.loads(SMOKE_FLOWS.read_text())
     flow_names = {flow["name"] for flow in payload["flows"]}
 
-    assert {"auth_session", "core_records_plans_files", "agent_replay"} <= flow_names
+    assert flow_names == {"auth_session", "core_records_plans_files", "voice_contract"}
 
 
 def test_flutter_smoke_flows_do_not_put_tokens_in_urls() -> None:
@@ -56,18 +56,18 @@ def test_flutter_smoke_flow_steps_match_openapi_paths_and_methods() -> None:
             assert step["method"].lower() in schema_paths[openapi_path]
 
 
-def test_flutter_smoke_flows_declare_auth_boundary() -> None:
+def test_flutter_smoke_flows_use_only_user_auth_boundary() -> None:
     payload = json.loads(SMOKE_FLOWS.read_text())
 
     for flow in payload["flows"]:
         for step in flow["steps"]:
             operation = (step["method"], _openapi_path(step["path"]))
             headers = set(step.get("headers", []))
+            assert "${service_header}" not in headers
             if operation in PUBLIC_STEPS:
                 assert "${auth_header}" not in headers
-                assert "${service_header}" not in headers
             else:
-                assert headers & {"${auth_header}", "${service_header}"}
+                assert "${auth_header}" in headers
 
 
 def _openapi_path(path: str) -> str:

@@ -150,7 +150,7 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
                     "weight_kg": 5.1,
                     "height_cm": 57.5,
                     "head_circumference_cm": 38.2,
-                    "measured_at": "2026-07-20T08:30:00+00:00",
+                    "measured_at": "2026-07-20T08:30:00Z",
                 },
             },
             {
@@ -173,7 +173,7 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
                     "weight_kg": 4.9,
                     "height_cm": 56.8,
                     "head_circumference_cm": 37.9,
-                    "measured_at": "2026-07-21T09:00:00+00:00",
+                    "measured_at": "2026-07-21T09:00:00Z",
                 },
             },
         ],

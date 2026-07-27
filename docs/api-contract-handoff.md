@@ -8,7 +8,7 @@ This handoff is the human-readable companion to
 - OpenAPI snapshot: `docs/openapi.generated.json`
 - API surface catalog: `docs/api-surface-catalog.md`
 - Export command: `make backend-export-contracts`
-- Runtime base path: `/v1`
+- Product API base path: `/v1`
 - Error model: stable `{ "error": { "code", "message", "request_id", "details?" } }`
 
 ## API Surface Rules
@@ -21,9 +21,10 @@ Every OpenAPI operation carries MomCozy extension metadata:
 - `x-momcozy-client`: intended callers.
 - `x-momcozy-stability`: stability level for client coordination.
 
-Flutter should only integrate routes marked `public_app_api` and the specific
-`runtime_stream_api` routes needed for streaming UX. It must not depend on
-`internal_service_api`, `admin_ops_api`, or `infra_probe_api` routes.
+Flutter should integrate only routes marked `public_app_api`. It must not
+depend on `internal_service_api`, `admin_ops_api`, or `infra_probe_api` routes.
+Agent conversation and stream routes are published by the separate Agent
+Runtime contract, not Product OpenAPI.
 
 Update flow for API changes:
 
@@ -42,6 +43,11 @@ Update flow for API changes:
 
 Clients use `Authorization: Bearer <access_token>` for user-facing APIs.
 Refresh tokens are opaque and only sent in request bodies to `/auth/refresh`.
+Access tokens are RS256-signed, carry both the Product API and Agent Runtime
+audiences, and expose their public signing key through
+`GET /.well-known/jwks.json`. The Product Backend is the only private-key owner;
+the Agent Runtime validates the same opaque client token from its local JWKS
+cache and never receives the private key.
 Invite-login is a beta-access path: the mobile app sends a configured invite
 code plus its stable device id. The first successful login binds that invite
 code to the device id; subsequent logins must use the same device id and receive
@@ -49,6 +55,10 @@ the same access/refresh token pair contract as signup/login. A different device
 using an already-bound invite code is rejected with `permission_denied`.
 Service-to-service callers use `X-Service-Key`; this is not a user token and
 must not be used by mobile clients.
+
+Product API authentication also checks the active device session. The Agent
+Runtime does not call the Product Backend on every request, so logout or session
+revocation reaches it no later than the 15-minute access-token expiry.
 
 ## Admin Invite Codes
 
@@ -74,8 +84,8 @@ blank values to `null`, trims whitespace, and rejects values over 255
 characters.
 
 Current retryable write surfaces include files, profile infants, records,
-plans/tasks, device telemetry, notifications, support tickets, agent run
-creation, and agent action confirmation.
+plans/tasks, device telemetry, notifications, support tickets, and the internal
+Agent action-apply endpoints.
 
 ## Owner Scope
 
@@ -84,98 +94,59 @@ not send `user_id` as an authority. Service-created notifications are the only
 current public route that accepts a target `owner_user_id`, and it requires
 `X-Service-Key`.
 
-## Agent Streaming
+## Agent Runtime Internal API
 
-- Replay page: `GET /v1/agent/runs/{run_id}/events`
-- SSE replay stream: `GET /v1/agent/runs/{run_id}/stream`
+Agent Runtime is a separate service. It does not import Product modules or read
+Product tables. It calls the following Product-owned internal endpoints:
 
-Stream URLs do not accept access tokens as query parameters. Clients must send
-the bearer token in headers. Events are application-level runtime events, not
-provider raw events.
+### Read
 
-AG-UI is not a production compatibility target. The legacy `/api/ag-ui`,
-`/api/ag-ui-ws`, prewarm, and WebSocket bridge contracts are replaced by the
-typed run/event APIs above. Flutter/Web clients should implement a MomCozy
-application-event reducer instead of an AG-UI adapter.
+- `GET /v1/internal/agent/profile`
+- `GET /v1/internal/agent/lactation/timeline`
+- `GET /v1/internal/agent/lactation/milk-analysis-snapshot`
+- `GET /v1/internal/agent/plans/current`
+- `GET /v1/internal/agent/plans/calendar`
+- `GET /v1/internal/agent/pregnancy-diary`
 
-The SSE stream replays persisted events by default. Clients that need live
-consumption can pass `follow=true` with bounded `poll_interval_seconds` and
-`max_wait_seconds`. Persisted events are the source of truth and carry a
-monotonic `sequence` for replay.
+Read calls require `X-Service-Key: <runtime-service-key>` and an explicit
+`actor_user_id`. Product applies owner scope before returning a bounded domain
+projection.
 
-In live follow mode, the backend may also emit transient `message.delta`
-application events from Redis for token-level typing UI. These events are not
-provider raw events, are not persisted to Postgres, and do not carry a
-`sequence`; their SSE id is `delta:<redis-stream-id>` and their payload includes
-`transient: true` plus a Redis `cursor`. Clients must treat them as provisional:
-they can be replayed within the short Redis TTL or lost after disconnect.
-The final assistant content is authoritative only after the persisted assistant
-`message.completed` event is available; that event includes
-`payload.message_id`, `payload.role=assistant`, and `payload.text`.
+### Files
 
-A client reducer is the deterministic function that folds an ordered event
-stream into visible UI state:
+- `POST /v1/internal/agent/files/resolve`
+
+The request carries `actor_user_id`, Product `file_id`, and purpose. Product
+validates ownership and returns a bounded signed URL. `file_id` remains the
+durable identity; the signed URL must not be persisted as an identity or used
+as a cache key.
+
+### Business Actions
+
+- `POST /v1/internal/agent/actions/profile.update/apply`
+- `POST /v1/internal/agent/actions/lactation.record/apply`
+- `POST /v1/internal/agent/actions/plans/apply`
+- `POST /v1/internal/agent/actions/pregnancy-diary.entry/apply`
+- `POST /v1/internal/agent/actions/notifications.milk_reminder/apply`
+- `POST /v1/internal/agent/actions/support.ticket/apply`
+
+Action requests carry `actor_user_id`, `action_id`, Runtime correlation
+metadata, and a bounded Product payload. Every request requires:
 
 ```text
-previous AgentChatState + AgentEvent -> next AgentChatState
+X-Service-Key: <runtime-service-key>
+Idempotency-Key: agent-action:<action_id>
 ```
 
-It deduplicates by `event_id` or `sequence`, merges message updates by
-`message_id`, tool updates by `tool_call_id`, artifacts by `artifact_id`, and
-action cards by `action_id`. Transient `message.delta` events should update only
-the provisional streaming buffer and must be replaced by the persisted assistant
-`message.completed` payload. The reducer must not infer state from
-natural-language assistant text, provider raw events, or legacy AG-UI event
-names.
+Product validates owner scope and domain invariants, commits the business
+mutation, records `actor_service=agent-runtime` audit metadata, and returns an
+explicit Product result. Replaying the same action key must not duplicate the
+business write.
 
-## Agent Action Events
-
-Action events use `action_id` as the reducer key. `action.confirmation_required`
-includes user-visible `preview_payload` plus action metadata:
-`action_type`, `action_status`, `target_type`, `target_id`, and
-`side_effect_level`.
-
-`action.confirmed`, `action.applied`, `action.failed`, and `action.rejected`
-include `action_status`, `action_type`, `target_type`, and `target_id`, plus the
-stable presentation fields `requires_confirmation`, `confirmation_policy`, and
-`user_visible`. `apply_payload` is never streamed; it is persisted only in the
-server-side action ledger. Direct explicit-intent actions use
-`requires_confirmation=false`, `confirmation_policy=explicit_intent`, and
-`user_visible=false`, so clients must not create an action card for them.
-
-Actions that still require a value-bearing preview (for example support
-handoff, milk-plan save, and reminders) emit `action.confirmation_required`.
-The confirm API records authorization, emits `action.confirmed`, and moves the
-same run back to `queued`; it never writes domain state in the HTTP request.
-The agent worker resumes that run, executes the action synchronously, persists
-the domain mutation plus action/domain events, returns an explicit result, and
-only then completes the run. The run queue is the only action-apply execution path.
-
-Action API responses likewise expose preview/status metadata only. They do not
-return server-side `apply_payload` or action idempotency keys.
-
-The direct `pregnancy.plan.create` tool path also emits the durable application
-event `pregnancy_plan.changed` in the same transaction as the authoritative
-Plan and action result. Its payload is intentionally limited to
-`operation=created`, opaque `plan_id`, `plan_type=pregnancy`,
-`source=agent_action`, and `action_id`. Failed apply states do not emit this business
-event, and it never contains the personalized card, plan context, or health
-facts. Clients use it only as an invalidation/notification signal and reload the
-owner-scoped resource through
-`GET /v1/plans?plan_type=pregnancy&status=active`.
-
-After an authorized milk plan is actually created, the same executor
-transaction persists both the owner-scoped Plan and every expanded PlanTask.
-The proposal must contain at least one bounded, schedulable task template;
-templates without an explicit date repeat across the persisted `start_date`
-and `days` range. Any plan or task failure rolls the entire action back. The
-same transaction emits durable `milk_plan.changed`. Before executor metadata is
-added, its exact domain payload is `operation=created`, `reason=created`, opaque
-`plan_id`, `plan_type=milk_management`, `source=agent_action`, and a deduplicated,
-sorted `affected_dates` list derived from the PlanTasks actually written. The
-executor adds `action_id` and stable presentation fields. The event contains no
-title, summary, task text, reminder text, lactation history, or health facts;
-failed writes and applied-action replays emit no duplicate event.
+The Runtime owns tool selection, proposal, confirmation, conversation events,
+and final response. The Product Backend owns business authorization, action
+application, idempotency, audit, and Product data. Mobile clients never call
+these internal endpoints.
 
 ## Files
 
@@ -260,7 +231,6 @@ Flutter repositories should be generated from or validated against the OpenAPI
 snapshot. Do not build new client code against legacy raw response shapes.
 
 Use `docs/flutter-smoke-flows.json` as the initial integration
-smoke fixture for auth, core records/plans/files, agent replay, and voice
-contract checks.
+smoke fixture for auth, core records/plans/files, and voice contract checks.
 Use `docs/flutter-client-compatibility.md` for generated
 client regeneration and breaking-change rules.

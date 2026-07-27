@@ -1,7 +1,7 @@
-name: momcozy-test-backend
+name: backend-test
 
 x-backend-image: &backend-image
-  image: ${MOMCOZY_BACKEND_IMAGE:-momcozy-production-backend:test}
+  image: ${MOMCOZY_BACKEND_IMAGE:-backend:test}
   build:
     context: .
     dockerfile: Dockerfile
@@ -38,32 +38,6 @@ services:
     command: python -m alembic -c alembic.ini upgrade head
     profiles:
       - tools
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  agent-worker:
-    <<: *backend-image
-    command: python -m scripts.run_agent_worker
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 60s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
-
-  memory-worker:
-    <<: *backend-image
-    command: python -m scripts.run_memory_consolidation
-    environment:
-      AGENT_MEMORY_CONSOLIDATION_ENABLED: "true"
-    restart: unless-stopped
-    init: true
-    stop_grace_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,10 +89,7 @@ services:
         sleep 1;
       done;
       mc mb --ignore-existing test/momcozy-test;
-      mc cp --overwrite /seed/agent-references/pump-models.md test/momcozy-test/agent-references/device-service/pump-models.md;
       "
-    volumes:
-      - ./assets/agent-references:/seed/agent-references:ro
 
 volumes:
   postgres_test_data:

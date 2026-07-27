@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -130,64 +130,3 @@ class LactationTimelineReadOutput(BaseModel):
     items: list[LactationTimelineItem] = Field(description="按实际发生时间或计划执行时间升序排列的时间线项目。")
     counts: LactationTimelineCounts = Field(description="对当前返回项目按归一化状态汇总的数量。")
     truncated: bool = Field(description="是否因返回数量上限而省略了时间范围内的其他项目。")
-
-
-class LactationTimelineManageOutput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    status: str = Field(description="本次变更结果状态，例如已执行、等待确认或执行失败。")
-    operation: Literal["create", "update", "delete", "set_status", "reschedule"] = Field(
-        description="本次执行的时间线管理操作。",
-    )
-    item_type: Literal["schedule", "feeding", "pumping", "growth"] = Field(
-        description="本次操作针对的计划日程或实际记录类型。",
-    )
-    action_id: UUID | None = Field(
-        default=None,
-        description="运行时为本次业务变更生成的稳定 Action UUID；无需写入的无变化结果为 null。",
-    )
-    action_type: str | None = Field(
-        default=None,
-        description="后端实际执行的内部 Action 类型；无需写入时为 null，且不作为模型选择工具的依据。",
-    )
-    action_status: str | None = Field(
-        default=None,
-        description="Action 当前状态，例如 applied、confirmation_required 或 failed；无需写入时为 null。",
-    )
-    requires_confirmation: bool = Field(description="该变更是否仍需用户在结构化确认界面中确认。")
-    confirmation_policy: Literal["always", "explicit_intent"] = Field(
-        description="确认策略：always 表示等待结构化确认，explicit_intent 表示本轮明确意图即可执行。",
-    )
-    user_visible: bool = Field(description="是否需要向 App 展示结构化 Action 确认卡。")
-    write_succeeded: bool = Field(description="业务写入是否已经成功提交；仅提出预览时为 false。")
-    preview_payload: dict[str, Any] = Field(description="用于确认或结果说明的安全变更摘要，不包含跨用户数据。")
-    error_code: str | None = Field(
-        default=None,
-        description="Action 执行失败时的稳定错误码；未失败时为 null。",
-    )
-    artifact_id: UUID | None = Field(
-        default=None,
-        description="批量重排生成的预览卡片 UUID；其他操作或没有变化时为 null。",
-    )
-    artifact_type: str | None = Field(
-        default=None,
-        description="批量重排预览卡片类型；其他操作或没有变化时为 null。",
-    )
-    plan_id: UUID | None = Field(
-        default=None,
-        description="批量重排涉及的奶量计划 UUID；其他操作时为 null。",
-    )
-    conflict_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="批量重排检测到的冲突数量；其他操作时为 null。",
-    )
-    updated_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="批量重排将调整的奶量任务数量；其他操作时为 null。",
-    )
-    affected_dates: list[date] | None = Field(
-        default=None,
-        description="批量重排影响的本地日期列表；其他操作时为 null。",
-    )

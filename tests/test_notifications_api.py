@@ -9,40 +9,11 @@ from app.modules.notifications.models import Notification
 from app.modules.notifications.router import get_notifications_service
 
 
-SERVICE_KEY = "service-key-value-with-at-least-32-bytes"
-
-
 def test_notifications_require_current_user_for_inbox() -> None:
     response = TestClient(create_app(Settings(app_env="test"))).get("/v1/notifications")
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
-
-
-def test_service_client_creates_notification_for_target_owner() -> None:
-    user_id = uuid4()
-    fake_service = FakeNotificationsService(user_id=user_id)
-    app = create_app(Settings(app_env="test", service_api_key=SERVICE_KEY))
-    app.dependency_overrides[get_notifications_service] = lambda: fake_service
-
-    response = TestClient(app).post(
-        "/v1/notifications",
-        headers={"X-Service-Key": SERVICE_KEY, "Idempotency-Key": " idem-notify ", "X-Request-ID": "req_notify"},
-        json={
-            "owner_user_id": str(user_id),
-            "reminder_type": "feeding_due",
-            "title": "Feeding reminder",
-            "message": "Bottle is due",
-            "data": {"infant_id": "baby-1"},
-        },
-    )
-
-    assert response.status_code == 201
-    assert response.json()["notification_type"] == "feeding_due"
-    assert fake_service.create_kwargs["owner_user_id"] == user_id
-    assert fake_service.create_kwargs["idempotency_key"] == "idem-notify"
-    assert fake_service.create_kwargs["request_id"] == "req_notify"
-    assert fake_service.create_kwargs["actor_service"] == "internal-service"
 
 
 def test_notification_inbox_and_state_changes_use_current_user_scope() -> None:

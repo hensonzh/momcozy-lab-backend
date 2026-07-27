@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.core.settings import Settings
 from app.factory import create_app
+from tests.auth_key_material import auth_settings
 
 
 def test_rate_limit_returns_stable_error_envelope() -> None:
@@ -49,6 +50,25 @@ def test_rate_limit_exempts_health_endpoints() -> None:
     assert "X-RateLimit-Limit" not in second.headers
 
 
+def test_rate_limit_exempts_jwks_endpoint() -> None:
+    app = create_app(
+        auth_settings(
+            rate_limit_enabled=True,
+            rate_limit_requests=1,
+            rate_limit_window_seconds=30,
+        )
+    )
+
+    with TestClient(app) as client:
+        app.state.redis_client = FakeRedis()
+        first = client.get("/.well-known/jwks.json")
+        second = client.get("/.well-known/jwks.json")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "X-RateLimit-Limit" not in second.headers
+
+
 def test_rate_limit_uses_hashed_credentials_as_identity() -> None:
     app = create_app(
         Settings(
@@ -67,6 +87,79 @@ def test_rate_limit_uses_hashed_credentials_as_identity() -> None:
 
     assert len(fake_redis.values) == 2
     assert all("token-a" not in key and "token-b" not in key for key in fake_redis.values)
+
+
+def test_agent_runtime_internal_surface_uses_its_own_capacity_bucket() -> None:
+    runtime_key = "agent-runtime-test-service-key-with-at-least-32-bytes"
+    app = create_app(
+        Settings(
+            app_env="test",
+            rate_limit_enabled=True,
+            rate_limit_requests=1,
+            rate_limit_window_seconds=30,
+            agent_runtime_service_api_key=runtime_key,
+            agent_runtime_rate_limit_requests=2,
+            agent_runtime_rate_limit_window_seconds=10,
+        )
+    )
+
+    with TestClient(app) as client:
+        fake_redis = FakeRedis()
+        app.state.redis_client = fake_redis
+        headers = {"X-Service-Key": runtime_key}
+        first = client.get(
+            "/v1/internal/agent/not-a-route",
+            headers=headers,
+        )
+        second = client.get(
+            "/v1/internal/agent/not-a-route",
+            headers=headers,
+        )
+        third = client.get(
+            "/v1/internal/agent/not-a-route",
+            headers=headers,
+        )
+
+    assert first.status_code == 404
+    assert second.status_code == 404
+    assert third.status_code == 429
+    assert first.headers["X-RateLimit-Limit"] == "2"
+    assert third.headers["Retry-After"] == "10"
+    assert len(fake_redis.values) == 1
+    assert next(iter(fake_redis.values)).startswith(
+        "rate-limit:agent-runtime:"
+    )
+
+
+def test_invalid_runtime_service_key_does_not_receive_internal_capacity() -> None:
+    app = create_app(
+        Settings(
+            app_env="test",
+            rate_limit_enabled=True,
+            rate_limit_requests=1,
+            rate_limit_window_seconds=30,
+            agent_runtime_service_api_key=(
+                "agent-runtime-test-service-key-with-at-least-32-bytes"
+            ),
+            agent_runtime_rate_limit_requests=100,
+        )
+    )
+
+    with TestClient(app) as client:
+        app.state.redis_client = FakeRedis()
+        headers = {"X-Service-Key": "invalid-service-key"}
+        first = client.get(
+            "/v1/internal/agent/not-a-route",
+            headers=headers,
+        )
+        second = client.get(
+            "/v1/internal/agent/not-a-route",
+            headers=headers,
+        )
+
+    assert first.status_code == 404
+    assert second.status_code == 429
+    assert first.headers["X-RateLimit-Limit"] == "1"
 
 
 class FakeRedis:

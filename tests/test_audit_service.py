@@ -217,6 +217,44 @@ def test_idempotency_service_rejects_conflicting_request_hash() -> None:
         )
 
 
+def test_idempotency_service_rereads_winner_after_concurrent_first_insert() -> None:
+    winner = _idempotency_key(request_hash_value="hash-1")
+    repository = ConcurrentInsertAuditRepository(winner=winner)
+    service = IdempotencyService(repository=repository)
+
+    decision = asyncio.run(
+        service.reserve(
+            actor_user_id=winner.actor_user_id,
+            scope=winner.scope,
+            key=winner.key,
+            request_hash="hash-1",
+            expires_at=_expires_at(),
+        )
+    )
+
+    assert decision.status == "replay"
+    assert decision.record is winner
+    assert repository.lookup_count == 2
+
+
+def test_idempotency_service_rejects_conflicting_concurrent_first_insert_winner() -> None:
+    winner = _idempotency_key(request_hash_value="winner-hash")
+    service = IdempotencyService(repository=ConcurrentInsertAuditRepository(winner=winner))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.reserve(
+                actor_user_id=winner.actor_user_id,
+                scope=winner.scope,
+                key=winner.key,
+                request_hash="loser-hash",
+                expires_at=_expires_at(),
+            )
+        )
+
+    assert exc_info.value.code == "idempotency_conflict"
+
+
 def test_request_hash_is_stable_for_equivalent_dicts() -> None:
     assert request_hash({"b": 2, "a": 1}) == request_hash({"a": 1, "b": 2})
 
@@ -282,3 +320,19 @@ class FakeAuditRepository:
 
     async def delete_idempotency_key(self, *, idempotency_key):
         self.deleted_idempotency = idempotency_key
+
+
+class ConcurrentInsertAuditRepository(FakeAuditRepository):
+    def __init__(self, *, winner: IdempotencyKey) -> None:
+        super().__init__()
+        self.winner = winner
+        self.lookup_count = 0
+
+    async def get_idempotency_key(self, **kwargs):
+        self.lookup_kwargs = kwargs
+        self.lookup_count += 1
+        return None if self.lookup_count == 1 else self.winner
+
+    async def create_idempotency_key(self, **kwargs):
+        self.created_idempotency = IdempotencyKey(**kwargs)
+        return None

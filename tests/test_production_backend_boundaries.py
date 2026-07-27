@@ -3,7 +3,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = ROOT / "app"
-AGENT_RUNTIME_ROOT = APP_ROOT / "agent_runtime"
 
 
 def test_production_backend_app_does_not_depend_on_retired_runtime_or_sqlite() -> None:
@@ -56,53 +55,19 @@ def test_retired_outbox_runtime_is_absent() -> None:
     assert all("outbox" not in path.read_text().lower() for path in APP_ROOT.rglob("*.py"))
 
 
-def test_agent_runtime_uses_explicit_internal_subdomains() -> None:
-    expected_subdomains = {
-        "actions",
-        "api",
-        "context",
-        "evals",
-        "events",
-        "providers",
-        "runs",
-        "tools",
-    }
-    missing_subdomains = sorted(name for name in expected_subdomains if not (AGENT_RUNTIME_ROOT / name).is_dir())
-    expected_agent_subdomains = {
-        "actions",
-        "context",
-        "prompts",
-        "skills",
-        "tools",
-        "workflows",
-    }
-    cozymate_root = APP_ROOT / "agents" / "cozymate"
-    missing_agent_subdomains = sorted(
-        name for name in expected_agent_subdomains if not (cozymate_root / name).is_dir()
-    )
+def test_embedded_agent_runtime_is_absent_and_internal_product_adapters_remain() -> None:
+    for retired_path in (
+        APP_ROOT / "agent_runtime",
+        APP_ROOT / "agents",
+        APP_ROOT / "workers",
+        APP_ROOT / "modules" / "agent_runtime",
+    ):
+        assert not retired_path.exists() or not any(retired_path.rglob("*.py"))
 
-    flattened_runtime_files = {
-        "action_outbox.py",
-        "action_policy.py",
-        "controls.py",
-        "evals.py",
-        "events.py",
-        "execution.py",
-        "memory.py",
-        "memory_actions.py",
-        "replay.py",
-        "runtime.py",
-        "safety.py",
-        "state_store.py",
-        "streaming.py",
-        "transient_stream.py",
-    }
-    leaked_files = sorted(name for name in flattened_runtime_files if (AGENT_RUNTIME_ROOT / name).exists())
-
-    assert missing_subdomains == []
-    assert missing_agent_subdomains == []
-    assert leaked_files == []
-    assert not (APP_ROOT / "modules" / "agent_runtime").exists()
+    for module in ("diary", "files", "notifications", "plans", "profiles", "records", "support"):
+        module_root = APP_ROOT / "modules" / module
+        for filename in ("agent_contracts.py", "agent_router.py", "agent_service.py"):
+            assert (module_root / filename).is_file()
 
 
 def test_business_modules_do_not_own_agent_adapters_or_depend_on_agent_layers() -> None:
@@ -122,8 +87,9 @@ def test_business_modules_do_not_own_agent_adapters_or_depend_on_agent_layers() 
     assert violations == []
 
 
-def test_worker_package_does_not_own_action_contracts() -> None:
-    assert not (APP_ROOT / "workers" / "errors.py").exists()
+def test_product_backend_has_no_worker_package() -> None:
+    workers = APP_ROOT / "workers"
+    assert not workers.exists() or not any(workers.rglob("*.py"))
 
 
 def test_records_module_keeps_domain_rules_out_of_service_or_infrastructure() -> None:

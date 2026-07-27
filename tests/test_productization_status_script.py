@@ -1,4 +1,5 @@
 import subprocess
+import sys
 from pathlib import Path
 
 from scripts.check_productization_status import run_checks
@@ -17,7 +18,7 @@ def test_productization_status_checks_pass_for_current_backend() -> None:
 def test_productization_status_script_prints_json_summary() -> None:
     completed = subprocess.run(
         [
-            ".venv/bin/python",
+            sys.executable,
             "scripts/check_productization_status.py",
             "--json",
         ],
@@ -31,14 +32,14 @@ def test_productization_status_script_prints_json_summary() -> None:
     assert '"failed": 0' in completed.stdout
 
 
-def test_productization_status_checks_worker_operations_scripts() -> None:
+def test_productization_status_checks_product_operations_and_runtime_boundary() -> None:
     results = run_checks(ROOT)
     names = {result.name for result in results}
 
-    assert "scripts/inspect_worker_backlog.py" in names
-    assert "scripts/recover_stuck_agent_runs.py" in names
+    assert "scripts/check_redis_profile.py" in names
     assert "scripts/check_product_asset_storage.py" in names
-    assert "scripts/run_memory_consolidation.py" in names
-    assert "Makefile:backend-worker-backlog:" in names
-    assert "Makefile:backend-agent-recover-stuck-runs:" in names
+    assert "app/modules/auth/jwks_router.py" in names
+    assert "app/modules/profiles/agent_router.py" in names
+    assert "retired:app/agent_runtime" in names
+    assert "retired:scripts/run_agent_worker.py" in names
     assert "Makefile:scripts/check_product_asset_storage.py" in names

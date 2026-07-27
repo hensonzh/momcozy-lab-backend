@@ -3,7 +3,6 @@
   "base_path": "/v1",
   "rules": {
     "auth_header": "Authorization: Bearer ${access_token}",
-    "service_header": "X-Service-Key: ${service_api_key}",
     "idempotency_header": "Idempotency-Key: ${unique_idempotency_key}",
     "no_tokens_in_urls": true
   },
@@ -95,51 +94,6 @@
           "method": "GET",
           "path": "/v1/records/feeding",
           "headers": ["${auth_header}"]
-        }
-      ]
-    },
-    {
-      "name": "agent_replay",
-      "steps": [
-        {
-          "method": "POST",
-          "path": "/v1/agent/threads",
-          "headers": ["${auth_header}"],
-          "body": {
-            "title": "Smoke agent thread"
-          },
-          "captures": {
-            "thread_id": "$.id"
-          }
-        },
-        {
-          "method": "POST",
-          "path": "/v1/agent/runs",
-          "headers": ["${auth_header}", "${idempotency_header}"],
-          "body": {
-            "thread_id": "${thread_id}",
-            "message": "Create a smoke-test run without external side effects."
-          },
-          "captures": {
-            "run_id": "$.id"
-          }
-        },
-        {
-          "method": "GET",
-          "path": "/v1/agent/runs/${run_id}/events",
-          "headers": ["${auth_header}"]
-        },
-        {
-          "method": "GET",
-          "path": "/v1/agent/runs/${run_id}/stream?after_sequence=0&limit=200",
-          "headers": ["${auth_header}"],
-          "assertions": ["no token query parameter"]
-        },
-        {
-          "method": "GET",
-          "path": "/v1/agent/runs/${run_id}/stream?after_sequence=0&limit=200&follow=true&poll_interval_seconds=0.5&max_wait_seconds=1",
-          "headers": ["${auth_header}"],
-          "assertions": ["no token query parameter", "returns persisted application events only"]
         }
       ]
     },
