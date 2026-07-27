@@ -23,9 +23,8 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "make backend-productization-status",
         "make backend-test-smoke",
         "make backend-prod-readiness",
-        "20260723_0047",
-        "20260727_0048",
-        "Do not stamp",
+        "empty database",
+        "upgrading an older Product schema",
     ]:
         assert phrase in text
 

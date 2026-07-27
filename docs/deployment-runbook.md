@@ -57,11 +57,11 @@ correlation values, but they are not Product Backend execution state.
    python -m alembic -c alembic.ini upgrade head
    ```
 
-   The migration history remains continuous from the previously deployed
-   `20260723_0047` revision. `20260727_0048` preserves Product business tables
-   and data while removing tables now owned by Agent Runtime. Do not stamp an
-   existing database to a replacement baseline. This extraction revision is
-   irreversible; take and verify a database backup before applying it.
+   The current baseline targets an empty database and does not support
+   upgrading an older Product schema. This is intentional while the product is
+   limited to resettable internal testing. Drop and recreate the test database
+   before deploying this baseline; do not point it at a database whose data
+   must be preserved.
 
 2. Deploy the Product API.
 3. Wait for `GET /v1/health/live`.
