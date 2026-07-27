@@ -4,10 +4,8 @@ This directory contains the Product Backend contracts, operational guides, and
 product references. Agent orchestration, tools, prompts, context, memory,
 workers, and evals belong to the independently deployed Agent Runtime repository.
 
-## Product
+## Product Assets
 
-- `product/momcozy-mai-integrated-prd.md`: product requirements and user
-  journeys.
 - `product-asset-storage.md`: product asset manifest and storage policy.
 
 ## API And Client Contracts

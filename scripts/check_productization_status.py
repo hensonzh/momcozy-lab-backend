@@ -65,11 +65,9 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "app/modules/auth/jwks_router.py",
         "app/modules/diary/agent_router.py",
         "app/modules/files/agent_router.py",
-        "app/modules/notifications/agent_router.py",
         "app/modules/plans/agent_router.py",
         "app/modules/profiles/agent_router.py",
         "app/modules/records/agent_router.py",
-        "app/modules/support/agent_router.py",
     ]
     return [_file_exists(root, relative_path) for relative_path in required]
 

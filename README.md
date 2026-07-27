@@ -18,8 +18,8 @@ workers, memory, and evals live in the independent Agent Runtime repository.
 - Product does not expose Agent run, thread, event, confirmation, memory, or
   eval endpoints and does not start Agent workers.
 
-The internal Agent API covers pregnancy diary, file resolution, notifications,
-plans, profile, lactation records, and support tickets. The source of truth is
+The internal Agent API covers pregnancy diary, file resolution, plans, profile,
+and lactation records. The source of truth is
 the generated [API surface catalog](docs/api-surface-catalog.md); integration
 rules are in [API contract handoff](docs/api-contract-handoff.md).
 

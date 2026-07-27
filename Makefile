@@ -108,7 +108,7 @@ backend-productization-status:
 
 backend-smoke:
 	$(PYTHON) scripts/check_productization_status.py
-	$(PYTHON) -m pytest -q tests/test_agent_diary_internal_api.py tests/test_agent_file_internal_api.py tests/test_agent_lactation_internal_api.py tests/test_agent_notifications_internal_api.py tests/test_agent_plans_internal_api.py tests/test_agent_profile_internal_api.py tests/test_agent_support_internal_api.py tests/test_auth_jwks.py
+	$(PYTHON) -m pytest -q tests/test_agent_diary_internal_api.py tests/test_agent_file_internal_api.py tests/test_agent_lactation_internal_api.py tests/test_agent_plans_internal_api.py tests/test_agent_profile_internal_api.py tests/test_auth_jwks.py
 
 backend-test-smoke:
 	$(MAKE) backend-productization-status

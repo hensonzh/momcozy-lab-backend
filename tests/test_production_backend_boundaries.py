@@ -64,7 +64,7 @@ def test_embedded_agent_runtime_is_absent_and_internal_product_adapters_remain()
     ):
         assert not retired_path.exists() or not any(retired_path.rglob("*.py"))
 
-    for module in ("diary", "files", "notifications", "plans", "profiles", "records", "support"):
+    for module in ("diary", "files", "plans", "profiles", "records"):
         module_root = APP_ROOT / "modules" / module
         for filename in ("agent_contracts.py", "agent_router.py", "agent_service.py"):
             assert (module_root / filename).is_file()

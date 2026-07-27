@@ -94,10 +94,8 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/.well-known/jwks.json` | auth | agent-runtime | stable | Jwks |
 | POST | `/v1/internal/agent/actions/diary.entry/apply` | diary | agent-runtime | stable | Apply Agent Diary Action |
 | POST | `/v1/internal/agent/actions/lactation.record/apply` | records | agent-runtime | stable | Apply Agent Lactation Record |
-| POST | `/v1/internal/agent/actions/notifications.milk_reminder/apply` | notifications | agent-runtime | stable | Apply Agent Milk Reminder Action |
 | POST | `/v1/internal/agent/actions/plans/apply` | plans | agent-runtime | stable | Apply Agent Plans Action |
 | POST | `/v1/internal/agent/actions/profile.update/apply` | profiles | agent-runtime | stable | Apply Agent Profile Update |
-| POST | `/v1/internal/agent/actions/support.ticket/apply` | support | agent-runtime | stable | Apply Agent Support Ticket Action |
 | GET | `/v1/internal/agent/diary` | diary | agent-runtime | stable | Read Agent Diary |
 | POST | `/v1/internal/agent/files/resolve` | files | agent-runtime | stable | Resolve Agent File |
 | GET | `/v1/internal/agent/lactation/milk-analysis-snapshot` | records | agent-runtime | stable | Read Agent Milk Analysis Snapshot |

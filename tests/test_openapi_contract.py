@@ -101,11 +101,9 @@ def test_openapi_contains_runtime_to_product_internal_contracts_only() -> None:
     paths = build_openapi_schema()["paths"]
     expected = {
         "/v1/internal/agent/actions/lactation.record/apply",
-        "/v1/internal/agent/actions/notifications.milk_reminder/apply",
         "/v1/internal/agent/actions/plans/apply",
         "/v1/internal/agent/actions/diary.entry/apply",
         "/v1/internal/agent/actions/profile.update/apply",
-        "/v1/internal/agent/actions/support.ticket/apply",
         "/v1/internal/agent/diary",
         "/v1/internal/agent/files/resolve",
         "/v1/internal/agent/lactation/milk-analysis-snapshot",
@@ -169,11 +167,9 @@ def test_retryable_writes_declare_idempotency_header() -> None:
         ("post", "/v1/devices/pump-health"),
         ("post", "/v1/support/tickets"),
         ("post", "/v1/internal/agent/actions/lactation.record/apply"),
-        ("post", "/v1/internal/agent/actions/notifications.milk_reminder/apply"),
         ("post", "/v1/internal/agent/actions/plans/apply"),
         ("post", "/v1/internal/agent/actions/diary.entry/apply"),
         ("post", "/v1/internal/agent/actions/profile.update/apply"),
-        ("post", "/v1/internal/agent/actions/support.ticket/apply"),
     ]:
         operation = schema["paths"][path][method]
         header_names = {parameter["name"] for parameter in operation.get("parameters", []) if parameter.get("in") == "header"}

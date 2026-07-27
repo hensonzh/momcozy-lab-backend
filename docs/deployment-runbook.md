@@ -161,8 +161,6 @@ The independent Runtime calls only the Product internal API:
 - `GET /v1/internal/agent/diary`
 - `POST /v1/internal/agent/actions/diary.entry/apply`
 - `POST /v1/internal/agent/files/resolve`
-- `POST /v1/internal/agent/actions/notifications.milk_reminder/apply`
-- `POST /v1/internal/agent/actions/support.ticket/apply`
 
 Every call requires the Runtime-only `X-Service-Key`. Read calls carry
 `actor_user_id` as an explicit query parameter. Action calls carry

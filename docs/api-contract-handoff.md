@@ -128,8 +128,6 @@ as a cache key.
 - `POST /v1/internal/agent/actions/lactation.record/apply`
 - `POST /v1/internal/agent/actions/plans/apply`
 - `POST /v1/internal/agent/actions/diary.entry/apply`
-- `POST /v1/internal/agent/actions/notifications.milk_reminder/apply`
-- `POST /v1/internal/agent/actions/support.ticket/apply`
 
 Action requests carry `actor_user_id`, `action_id`, Runtime correlation
 metadata, and a bounded Product payload. Every request requires:

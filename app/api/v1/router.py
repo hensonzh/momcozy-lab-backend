@@ -17,7 +17,6 @@ from ...modules.diary.agent_router import router as agent_diary_router
 from ...modules.files.router import router as files_router
 from ...modules.files.agent_router import router as agent_files_router
 from ...modules.invites.router import router as invites_router
-from ...modules.notifications.agent_router import router as agent_notifications_router
 from ...modules.notifications.router import router as notifications_router
 from ...modules.plans.agent_router import router as agent_plans_router
 from ...modules.plans.router import router as plans_router
@@ -25,7 +24,6 @@ from ...modules.profiles.agent_router import router as agent_profiles_router
 from ...modules.profiles.router import router as profiles_router
 from ...modules.records.agent_router import router as agent_records_router
 from ...modules.records.router import router as records_router
-from ...modules.support.agent_router import router as agent_support_router
 from ...modules.support.router import router as support_router
 from ...modules.voice.router import router as voice_router
 
@@ -41,7 +39,6 @@ router.include_router(agent_diary_router)
 router.include_router(files_router)
 router.include_router(agent_files_router)
 router.include_router(invites_router)
-router.include_router(agent_notifications_router)
 router.include_router(notifications_router)
 router.include_router(agent_plans_router)
 router.include_router(plans_router)
@@ -49,7 +46,6 @@ router.include_router(agent_profiles_router)
 router.include_router(profiles_router)
 router.include_router(agent_records_router)
 router.include_router(records_router)
-router.include_router(agent_support_router)
 router.include_router(support_router)
 router.include_router(voice_router)
 
