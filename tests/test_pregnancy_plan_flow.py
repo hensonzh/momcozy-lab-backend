@@ -687,6 +687,41 @@ def test_pregnancy_plan_card_uses_legacy_dynamic_late_pregnancy_cadence(
     assert card["todo_plan"]["periods"][0]["title"] == first_period
 
 
+def test_pregnancy_plan_card_uses_globally_unique_todo_item_ids() -> None:
+    card = build_pregnancy_plan_card_json(
+        {
+            "current_week": "32周",
+            "ivf": "否",
+            "fetus_count": "单胎",
+            "age": 30,
+            "first_birth": "是",
+            "birth_path": "顺产",
+        }
+    )
+
+    item_ids = [
+        item["item_id"]
+        for period in card["todo_plan"]["periods"]
+        for item in period["items"]
+    ]
+
+    assert len(item_ids) == len(set(item_ids))
+    assert item_ids == [
+        item["item_id"]
+        for period in build_pregnancy_plan_card_json(
+            {
+                "current_week": "32周",
+                "ivf": "否",
+                "fetus_count": "单胎",
+                "age": 30,
+                "first_birth": "是",
+                "birth_path": "顺产",
+            }
+        )["todo_plan"]["periods"]
+        for item in period["items"]
+    ]
+
+
 def test_pregnancy_plan_card_applies_collected_scope_to_visible_phase_route() -> None:
     base = {
         "current_week": "20周",

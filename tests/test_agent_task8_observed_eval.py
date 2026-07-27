@@ -26,6 +26,7 @@ from app.agents.cozymate.tools import (
     PlanMutateToolHandler,
     DiaryMutateToolHandler,
     PregnancyIntakeWorkflowToolHandler,
+    ScheduleTimelineReadToolHandler,
     ScheduleTimelineMutateToolHandler,
     SupportTicketProposeToolHandler,
     CozymateToolExecutor,
@@ -70,11 +71,13 @@ from app.modules.diary.models import DiaryEntry
 from app.agents.cozymate.actions.diary import DiarySaveActionHandler
 from app.agents.cozymate.actions.hospital_bag import HospitalBagCartUpdateActionHandler
 from app.agents.cozymate.actions.plans import (
-    MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
+    PlanTaskCompleteActionHandler,
     PregnancyPlanCreateActionHandler,
 )
 from app.modules.plans.models import Plan, PlanTask
+from app.modules.plans.repository import ScheduleTimelineTaskRow
+from app.modules.plans.schedule_timeline import ScheduleTimelineService
 from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from app.modules.records.schemas import MilkTrendDayRead, MilkTrendListResponse
 
@@ -162,7 +165,89 @@ def test_observed_pregnancy_plan_creates_durable_form_then_applies_one_plan() ->
     _assert_artifact_events(created.trace, "birth_journey_plan_card")
     assert len(scenario.plans.plans) == 1
     assert scenario.plans.plans[0].plan_type == "pregnancy"
+    assert scenario.plans.tasks
+    assert all(task.plan_id == scenario.plans.plans[0].id for task in scenario.plans.tasks)
+    assert all(task.payload["domain"] == "pregnancy" for task in scenario.plans.tasks)
     assert scenario.workflow("pregnancy_plan").status == "completed"
+    plan_mutate_output = scenario.repository.tool_outputs[-1].output
+    assert plan_mutate_output["status"] == "applied"
+    assert plan_mutate_output["result_code"] == "action_applied"
+    assert plan_mutate_output["plan_id"] == str(scenario.plans.plans[0].id)
+    assert plan_mutate_output["plan_version"] == 1
+    assert plan_mutate_output["task_count"] == len(scenario.plans.tasks)
+
+    first_task = scenario.plans.tasks[0]
+    assert first_task.task_date is not None
+    task_date = first_task.task_date.isoformat()
+    read_pending = scenario.run_turn(
+        text="看看这项孕期安排。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation(
+                "schedule_timeline_read",
+                {
+                    "start_date": task_date,
+                    "end_date": task_date,
+                    "domains": ["pregnancy"],
+                },
+            ),
+        ),
+        final_text="这是对应的孕期安排。",
+    )
+    _assert_tools(read_pending.trace, "schedule_timeline_read")
+    pending_output = scenario.repository.tool_outputs[-1].output
+    pending_item = next(
+        item
+        for item in pending_output["items"]
+        if item["schedule"]["task_id"] == str(first_task.id)
+    )
+    assert pending_item["domain"] == "pregnancy"
+    assert pending_item["state"] == "pending"
+
+    completed = scenario.run_turn(
+        text="这项已经完成了。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation(
+                "schedule_timeline_mutate",
+                {
+                    "operation": "set_status",
+                    "entry_type": "schedule",
+                    "task_id": str(first_task.id),
+                    "completed": True,
+                },
+            ),
+        ),
+        final_text="已标记完成。",
+    )
+    _assert_tools(completed.trace, "schedule_timeline_mutate")
+    _assert_actions(completed.trace, ("plans.task.complete", "applied", "plan_task"))
+    assert first_task.status == "completed"
+
+    read_completed = scenario.run_turn(
+        text="再看一下这项孕期安排。",
+        handlers=handlers,
+        tool_invocations=(
+            scripted_tool_invocation(
+                "schedule_timeline_read",
+                {
+                    "start_date": task_date,
+                    "end_date": task_date,
+                    "domains": ["pregnancy"],
+                    "states": ["completed"],
+                },
+            ),
+        ),
+        final_text="这项孕期安排已完成。",
+    )
+    _assert_tools(read_completed.trace, "schedule_timeline_read")
+    completed_output = scenario.repository.tool_outputs[-1].output
+    assert completed_output["counts"]["completed"] >= 1
+    assert any(
+        item["schedule"]["task_id"] == str(first_task.id)
+        and item["state"] == "completed"
+        for item in completed_output["items"]
+    )
 
 
 def test_observed_pregnancy_plan_urgent_turn_enters_model_before_tool_safety_result() -> None:
@@ -386,7 +471,7 @@ def test_observed_hospital_bag_worry_and_history_do_not_trigger_current_emergenc
     assert scenario.workflow("hospital_bag").status == "completed"
 
 
-def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles() -> None:
+def test_observed_milk_analysis_and_existing_schedule_persist_real_action_lifecycles() -> None:
     scenario = ObservedScenario()
     handlers = scenario.milk_handlers()
     started = scenario.run_turn(
@@ -443,51 +528,42 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
         text="请给我分析结果。",
         handlers=handlers,
         tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "evaluate"}),),
-        final_text="分析完成，可以制定温和的稳奶计划。",
+        final_text="分析完成，近期记录可供参考，目前没有妈妈或宝宝风险信号。",
     )
     _assert_tools(evaluated.trace, "milk_analysis_manage")
     _assert_artifact_events(evaluated.trace, "milk_analysis_card")
     milk_workflow = scenario.workflow("milk_analysis")
     assert milk_workflow.state["phase"] == "assessment_complete"
-    assert milk_workflow.state["assessment"]["plan_decision"]["can_start_plan"] is True
+    assert milk_workflow.state["assessment"]["risk"] == {
+        "maternal_red_flags": False,
+        "infant_intake_risk": False,
+    }
+    assert "plan_decision" not in milk_workflow.state["assessment"]
     assert evaluated.trace.actions == []
 
-    plan_turn = scenario.run_turn(
-        text="按分析结果做一份本周稳奶计划。",
-        handlers=handlers,
-        tool_invocations=(
-            scripted_tool_invocation(
-                "plan_mutate",
-                {
-                    "operation": "create",
-                    "plan_type": "milk_management",
-                    "direction": "maintain",
-                    "days": 1,
-                    "preferred_pumping_times": ["08:00", "11:00", "14:00"],
-                },
-            ),
-        ),
-        final_text="请确认后创建计划。",
+    plan_date = date(2026, 7, 28)
+    plan = asyncio.run(
+        scenario.plans.create_plan(
+            owner_user_id=scenario.actor_user_id,
+            plan_type="milk_management",
+            title="已有奶量计划",
+            summary="历史计划，仅用于验证已有日程调整。",
+            source="fixture",
+            payload={"start_date": plan_date.isoformat(), "days": 1},
+        )
     )
-    _assert_tools(plan_turn.trace, "plan_mutate")
-    _assert_actions(plan_turn.trace, ("plans.milk_plan.create", "confirmation_required", "plan"))
-    _assert_event_types(
-        plan_turn.trace,
-        required={"action.confirmation_required", "artifact.created", "run.waiting_for_confirmation"},
-    )
-    _assert_artifact_events(plan_turn.trace, "milk_plan_preview")
-
-    plan_trace = scenario.confirm_and_apply(plan_turn.trace.actions[0]["action_type"])
-    _assert_actions(plan_trace, ("plans.milk_plan.create", "applied", "plan"))
-    _assert_event_types(plan_trace, required={"action.confirmed", "action.applied", "milk_plan.changed"})
-    changed = _event_by_type(plan_trace, "milk_plan.changed")
-    assert changed["payload"]["operation"] == "created"
-    assert len(scenario.plans.plans) == 1
-    assert len(scenario.plans.tasks) == 3
-
-    plan = scenario.plans.plans[0]
-    plan_date = scenario.plans.tasks[0].task_date
-    assert plan_date is not None
+    for task_time in ("08:00", "11:00", "14:00"):
+        asyncio.run(
+            scenario.plans.create_task(
+                owner_user_id=scenario.actor_user_id,
+                plan_id=plan.id,
+                task_date=plan_date,
+                task_time=task_time,
+                title="已有吸奶安排",
+                description="",
+                payload={"task_type": "pumping", "duration_minutes": 30},
+            )
+        )
     plan_date_text = plan_date.isoformat()
     schedule_turn = scenario.run_turn(
         text="明天 10:30 到 12:30 开会，把冲突的吸奶安排挪开。",
@@ -528,7 +604,7 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     assert scenario.plans.tasks[-1].plan_id is None
 
 
-def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
+def test_observed_milk_red_flags_are_reported_without_plan_action() -> None:
     scenario = ObservedScenario()
     handlers = scenario.milk_handlers()
     scenario.run_turn(
@@ -563,43 +639,20 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
             ),
             final_text="继续。",
         )
-    scenario.run_turn(
+    evaluated = scenario.run_turn(
         text="给我结论。",
         handlers=handlers,
         tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "evaluate"}),),
         final_text="请先联系专业人员。",
     )
-    assert scenario.workflow("milk_analysis").state["assessment"]["plan_decision"] == {
-        "can_start_plan": False,
-        "recommended_direction": None,
-        "reason": "maternal_red_flags_require_professional_support",
+    assessment = scenario.workflow("milk_analysis").state["assessment"]
+    assert assessment["risk"] == {
+        "maternal_red_flags": True,
+        "infant_intake_risk": False,
     }
-    artifact_count = len(scenario.repository.artifacts)
-
-    with pytest.raises(ApiError, match="latest milk analysis does not allow a plan"):
-        scenario.run_turn(
-            text="还是直接给我追奶计划。",
-            handlers=handlers,
-            tool_invocations=(
-                scripted_tool_invocation(
-                    "plan_mutate",
-                    {
-                        "operation": "create",
-                        "plan_type": "milk_management",
-                        "direction": "increase",
-                    },
-                ),
-            ),
-            final_text="不应成功。",
-        )
-
-    failed_run = scenario.repository.runs[-1]
-    assert [(call.tool_name, call.status) for call in scenario.repository.tool_calls_for(failed_run.id)] == [
-        ("plan_mutate", "failed")
-    ]
-    assert scenario.repository.actions_for(failed_run.id) == []
-    assert len(scenario.repository.artifacts) == artifact_count
-    assert "tool.failed" in {event.event_type for event in scenario.repository.events_for(failed_run.id)}
+    assert "plan_decision" not in assessment
+    _assert_artifact_events(evaluated.trace, "milk_analysis_card")
+    assert evaluated.trace.actions == []
 
 
 def test_observed_device_unboxing_complete_current_advances_exactly_one_persisted_step() -> None:
@@ -895,9 +948,9 @@ class ObservedScenario:
             repository=self.repository,
             handlers={
                 "hospital_bag.cart.update": HospitalBagCartUpdateActionHandler(),
-                "plans.milk_plan.create": MilkPlanCreateActionHandler(service=self.plans),
                 "plans.milk_schedule.reschedule": MilkScheduleRescheduleActionHandler(service=self.plans),
                 "pregnancy.plan.create": PregnancyPlanCreateActionHandler(service=self.plans),
+                "plans.task.complete": PlanTaskCompleteActionHandler(service=self.plans),
                 "diary.entry.save": DiarySaveActionHandler(service=self.diary),
             },
         )
@@ -1017,6 +1070,16 @@ class ObservedScenario:
         return {
             "pregnancy_intake_manage": PregnancyIntakeWorkflowToolHandler(runtime_service=self.runtime_service),
             "plan_mutate": PlanMutateToolHandler(
+                runtime_service=self.runtime_service,
+                plans_service=self.plans,
+            ),
+            "schedule_timeline_read": ScheduleTimelineReadToolHandler(
+                service=ScheduleTimelineService(
+                    records_service=self.records,
+                    plans_service=self.plans,
+                )
+            ),
+            "schedule_timeline_mutate": ScheduleTimelineMutateToolHandler(
                 runtime_service=self.runtime_service,
                 plans_service=self.plans,
             ),
@@ -1476,6 +1539,7 @@ class RecordingPlansService:
             title=kwargs["title"],
             summary=kwargs["summary"],
             status="active",
+            version=1,
             source=kwargs["source"],
             payload=kwargs["payload"],
         )
@@ -1503,36 +1567,97 @@ class RecordingPlansService:
             raise ApiError(code="not_found", message="Plan not found.", status=404)
         return plan
 
-    async def list_tasks_for_plan(self, *, owner_user_id: UUID, plan_id: UUID, task_dates, status: str, limit: int):
-        await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
-        return [task for task in self.tasks if task.plan_id == plan_id and task.task_date in task_dates and task.status == status][:limit]
+    async def get_task(self, *, owner_user_id: UUID, task_id: UUID):
+        task = next((item for item in self.tasks if item.id == task_id and item.owner_user_id == owner_user_id), None)
+        if task is None:
+            raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        return task
 
-    async def list_tasks(self, *, owner_user_id: UUID, task_date: date, status: str, limit: int):
+    async def list_schedule_timeline_plans(
+        self,
+        *,
+        owner_user_id: UUID,
+        domains,
+        status: str,
+        as_of_date: date,
+        limit: int,
+    ):
+        del as_of_date
         return [
-            task for task in self.tasks if task.owner_user_id == owner_user_id and task.task_date == task_date and task.status == status
+            plan
+            for plan in self.plans
+            if plan.owner_user_id == owner_user_id
+            and plan.status == status
+            and (
+                (plan.plan_type == "pregnancy" and "pregnancy" in domains)
+                or (plan.plan_type == "milk_management" and "lactation" in domains)
+            )
         ][:limit]
 
-    async def list_future_milk_plan_tasks(
+    async def list_schedule_timeline_tasks(
         self,
         *,
         owner_user_id: UUID,
         start_date: date,
         end_date: date,
+        domains,
+        limit: int,
     ):
-        milk_plan_ids = {
-            plan.id
-            for plan in self.plans
-            if plan.owner_user_id == owner_user_id and plan.plan_type == "milk_management" and plan.status == "active"
-        }
+        plans_by_id = {plan.id: plan for plan in self.plans}
+        rows: list[ScheduleTimelineTaskRow] = []
+        for task in self.tasks:
+            if (
+                task.owner_user_id != owner_user_id
+                or task.task_date is None
+                or not start_date <= task.task_date <= end_date
+                or task.status == "deleted"
+            ):
+                continue
+            plan = plans_by_id.get(task.plan_id)
+            if plan is not None:
+                if plan.plan_type == "pregnancy" and "pregnancy" not in domains:
+                    continue
+                if plan.plan_type == "milk_management" and "lactation" not in domains:
+                    continue
+            rows.append(ScheduleTimelineTaskRow(task=task, plan=plan))
+        return rows[:limit]
+
+    async def list_tasks_for_plan(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        task_dates=None,
+        status: str | None = None,
+        limit: int = 200,
+    ):
+        await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
         return [
             task
             for task in self.tasks
-            if task.owner_user_id == owner_user_id
-            and task.plan_id in milk_plan_ids
-            and task.status == "pending"
-            and task.task_date is not None
-            and start_date <= task.task_date <= end_date
-        ]
+            if task.plan_id == plan_id
+            and (not task_dates or task.task_date in task_dates)
+            and (status is None or task.status == status)
+        ][:limit]
+
+    async def set_task_completed(
+        self,
+        *,
+        owner_user_id: UUID,
+        task_id: UUID,
+        completed: bool,
+        request_id: str,
+    ):
+        del request_id
+        task = await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
+        task.status = "completed" if completed else "pending"
+        task.completed_at = datetime.now(timezone.utc) if completed else None
+        return task
+
+    async def list_tasks(self, *, owner_user_id: UUID, task_date: date, status: str, limit: int):
+        return [
+            task for task in self.tasks if task.owner_user_id == owner_user_id and task.task_date == task_date and task.status == status
+        ][:limit]
 
     async def reschedule_milk_tasks(self, *, owner_user_id: UUID, plan_id: UUID, updates: list[dict[str, Any]], request_id: str):
         del request_id

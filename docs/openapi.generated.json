@@ -2493,6 +2493,18 @@
       },
       "PlanRead": {
         "properties": {
+          "ends_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ends On"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2515,6 +2527,18 @@
           "source": {
             "title": "Source",
             "type": "string"
+          },
+          "starts_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts On"
           },
           "status": {
             "title": "Status",

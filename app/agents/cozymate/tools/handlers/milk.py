@@ -1,24 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from typing import Any, Literal, cast
 
 from app.core.errors import ApiError
 from app.agent_runtime.runs.service import AgentRuntimeService
 from app.agent_runtime.tools.executor import DEFERRED_AGENT_EVENTS_KEY, ToolHandlerContext
 from app.agents.cozymate.actions.plans import (
-    MILK_PLAN_CALENDAR_APPEND,
-    MILK_PLAN_CALENDAR_REPLACE,
-    MILK_PLAN_CREATE_ACTION,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
 )
 from app.modules.plans.models import PlanTask
-from app.modules.plans.milk_plan_builder import (
-    MilkPlanDraftError,
-    build_milk_plan_draft,
-    summarize_pumping_rhythm,
-)
 from app.modules.plans.milk_schedule_calendar import (
     MilkScheduleCalendarEventError,
     normalize_milk_schedule_calendar_events,
@@ -49,7 +41,7 @@ from app.agents.cozymate.tools.milk_analysis_flow import (
     advance_milk_analysis_intake,
     build_milk_analysis_assessment,
     initialize_milk_analysis_intake,
-    milk_analysis_context_fingerprint,
+    summarize_pumping_rhythm,
 )
 
 from app.agents.cozymate.tools.milk_schedule_adjustment import (
@@ -60,12 +52,11 @@ from app.agents.cozymate.tools.milk_schedule_adjustment import (
 )
 
 from .base import (
-    _MILK_ANALYSIS_PLAN_TTL,
     _StandardToolHandler,
     _ToolOperationOutput,
 )
 from .shared import (
-    _datetime_value,
+    _create_payload_scoped_artifact_once,
     _current_delivery_infant_links,
     _deferred_artifact_created_event,
     _feeding_payload,
@@ -85,16 +76,12 @@ from .shared import (
     _limit,
     _milk_analysis_payload,
     _milk_analysis_window,
-    _milk_plan_artifact_payload,
-    _milk_plan_preview_payload,
     _milk_schedule_busy_windows,
     _milk_schedule_target_dates,
     _milk_status_payload,
     _milk_trend_payload,
     _maternal_profile_update_values,
     _optional_date_arg,
-    _optional_int,
-    _optional_number,
     _optional_uuid_arg,
     _profile_infant_updates,
     _proposal_result,
@@ -108,7 +95,6 @@ from .shared import (
     _record_delete_apply_payload,
     _record_delete_preview_payload,
     _stable_payload_key,
-    _string_list,
     _text,
 )
 
@@ -435,28 +421,18 @@ class MilkAnalysisEvaluateToolHandler(_StandardToolHandler):
             dict(cast(dict[str, Any], raw_existing_assessment)) if isinstance(raw_existing_assessment, dict) else {}
         )
         if _text(existing_state, "phase") == "assessment_complete" and replay_artifact_id and existing_assessment:
-            raw_replay_decision = existing_assessment.get("plan_decision")
-            replay_decision: dict[str, Any] = (
-                dict(cast(dict[str, Any], raw_replay_decision)) if isinstance(raw_replay_decision, dict) else {}
-            )
             return {
-                    "status": "milk_analysis_completed",
-                    "replayed": True,
-                    "workflow_state_id": str(existing.id),
-                    "artifact_id": replay_artifact_id,
-                    "artifact_type": "milk_analysis_card",
-                    "can_start_plan": replay_decision.get("can_start_plan") is True,
-                    "recommended_direction": replay_decision.get("recommended_direction"),
-                    "reason": replay_decision.get("reason"),
-                }
+                "status": "milk_analysis_completed",
+                "replayed": True,
+                "workflow_state_id": str(existing.id),
+                "artifact_id": replay_artifact_id,
+                "artifact_type": "milk_analysis_card",
+                **_milk_analysis_assessment_result(existing_assessment),
+            }
         try:
             assessment = build_milk_analysis_assessment(existing_state)
         except MilkAnalysisFlowError as exc:
             raise ApiError(code=str(exc), message="Complete milk analysis intake first.", status=409) from exc
-        assessment = {
-            **assessment,
-            "valid_until": (datetime.now(timezone.utc) + _MILK_ANALYSIS_PLAN_TTL).isoformat(),
-        }
         card = dict(assessment["card"])
         artifact = await self.runtime_service.create_artifact(
             owner_user_id=context.actor.user_id,
@@ -483,18 +459,30 @@ class MilkAnalysisEvaluateToolHandler(_StandardToolHandler):
             state=state,
             active_step="assessment_complete",
         )
-        decision = assessment["plan_decision"]
         output = {
             "status": "milk_analysis_completed",
             "workflow_state_id": str(persisted.id),
             "artifact_id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
-            "can_start_plan": decision["can_start_plan"],
-            "recommended_direction": decision["recommended_direction"],
-            "reason": decision["reason"],
+            **_milk_analysis_assessment_result(assessment),
             DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
         return output
+
+
+def _milk_analysis_assessment_result(assessment: dict[str, Any]) -> dict[str, Any]:
+    raw_risk = assessment.get("risk")
+    risk = dict(cast(dict[str, Any], raw_risk)) if isinstance(raw_risk, dict) else {}
+    raw_findings = assessment.get("findings")
+    if not isinstance(raw_findings, dict):
+        raw_findings = assessment.get("eligibility")
+    findings = dict(cast(dict[str, Any], raw_findings)) if isinstance(raw_findings, dict) else {}
+    return {
+        "maternal_red_flags": risk.get("maternal_red_flags") is True,
+        "infant_intake_risk": risk.get("infant_intake_risk") is True,
+        "data_coverage": _text(findings, "data_coverage"),
+        "pumping_trend": _text(findings, "pumping_trend") or _text(findings, "trend"),
+    }
 
 
 class MilkAnalysisToolHandler(_StandardToolHandler):
@@ -1071,154 +1059,6 @@ class GrowthRecordDeleteProposeToolHandler(_StandardToolHandler):
         return _proposal_result(action=action, preview_payload=preview_payload)
 
 
-class MilkPlanProposeToolHandler(_StandardToolHandler):
-    def __init__(self, *, runtime_service: AgentRuntimeService, plans_service: PlansService) -> None:
-        self.runtime_service = runtime_service
-        self.plans_service = plans_service
-
-    async def execute(self, context: ToolHandlerContext) -> _ToolOperationOutput:
-        requested_direction = _text(context.args, "direction")
-        if not requested_direction:
-            raise ApiError(code="validation_failed", message="direction is required.", status=422)
-        if context.thread_id is None:
-            raise ApiError(code="validation_failed", message="A thread is required for a milk plan.", status=422)
-        workflow = await self.runtime_service.get_latest_workflow_state(
-            owner_user_id=context.actor.user_id,
-            thread_id=context.thread_id,
-            workflow_type=MILK_ANALYSIS_WORKFLOW_TYPE,
-        )
-        if workflow is None:
-            raise ApiError(
-                code="milk_analysis_required_before_plan",
-                message="Complete the durable milk analysis before creating a plan.",
-                status=409,
-            )
-        state = dict(workflow.state) if workflow is not None and isinstance(workflow.state, dict) else {}
-        raw_assessment = state.get("assessment")
-        assessment: dict[str, Any] = dict(cast(dict[str, Any], raw_assessment)) if isinstance(raw_assessment, dict) else {}
-        raw_decision = assessment.get("plan_decision")
-        decision: dict[str, Any] = dict(cast(dict[str, Any], raw_decision)) if isinstance(raw_decision, dict) else {}
-        fingerprint = _text(assessment, "analysis_context_fingerprint")
-        raw_analysis_context = assessment.get("analysis_context")
-        analysis_context: dict[str, Any] = (
-            dict(cast(dict[str, Any], raw_analysis_context)) if isinstance(raw_analysis_context, dict) else {}
-        )
-        expected_fingerprint = milk_analysis_context_fingerprint(analysis_context) if analysis_context else ""
-        if _text(state, "phase") != "assessment_complete" or not fingerprint:
-            raise ApiError(
-                code="milk_analysis_required_before_plan",
-                message="Complete the durable milk analysis before creating a plan.",
-                status=409,
-            )
-        if not expected_fingerprint or fingerprint != expected_fingerprint:
-            raise ApiError(
-                code="milk_analysis_fingerprint_mismatch",
-                message="The latest milk analysis context changed. Evaluate it again before creating a plan.",
-                status=409,
-            )
-        valid_until = _datetime_value(assessment.get("valid_until"))
-        if valid_until is None or valid_until <= datetime.now(timezone.utc):
-            raise ApiError(
-                code="milk_analysis_expired_before_plan",
-                message="The latest milk analysis expired. Refresh it before creating a plan.",
-                status=409,
-            )
-        if decision.get("can_start_plan") is not True:
-            raise ApiError(code="milk_plan_not_eligible", message="The latest milk analysis does not allow a plan.", status=409)
-        recommended_direction = _text(decision, "recommended_direction")
-        if requested_direction and requested_direction != recommended_direction:
-            raise ApiError(
-                code="milk_plan_direction_mismatch",
-                message="The proposed direction does not match the latest milk analysis.",
-                status=409,
-            )
-        try:
-            draft = build_milk_plan_draft(
-                analysis_context=analysis_context,
-                direction=requested_direction,
-                timezone_name=_text(context.args, "runtime_timezone") or "UTC",
-                start_date=_text(context.args, "start_date"),
-                days=_optional_int(context.args, "days") or 7,
-                target_daily_ml=_optional_number(context.args, "target_daily_ml"),
-                preferred_pumping_times=_string_list(context.args.get("preferred_pumping_times")),
-                today=_optional_date_arg(context.args, "runtime_local_date"),
-            )
-        except MilkPlanDraftError as exc:
-            raise ApiError(code="validation_failed", message=str(exc), status=422) from exc
-        plan_payload = dict(cast(dict[str, Any], draft["payload"]))
-        start_date = date.fromisoformat(str(plan_payload["start_date"]))
-        end_date = start_date + timedelta(days=int(plan_payload["days"]) - 1)
-        existing_tasks = await self.plans_service.list_future_milk_plan_tasks(
-            owner_user_id=context.actor.user_id,
-            start_date=start_date,
-            end_date=end_date,
-        )
-        calendar_write_strategy = _text(context.args, "calendar_write_strategy")
-        allowed_strategies = [MILK_PLAN_CALENDAR_APPEND, MILK_PLAN_CALENDAR_REPLACE]
-        if calendar_write_strategy and calendar_write_strategy not in allowed_strategies:
-            raise ApiError(code="validation_failed", message="calendar_write_strategy is invalid.", status=422)
-        if existing_tasks and not calendar_write_strategy:
-            return {
-                "status": "milk_plan_calendar_strategy_required",
-                "existing_future_task_count": len(existing_tasks),
-                "allowed_strategies": allowed_strategies,
-                "question": "未来日程已有奶量计划任务。你希望把新计划追加进去，还是替换这些未来未完成任务？",
-            }
-        calendar_write_strategy = calendar_write_strategy or MILK_PLAN_CALENDAR_APPEND
-        apply_payload = {
-            "title": _text(draft, "title"),
-            "summary": _text(draft, "summary"),
-            "calendar_write_strategy": calendar_write_strategy,
-            "expected_replaced_task_ids": [str(task.id) for task in existing_tasks],
-            "payload": {
-                **plan_payload,
-                "analysis_context_fingerprint": fingerprint,
-                "analysis_workflow_state_id": str(workflow.id),
-            },
-        }
-        preview_payload = {
-            **_milk_plan_preview_payload(apply_payload),
-            "existing_future_task_count": len(existing_tasks),
-        }
-        action = await _propose_action_reusing_idempotency(
-            self.runtime_service,
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            action_type=MILK_PLAN_CREATE_ACTION,
-            target_type="plan",
-            side_effect_level="medium",
-            preview_payload=preview_payload,
-            apply_payload=apply_payload,
-            expires_at=valid_until,
-            idempotency_key=_stable_payload_key(
-                f"{context.run_id}:milk-plan-create",
-                apply_payload,
-            ),
-        )
-        payload = {**_milk_plan_artifact_payload(apply_payload), "action_id": str(action.id)}
-        artifact = await self.runtime_service.create_artifact(
-            owner_user_id=context.actor.user_id,
-            run_id=context.run_id,
-            artifact_type="milk_plan_preview",
-            schema_version="v1",
-            status="created",
-            payload=payload,
-            emit_event=False,
-        )
-        reminders = payload.get("reminders")
-        return {
-            **_proposal_result(action=action, preview_payload=preview_payload),
-            "artifact_id": str(artifact.id),
-            "artifact_type": artifact.artifact_type,
-            "status": artifact.status,
-            "title": _text(payload, "title"),
-            "summary": _text(payload, "summary"),
-            "task_count": int(payload.get("scheduled_task_count") or 0),
-            "reminder_count": len(reminders) if isinstance(reminders, list) else 0,
-            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
-        }
-
-
 class MilkScheduleRescheduleProposeToolHandler(_StandardToolHandler):
     def __init__(self, *, runtime_service: AgentRuntimeService, plans_service: PlansService) -> None:
         self.runtime_service = runtime_service
@@ -1310,16 +1150,16 @@ class MilkScheduleRescheduleProposeToolHandler(_StandardToolHandler):
             ),
         )
         artifact_payload = {**preview, "action_id": str(action.id), "title": "奶量计划日程调整预览"}
-        artifact = await self.runtime_service.create_artifact(
+        artifact, artifact_created = await _create_payload_scoped_artifact_once(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             artifact_type="milk_schedule_reschedule_preview",
             schema_version="v1",
             status="created",
             payload=artifact_payload,
-            emit_event=False,
         )
-        return {
+        output = {
             **_proposal_result(action=action, preview_payload=preview),
             "artifact_id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
@@ -1328,5 +1168,7 @@ class MilkScheduleRescheduleProposeToolHandler(_StandardToolHandler):
             "updated_count": preview["updated_count"],
             "calendar_event_count": len(calendar_events),
             "affected_dates": preview["affected_dates"],
-            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
+        if artifact_created:
+            output[DEFERRED_AGENT_EVENTS_KEY] = [_deferred_artifact_created_event(artifact)]
+        return output

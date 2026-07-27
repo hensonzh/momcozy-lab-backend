@@ -281,6 +281,8 @@ def test_cozymate_agent_catalog_has_static_scene_tool_allowlists() -> None:
     assert catalog.get("birth-prep").tool_names == (
         "plan_read",
         "plan_mutate",
+        "schedule_timeline_read",
+        "schedule_timeline_mutate",
         "pregnancy_intake_manage",
         "hospital_bag_manage",
         "hospital_bag_cart_mutate",
@@ -320,8 +322,8 @@ def test_specialist_system_prompts_are_seeded_from_only_their_file_backed_skill(
     assert milk_prompt.startswith(DEFAULT_STABLE_SYSTEM_PROMPT)
     assert device_prompt.startswith(DEFAULT_STABLE_SYSTEM_PROMPT)
     assert "制定孕期计划" in birth_prompt
-    assert "奶量管理仅处理三类任务" not in birth_prompt
-    assert "奶量管理仅处理三类任务" in milk_prompt
+    assert "奶量管理仅处理两类任务" not in birth_prompt
+    assert "奶量管理仅处理两类任务" in milk_prompt
     assert "当前已接入官方资料的型号：Air1" not in milk_prompt
     assert "当前已接入官方资料的型号：Air1" in device_prompt
     assert "制定孕期计划" not in device_prompt
@@ -588,7 +590,7 @@ def test_service_skills_capture_current_domain_flow_semantics() -> None:
     assert "birth_plan_form_create" not in pregnancy
     assert "labor_communication_card_create" not in pregnancy
 
-    assert "追奶、稳奶还是减奶" in lactation
+    assert "当前不提供新的追奶、稳奶或减奶计划制定与创建" in lactation
     assert "schedule_timeline_read" in lactation
     assert "schedule_timeline_mutate" in lactation
     assert "entry_type=execution" in lactation
@@ -718,7 +720,6 @@ def test_model_tool_contract_names_are_provider_safe_canonical_names() -> None:
             "plan_mutate",
             "user_resource",
             (
-                "plans.milk_plan.create",
                 "pregnancy.plan.create",
                 "plans.plan.update",
                 "plans.plan.delete",
@@ -949,22 +950,21 @@ def test_tool_input_schemas_are_explicit_and_registered_on_contract() -> None:
     assert plan_read_schema["required"] == ["mode"]
     assert plan_read_schema["properties"]["mode"]["enum"] == ["list", "detail"]
     assert plan_read_schema["properties"]["plan_id"]["format"] == "uuid"
-    assert plan_read_schema["properties"]["include_content"]["type"] == "boolean"
+    assert "include_content" not in plan_read_schema["properties"]
+    assert plan_read_schema["properties"]["limit"]["maximum"] == 20
     assert plan_mutate_schema["additionalProperties"] is False
     assert plan_mutate_schema["required"] == ["operation"]
     assert plan_mutate_schema["properties"]["operation"]["enum"] == ["create", "update", "delete"]
     assert "payload" not in plan_mutate_schema["properties"]
     assert "tasks" not in plan_mutate_schema["properties"]
-    assert plan_mutate_schema["properties"]["days"]["maximum"] == 30
-    assert plan_mutate_schema["properties"]["preferred_pumping_times"]["maxItems"] == 10
-    assert plan_mutate_schema["properties"]["direction"]["enum"] == ["increase", "maintain", "decrease"]
-    assert plan_mutate_schema["properties"]["calendar_write_strategy"]["enum"] == [
-        "append",
-        "replace_future_plan_tasks",
-    ]
+    assert "days" not in plan_mutate_schema["properties"]
+    assert "preferred_pumping_times" not in plan_mutate_schema["properties"]
+    assert "direction" not in plan_mutate_schema["properties"]
+    assert "calendar_write_strategy" not in plan_mutate_schema["properties"]
     assert plan_mutate_schema["properties"]["scope"]["enum"] == ["full", "prenatal_only", "short_range"]
     assert plan_mutate_schema["properties"]["expected_version"]["minimum"] == 1
     assert plan_mutate_schema["properties"]["plan_id"]["format"] == "uuid"
+    assert plan_mutate_schema["properties"]["confirmation_evidence"]["maxLength"] == 500
     assert pregnancy_intake_schema["additionalProperties"] is False
     assert pregnancy_intake_schema["required"] == ["command"]
     assert "title" not in pregnancy_intake_schema["properties"]

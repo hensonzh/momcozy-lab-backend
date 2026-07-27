@@ -100,7 +100,15 @@ class InMemoryPlansRepository:
             None,
         )
 
-    async def list_plans(self, *, owner_user_id: UUID, plan_type: str, status: str, limit: int):
+    async def list_plans(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_type: str,
+        status: str,
+        as_of_date: date,
+        limit: int,
+    ):
         plans = [
             plan
             for plan in self.plans
@@ -110,6 +118,25 @@ class InMemoryPlansRepository:
             and plan.deleted_at is None
         ]
         return plans[:limit]
+
+    async def soft_delete_tasks_for_plan(self, *, plan_id: UUID, owner_user_id: UUID, deleted_at):
+        deleted = []
+        for task in self.tasks:
+            if (
+                task.plan_id == plan_id
+                and task.owner_user_id == owner_user_id
+                and task.deleted_at is None
+            ):
+                task.status = "deleted"
+                task.deleted_at = deleted_at
+                deleted.append(task)
+        return deleted
+
+    async def get_plan_for_owner_for_update(self, *, plan_id: UUID, owner_user_id: UUID):
+        return await self.get_plan_for_owner(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+        )
 
     async def soft_delete_plan(self, *, plan_id: UUID, owner_user_id: UUID, deleted_at):
         plan = await self.get_plan_for_owner(plan_id=plan_id, owner_user_id=owner_user_id)

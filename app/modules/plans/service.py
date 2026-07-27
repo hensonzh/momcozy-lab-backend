@@ -3,11 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import Plan, PlanTask
+from .pregnancy_plan_todos import normalize_pregnancy_plan_payload
 from .repository import PlansRepository, ScheduleTimelineTaskRow
 from .schedule_domain import normalize_schedule_domains
 
@@ -17,7 +18,6 @@ PLAN_TASK_CREATE_IDEMPOTENCY_SCOPE = "plans.tasks.create"
 PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE = "plans.todos.completion"
 PLAN_TASK_STATES = frozenset({"pending", "completed", "skipped"})
 MAX_MILK_SCHEDULE_RESCHEDULE_TASKS = 100
-MAX_FUTURE_MILK_PLAN_TASKS = 500
 
 
 class PlansService:
@@ -44,7 +44,14 @@ class PlansService:
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> Plan:
+        if plan_type.strip().lower() == "milk_management":
+            raise ApiError(
+                code="unsupported_plan_type",
+                message="Creating milk-management plans is no longer supported.",
+                status=422,
+            )
         normalized_payload = _normalize_plan_payload(plan_type=plan_type, payload=payload or {})
+        starts_on, ends_on = _plan_effective_dates(normalized_payload)
         idempotency_record = await self._reserve_idempotency(
             owner_user_id=owner_user_id,
             scope=PLAN_CREATE_IDEMPOTENCY_SCOPE,
@@ -54,6 +61,27 @@ class PlansService:
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_plan(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
 
+        if plan_type.strip().lower() == "pregnancy":
+            lock_plan_type = getattr(self.repository, "lock_plan_type", None)
+            if callable(lock_plan_type):
+                await lock_plan_type(
+                    owner_user_id=owner_user_id,
+                    plan_type="pregnancy",
+                )
+            active_plan = await self.repository.get_active_plan_by_type_for_update(
+                owner_user_id=owner_user_id,
+                plan_type="pregnancy",
+            )
+            if active_plan is not None:
+                raise ApiError(
+                    code="active_pregnancy_plan_exists",
+                    message="An active pregnancy plan already exists. Update or delete it before creating another.",
+                    status=409,
+                    details={
+                        "plan_id": str(active_plan.id),
+                        "version": active_plan.version,
+                    },
+                )
         plan = await self.repository.create_plan(
             owner_user_id=owner_user_id,
             plan_type=plan_type,
@@ -61,6 +89,8 @@ class PlansService:
             summary=summary,
             source=source,
             payload=normalized_payload,
+            starts_on=starts_on,
+            ends_on=ends_on,
         )
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(plan.id))
         await self._audit(
@@ -74,6 +104,7 @@ class PlansService:
         owner_user_id: UUID,
         plan_type: str = "",
         status: str = "active",
+        as_of_date: date | None = None,
         limit: int = 50,
     ) -> list[Plan]:
         self._validate_limit(limit)
@@ -81,6 +112,7 @@ class PlansService:
             owner_user_id=owner_user_id,
             plan_type=plan_type.strip(),
             status=status,
+            as_of_date=as_of_date or _utcnow().date(),
             limit=limit,
         )
 
@@ -90,6 +122,7 @@ class PlansService:
         owner_user_id: UUID,
         domains: tuple[str, ...],
         status: str = "active",
+        as_of_date: date | None = None,
         limit: int = 20,
     ) -> list[Plan]:
         normalized_domains = normalize_schedule_domains(domains)
@@ -98,6 +131,7 @@ class PlansService:
             owner_user_id=owner_user_id,
             domains=normalized_domains,
             status=status,
+            as_of_date=as_of_date or _utcnow().date(),
             limit=limit,
         )
 
@@ -154,12 +188,48 @@ class PlansService:
         )
         return updated
 
-    async def delete_plan(self, *, owner_user_id: UUID, plan_id: UUID, request_id: str = "") -> None:
-        deleted = await self.repository.soft_delete_plan(plan_id=plan_id, owner_user_id=owner_user_id, deleted_at=_utcnow())
+    async def delete_plan(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_id: UUID,
+        request_id: str = "",
+        reason: str = "",
+    ) -> None:
+        plan = await self.repository.get_plan_for_owner_for_update(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+        )
+        if plan is None:
+            raise ApiError(code="not_found", message="Plan not found.", status=404)
+        deleted_at = _utcnow()
+        delete_tasks = getattr(self.repository, "soft_delete_tasks_for_plan", None)
+        deleted_tasks = (
+            await delete_tasks(
+                plan_id=plan_id,
+                owner_user_id=owner_user_id,
+                deleted_at=deleted_at,
+            )
+            if callable(delete_tasks)
+            else []
+        )
+        deleted = await self.repository.soft_delete_plan(
+            plan_id=plan_id,
+            owner_user_id=owner_user_id,
+            deleted_at=deleted_at,
+        )
         if deleted is None:
             raise ApiError(code="not_found", message="Plan not found.", status=404)
         await self._audit(
-            owner_user_id=owner_user_id, action="plans.delete", resource_type="plan", resource_id=str(plan_id), request_id=request_id
+            owner_user_id=owner_user_id,
+            action="plans.delete",
+            resource_type="plan",
+            resource_id=str(plan_id),
+            request_id=request_id,
+            details={
+                "deleted_task_count": len(deleted_tasks),
+                **({"reason": reason.strip()} if reason.strip() else {}),
+            },
         )
 
     async def create_task(
@@ -270,9 +340,7 @@ class PlansService:
     ) -> list[PlanTask]:
         if limit < 1 or limit > 500:
             raise ApiError(code="validation_failed", message="limit must be between 1 and 500.", status=422)
-        plan = await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
-        if plan.plan_type != "milk_management":
-            raise ApiError(code="validation_failed", message="Plan is not a milk-management plan.", status=422)
+        await self.get_plan(owner_user_id=owner_user_id, plan_id=plan_id)
         return await self.repository.list_tasks_for_plan(
             owner_user_id=owner_user_id,
             plan_id=plan_id,
@@ -280,66 +348,6 @@ class PlansService:
             status=status,
             limit=limit,
         )
-
-    async def list_future_milk_plan_tasks(
-        self,
-        *,
-        owner_user_id: UUID,
-        start_date: date,
-        end_date: date,
-    ) -> list[PlanTask]:
-        _milk_plan_schedule_dates(start_date=start_date, end_date=end_date)
-        tasks = await self.repository.list_future_milk_plan_tasks(
-            owner_user_id=owner_user_id,
-            start_date=start_date,
-            end_date=end_date,
-            for_update=False,
-            limit=MAX_FUTURE_MILK_PLAN_TASKS + 1,
-        )
-        return _bounded_future_milk_plan_tasks(tasks)
-
-    async def replace_future_milk_plan_tasks(
-        self,
-        *,
-        owner_user_id: UUID,
-        start_date: date,
-        end_date: date,
-        expected_task_ids: list[UUID],
-        request_id: str = "",
-    ) -> list[PlanTask]:
-        task_dates = _milk_plan_schedule_dates(start_date=start_date, end_date=end_date)
-        await self._lock_task_schedule_dates(owner_user_id=owner_user_id, task_dates=task_dates)
-        tasks = await self.repository.list_future_milk_plan_tasks(
-            owner_user_id=owner_user_id,
-            start_date=start_date,
-            end_date=end_date,
-            for_update=True,
-            limit=MAX_FUTURE_MILK_PLAN_TASKS + 1,
-        )
-        tasks = _bounded_future_milk_plan_tasks(tasks)
-        if {task.id for task in tasks} != set(expected_task_ids):
-            raise ApiError(
-                code="milk_plan_calendar_conflict",
-                message="Future milk-plan tasks changed after preview. Create a fresh preview before applying.",
-                status=409,
-            )
-        deleted_at = _utcnow()
-        for task in tasks:
-            deleted = await self.repository.soft_delete_task(
-                task_id=task.id,
-                owner_user_id=owner_user_id,
-                deleted_at=deleted_at,
-            )
-            if deleted is None:
-                raise ApiError(code="milk_plan_calendar_conflict", message="A future milk-plan task changed during apply.", status=409)
-            await self._audit(
-                owner_user_id=owner_user_id,
-                action="plans.milk_plan.replace_future_tasks",
-                resource_type="plan_task",
-                resource_id=str(task.id),
-                request_id=request_id,
-            )
-        return tasks
 
     async def reschedule_milk_tasks(
         self,
@@ -437,6 +445,11 @@ class PlansService:
         return applied
 
     async def set_task_completed(self, *, owner_user_id: UUID, task_id: UUID, completed: bool, request_id: str = "") -> PlanTask:
+        existing = await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
+        pregnancy_plan = await self._lock_linked_pregnancy_plan(
+            owner_user_id=owner_user_id,
+            task=existing,
+        )
         task = await self.repository.set_task_completed(
             task_id=task_id,
             owner_user_id=owner_user_id,
@@ -445,6 +458,13 @@ class PlansService:
         )
         if task is None:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        if pregnancy_plan is not None:
+            await self._sync_pregnancy_todo_from_task(
+                owner_user_id=owner_user_id,
+                plan=pregnancy_plan,
+                task=task,
+                state="completed" if completed else "pending",
+            )
         await self._audit(
             owner_user_id=owner_user_id,
             action="plans.tasks.complete",
@@ -469,6 +489,11 @@ class PlansService:
                 message="state must be pending, completed, or skipped.",
                 status=422,
             )
+        existing = await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
+        pregnancy_plan = await self._lock_linked_pregnancy_plan(
+            owner_user_id=owner_user_id,
+            task=existing,
+        )
         task = await self.repository.set_task_state(
             task_id=task_id,
             owner_user_id=owner_user_id,
@@ -477,6 +502,13 @@ class PlansService:
         )
         if task is None:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
+        if pregnancy_plan is not None:
+            await self._sync_pregnancy_todo_from_task(
+                owner_user_id=owner_user_id,
+                plan=pregnancy_plan,
+                task=task,
+                state=normalized_state,
+            )
         await self._audit(
             owner_user_id=owner_user_id,
             action="plans.tasks.state",
@@ -548,6 +580,31 @@ class PlansService:
         )
         if updated is None:
             raise ApiError(code="version_conflict", message="Plan was updated by another request.", status=409)
+        linked_tasks = await self.repository.list_tasks_for_plan(
+            owner_user_id=owner_user_id,
+            plan_id=plan_id,
+            task_dates=None,
+            status=None,
+            limit=500,
+        )
+        completed_at = _utcnow() if completed else None
+        synced_task_count = 0
+        for task in linked_tasks:
+            if not _task_links_to_pregnancy_todo(task, item_id=normalized_item_id):
+                continue
+            synced = await self.repository.set_task_state(
+                task_id=task.id,
+                owner_user_id=owner_user_id,
+                state="completed" if completed else "pending",
+                completed_at=completed_at,
+            )
+            if synced is None:
+                raise ApiError(
+                    code="plan_task_sync_conflict",
+                    message="A linked plan task changed during todo update.",
+                    status=409,
+                )
+            synced_task_count += 1
         await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(plan_id))
         await self._audit(
             owner_user_id=owner_user_id,
@@ -555,6 +612,7 @@ class PlansService:
             resource_type="plan",
             resource_id=str(plan_id),
             request_id=request_id,
+            details={"synced_task_count": synced_task_count, "version": updated.version},
         )
         return updated
 
@@ -650,6 +708,77 @@ class PlansService:
             request_id=request_id,
         )
 
+    async def _lock_linked_pregnancy_plan(
+        self,
+        *,
+        owner_user_id: UUID,
+        task: PlanTask,
+    ) -> Plan | None:
+        if not _is_pregnancy_plan_task(task):
+            return None
+        if task.plan_id is None:
+            raise ApiError(
+                code="plan_task_sync_conflict",
+                message="Pregnancy plan task is missing its parent plan.",
+                status=409,
+            )
+        plan = await self.repository.get_plan_for_owner_for_update(
+            plan_id=task.plan_id,
+            owner_user_id=owner_user_id,
+        )
+        if plan is None:
+            raise ApiError(code="not_found", message="Linked pregnancy plan not found.", status=404)
+        if plan.plan_type != "pregnancy":
+            raise ApiError(
+                code="plan_task_sync_conflict",
+                message="Plan task is linked to an incompatible plan type.",
+                status=409,
+            )
+        return plan
+
+    async def _sync_pregnancy_todo_from_task(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan: Plan,
+        task: PlanTask,
+        state: str,
+    ) -> None:
+        item_id = _nonempty_text(task.payload.get("plan_todo_item_id"))
+        period_id = _nonempty_text(task.payload.get("plan_todo_period_id"))
+        if not item_id:
+            raise ApiError(
+                code="plan_task_sync_conflict",
+                message="Pregnancy plan task is missing its todo item reference.",
+                status=409,
+            )
+        next_payload = deepcopy(plan.payload)
+        item = _find_todo_item_by_reference(
+            next_payload,
+            item_id=item_id,
+            period_id=period_id or None,
+        )
+        if item is None:
+            raise ApiError(
+                code="plan_task_sync_conflict",
+                message="Linked pregnancy plan todo item was not found.",
+                status=409,
+            )
+        item["completed"] = state == "completed"
+        item["status"] = state
+        updated = await self.repository.update_plan_payload_and_version(
+            plan_id=plan.id,
+            owner_user_id=owner_user_id,
+            expected_version=plan.version,
+            payload=next_payload,
+        )
+        if updated is None:
+            raise ApiError(
+                code="version_conflict",
+                message="Pregnancy plan changed during task update.",
+                status=409,
+            )
+
     async def _reserve_idempotency(
         self, *, owner_user_id: UUID, scope: str, key: str | None, payload: dict[str, Any]
     ) -> IdempotencyKey | None:
@@ -742,22 +871,6 @@ def _milk_schedule_has_target_conflict(
     return False
 
 
-def _milk_plan_schedule_dates(*, start_date: date, end_date: date) -> list[date]:
-    if end_date < start_date or (end_date - start_date).days >= 30:
-        raise ApiError(code="validation_failed", message="Milk plan date range must contain 1 to 30 days.", status=422)
-    return [start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)]
-
-
-def _bounded_future_milk_plan_tasks(tasks: list[PlanTask]) -> list[PlanTask]:
-    if len(tasks) > MAX_FUTURE_MILK_PLAN_TASKS:
-        raise ApiError(
-            code="milk_plan_calendar_capacity_exceeded",
-            message="Too many future milk-plan tasks overlap this date range. Remove older plans before continuing.",
-            status=409,
-        )
-    return tasks
-
-
 def _task_duration_minutes(task: PlanTask) -> int:
     payload = task.payload if isinstance(task.payload, dict) else {}
     try:
@@ -810,38 +923,51 @@ def _required_time_value(value: Any, *, code: str) -> str:
     return token
 
 
+def _plan_effective_dates(payload: dict[str, Any]) -> tuple[date | None, date | None]:
+    starts_on = _payload_date(payload.get("start_date"))
+    ends_on = _payload_date(payload.get("end_date"))
+    if ends_on is None and starts_on is not None:
+        days = payload.get("days")
+        if (
+            isinstance(days, int)
+            and not isinstance(days, bool)
+            and 1 <= days <= 3660
+        ):
+            ends_on = starts_on + timedelta(days=days - 1)
+    if starts_on is not None and ends_on is not None and ends_on < starts_on:
+        ends_on = None
+    return starts_on, ends_on
+
+
+def _payload_date(value: Any) -> date | None:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    try:
+        return date.fromisoformat(str(value or ""))
+    except ValueError:
+        return None
+
+
 def _normalize_plan_payload(*, plan_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-    normalized = deepcopy(payload)
     if plan_type.strip().lower() != "pregnancy":
-        return normalized
-    periods = _todo_periods(normalized)
-    for period_index, period in enumerate(periods):
-        raw_items = period.get("items")
-        if not isinstance(raw_items, list):
-            continue
-        normalized_items: list[Any] = []
-        period_id = _nonempty_text(period.get("id")) or f"period-{period_index + 1}"
-        for item_index, raw_item in enumerate(raw_items):
-            if isinstance(raw_item, str):
-                item: dict[str, Any] = {"title": raw_item}
-            elif isinstance(raw_item, dict):
-                item = deepcopy(raw_item)
-            else:
-                normalized_items.append(raw_item)
-                continue
-            stable_id = _nonempty_text(item.get("item_id")) or _nonempty_text(item.get("id"))
-            if not stable_id:
-                title = _nonempty_text(item.get("title"))
-                seed = f"momcozy:pregnancy-plan:{period_id}:{item_index}:{title}"
-                stable_id = f"todo-{uuid5(NAMESPACE_URL, seed)}"
-            item["item_id"] = stable_id
-            normalized_items.append(item)
-        period["items"] = normalized_items
-    return normalized
+        return deepcopy(payload)
+    return normalize_pregnancy_plan_payload(payload)
 
 
 def _find_todo_item_by_item_id(payload: dict[str, Any], item_id: str) -> dict[str, Any] | None:
-    for period in _todo_periods(payload):
+    return _find_todo_item_by_reference(payload, item_id=item_id)
+
+
+def _find_todo_item_by_reference(
+    payload: dict[str, Any],
+    *,
+    item_id: str,
+    period_id: str | None = None,
+) -> dict[str, Any] | None:
+    for period_index, period in enumerate(_todo_periods(payload)):
+        current_period_id = _nonempty_text(period.get("id")) or f"period_{period_index + 1:02d}"
+        if period_id is not None and current_period_id != period_id:
+            continue
         items = period.get("items")
         if not isinstance(items, list):
             continue
@@ -849,6 +975,17 @@ def _find_todo_item_by_item_id(payload: dict[str, Any], item_id: str) -> dict[st
             if isinstance(item, dict) and _nonempty_text(item.get("item_id")) == item_id:
                 return item
     return None
+
+
+def _is_pregnancy_plan_task(task: PlanTask) -> bool:
+    return _nonempty_text(task.payload.get("source")) == "pregnancy_plan"
+
+
+def _task_links_to_pregnancy_todo(task: PlanTask, *, item_id: str) -> bool:
+    return (
+        _is_pregnancy_plan_task(task)
+        and _nonempty_text(task.payload.get("plan_todo_item_id")) == item_id
+    )
 
 
 def _todo_periods(payload: dict[str, Any]) -> list[dict[str, Any]]:

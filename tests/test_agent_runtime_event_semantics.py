@@ -190,13 +190,7 @@ def test_tool_event_semantic_maps_confirmation_outputs() -> None:
     assert semantic["lifecycle"] == "completed"
 
 
-def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_plan() -> None:
-    milk_started = tool_event_semantic(
-        event_type="tool.started",
-        tool_name="plan_mutate",
-        safe_args={"operation": "create", "plan_type": "milk_management"},
-        effect_scope="user_resource",
-    )
+def test_plan_tool_event_semantics_identify_applied_pregnancy_plan() -> None:
     pregnancy_completed = tool_event_semantic(
         event_type="tool.completed",
         tool_name="plan_mutate",
@@ -209,7 +203,6 @@ def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_pl
         },
         effect_scope="user_resource",
     )
-    assert milk_started["label"] == "我先帮你整理奶量计划～"
     assert pregnancy_completed["label"] == "孕期计划已生成"
 
 

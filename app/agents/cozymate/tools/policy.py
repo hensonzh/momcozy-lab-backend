@@ -33,6 +33,8 @@ class CozymateToolExecutionPolicy(ToolExecutionPolicy):
 
     def safe_args(self, *, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         safe = super().safe_args(tool_name=tool_name, args=args)
+        if tool_name == "plan_mutate" and args.get("operation") == "delete":
+            safe.pop("confirmation_evidence", None)
         if tool_name not in _DIARY_TOOLS:
             return safe
         if tool_name == "diary_read":

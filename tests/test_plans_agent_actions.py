@@ -1,6 +1,5 @@
 import asyncio
-import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from uuid import uuid4
 
 import pytest
@@ -8,7 +7,6 @@ import pytest
 from app.core.errors import ApiError
 from app.agent_runtime.runs.models import AgentAction
 from app.agents.cozymate.actions.plans import (
-    MILK_PLAN_CREATE_ACTION,
     MILK_PLAN_CHANGED_EVENT,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_DELETE_ACTION,
@@ -18,7 +16,6 @@ from app.agents.cozymate.actions.plans import (
     PLAN_TASK_UPDATE_ACTION,
     PLAN_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
-    MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
     PlanTaskCompleteActionHandler,
@@ -37,219 +34,6 @@ from app.agents.cozymate.tools.pregnancy_plan_flow import (
 
 PRIVATE_PREGNANCY_PLAN_CONTENT = "private thyroid medication and birth plan card"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
-MILK_ANALYSIS_WORKFLOW_STATE_ID = "00000000-0000-4000-8000-000000000001"
-
-
-def test_milk_plan_create_action_handler_creates_plan_through_service() -> None:
-    service = FakePlansService()
-    action = _action(
-        apply_payload={
-            "title": "Increase pumping consistency",
-            "summary": "Pump after morning and evening feeds.",
-            "payload": {
-                "direction": "maintain",
-                "analysis_context_fingerprint": "fingerprint",
-                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
-                "start_date": "2026-07-13",
-                "days": 2,
-                "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
-            },
-        }
-    )
-
-    result = asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
-
-    assert result.resource_type == "plan"
-    assert result.resource_id == str(service.plan.id)
-    assert result.details == {
-        "plan_type": "milk_management",
-        "task_count": 2,
-        "replaced_task_count": 0,
-        "calendar_write_strategy": "append",
-        "agent_action_id": str(action.id),
-        "agent_run_id": str(action.run_id),
-    }
-    assert service.create_plan_kwargs["owner_user_id"] == action.actor_user_id
-    assert service.create_plan_kwargs["plan_type"] == "milk_management"
-    assert service.create_plan_kwargs["title"] == "Increase pumping consistency"
-    assert service.create_plan_kwargs["summary"] == "Pump after morning and evening feeds."
-    assert service.create_plan_kwargs["source"] == "agent_action"
-    assert service.create_plan_kwargs["payload"]["start_date"] == "2026-07-13"
-    assert service.create_plan_kwargs["payload"]["agent_action_id"] == str(action.id)
-    assert service.create_plan_kwargs["idempotency_key"] == "idem-action"
-    assert len(service.create_task_kwargs_list) == 2
-    assert [call["task_date"].isoformat() for call in service.create_task_kwargs_list] == [
-        "2026-07-13",
-        "2026-07-14",
-    ]
-    assert all(call["plan_id"] == service.plan.id for call in service.create_task_kwargs_list)
-    assert all(call["payload"]["source"] == "agent_action" for call in service.create_task_kwargs_list)
-    assert len(result.application_events) == 1
-    changed_event = result.application_events[0]
-    assert changed_event.event_type == MILK_PLAN_CHANGED_EVENT
-    assert changed_event.payload == {
-        "operation": "created",
-        "reason": "created",
-        "plan_id": str(service.plan.id),
-        "plan_type": "milk_management",
-        "source": "agent_action",
-        "affected_dates": ["2026-07-13", "2026-07-14"],
-        "replaced_task_count": 0,
-    }
-    rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
-    assert "Pump after morning and evening feeds" not in rendered_event
-    assert "Morning pump" not in rendered_event
-
-
-def test_milk_plan_create_replaces_only_the_future_tasks_from_the_confirmed_preview() -> None:
-    service = FakePlansService()
-    replaced_task_ids = [uuid4(), uuid4()]
-    action = _action(
-        apply_payload={
-            "title": "7 天稳奶计划",
-            "summary": "保持近期节奏。",
-            "calendar_write_strategy": "replace_future_plan_tasks",
-            "expected_replaced_task_ids": [str(task_id) for task_id in replaced_task_ids],
-            "payload": {
-                "direction": "maintain",
-                "analysis_context_fingerprint": "fingerprint",
-                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
-                "start_date": "2026-07-13",
-                "days": 2,
-                "tasks": [{"title": "稳奶吸奶", "time": "08:00", "task_type": "pumping"}],
-            },
-        }
-    )
-
-    result = asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
-
-    assert service.replace_future_milk_plan_tasks_kwargs == {
-        "owner_user_id": action.actor_user_id,
-        "start_date": date(2026, 7, 13),
-        "end_date": date(2026, 7, 14),
-        "expected_task_ids": replaced_task_ids,
-        "request_id": f"agent-action:{action.id}",
-    }
-    assert result.details["replaced_task_count"] == 2
-    assert result.details["calendar_write_strategy"] == "replace_future_plan_tasks"
-    assert result.application_events[0].payload["replaced_task_count"] == 2
-
-
-def test_milk_plan_changed_event_contains_only_bounded_dates_and_no_private_plan_content() -> None:
-    service = FakePlansService()
-    private_summary = "private lactation health history and supply target"
-    action = _action(
-        apply_payload={
-            "title": "Private milk plan title",
-            "summary": private_summary,
-            "payload": {
-                "direction": "maintain",
-                "analysis_context_fingerprint": "fingerprint",
-                "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
-                "start_date": "2026-07-04",
-                "days": 30,
-                "tasks": [
-                    {
-                        "title": "private task",
-                        "time": "08:00",
-                        "task_type": "pumping",
-                        "health_note": "private diagnosis",
-                    }
-                ],
-            },
-        }
-    )
-
-    result = asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
-
-    changed_event = result.application_events[0]
-    assert len(changed_event.payload["affected_dates"]) == 30
-    assert changed_event.payload["affected_dates"][0] == "2026-07-04"
-    assert changed_event.payload["affected_dates"][-1] == "2026-08-02"
-    rendered_event = json.dumps(changed_event.payload, ensure_ascii=False)
-    assert private_summary not in rendered_event
-    assert "private task" not in rendered_event
-    assert "private diagnosis" not in rendered_event
-
-
-def test_milk_plan_create_action_handler_rejects_missing_title() -> None:
-    with pytest.raises(PermanentActionError) as exc_info:
-        asyncio.run(MilkPlanCreateActionHandler(service=FakePlansService())(_action(apply_payload={})))
-
-    assert exc_info.value.code == "missing_plan_title"
-
-
-def test_milk_plan_create_action_handler_rejects_a_plan_that_cannot_reach_schedule() -> None:
-    with pytest.raises(PermanentActionError) as exc_info:
-        asyncio.run(
-            MilkPlanCreateActionHandler(service=FakePlansService())(
-                _action(
-                    apply_payload={
-                        "title": "Plan without tasks",
-                        "payload": {
-                            "direction": "maintain",
-                            "analysis_context_fingerprint": "fingerprint",
-                            "analysis_workflow_state_id": MILK_ANALYSIS_WORKFLOW_STATE_ID,
-                            "days": 7,
-                        },
-                    }
-                )
-            )
-        )
-
-    assert exc_info.value.code == "invalid_milk_plan_schedule"
-
-
-@pytest.mark.parametrize(
-    "plan_payload",
-    [
-        {
-            "direction": "maintain",
-            "days": 1,
-            "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
-        },
-        {
-            "analysis_context_fingerprint": "fingerprint",
-            "days": 1,
-            "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
-        },
-        {
-            "direction": "maintain",
-            "analysis_context_fingerprint": "fingerprint",
-            "days": 1,
-            "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
-        },
-    ],
-)
-def test_milk_plan_create_action_handler_rechecks_analysis_lineage(plan_payload: dict) -> None:
-    service = FakePlansService()
-    action = _action(apply_payload={"title": "Milk plan", "payload": plan_payload})
-
-    with pytest.raises(PermanentActionError) as exc_info:
-        asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
-
-    assert exc_info.value.code == "invalid_milk_analysis_lineage"
-    assert service.create_plan_kwargs == {}
-
-
-def test_milk_plan_create_action_handler_rejects_an_expired_analysis_before_side_effects() -> None:
-    service = FakePlansService()
-    action = _action(
-        apply_payload={
-            "title": "Expired milk plan",
-            "payload": {
-                "days": 1,
-                "tasks": [{"title": "Morning pump", "time": "08:00", "task_type": "pumping"}],
-            },
-        },
-        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
-    )
-
-    with pytest.raises(PermanentActionError) as exc_info:
-        asyncio.run(MilkPlanCreateActionHandler(service=service)(action))
-
-    assert exc_info.value.code == "milk_analysis_expired_before_plan"
-    assert service.create_plan_kwargs == {}
 
 
 def test_milk_schedule_reschedule_action_emits_authoritative_change_event() -> None:
@@ -385,6 +169,7 @@ def test_pregnancy_plan_create_action_handler_creates_plan_through_service() -> 
         "plan_id": str(service.plan.id),
         "plan_type": "pregnancy",
         "source": "agent_action",
+        "task_count": 0,
     }
 
 
@@ -421,7 +206,7 @@ def test_pregnancy_plan_create_action_handler_persists_personalized_and_checkup_
         },
     )
 
-    asyncio.run(PregnancyPlanCreateActionHandler(service=service)(action))
+    action_result = asyncio.run(PregnancyPlanCreateActionHandler(service=service)(action))
 
     persisted_card = service.create_plan_kwargs["payload"]["card"]["card_json"]
     current_items = persisted_card["todo_plan"]["periods"][0]["items"]
@@ -429,6 +214,14 @@ def test_pregnancy_plan_create_action_handler_persists_personalized_and_checkup_
     assert any(item["id"] == "review_uploaded_checkup_records" for item in current_items)
     assert "来自客户端的不可信覆盖" not in str(persisted_card)
     assert "other-owner-id" not in str(persisted_card)
+    assert service.create_task_kwargs_list
+    assert action_result.details["task_count"] == len(service.create_task_kwargs_list)
+    assert all(call["plan_id"] == service.plan.id for call in service.create_task_kwargs_list)
+    assert all(call["task_date"] is not None for call in service.create_task_kwargs_list)
+    assert all(call["payload"]["domain"] == "pregnancy" for call in service.create_task_kwargs_list)
+    assert all(call["payload"]["event_type"] == "task" for call in service.create_task_kwargs_list)
+    assert all(call["payload"]["plan_todo_item_id"] for call in service.create_task_kwargs_list)
+    assert all(call["payload"]["plan_todo_period_id"] for call in service.create_task_kwargs_list)
 
 
 def test_plan_task_create_action_handler_creates_task_through_service() -> None:
@@ -534,7 +327,7 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
     action = _action(
         action_type=PLAN_DELETE_ACTION,
         target_type="plan",
-        apply_payload={"plan_id": str(plan_id)},
+        apply_payload={"plan_id": str(plan_id), "reason": "计划已不再适用"},
     )
     service.plan.id = plan_id
     service.plan.owner_user_id = action.actor_user_id
@@ -545,6 +338,7 @@ def test_plan_delete_action_handler_deletes_plan_through_service() -> None:
     assert result.resource_id == str(plan_id)
     assert service.delete_plan_kwargs["owner_user_id"] == action.actor_user_id
     assert service.delete_plan_kwargs["plan_id"] == plan_id
+    assert service.delete_plan_kwargs["reason"] == "计划已不再适用"
 
 
 def test_plan_update_action_handler_updates_metadata_with_version_and_emits_change_event() -> None:
@@ -684,6 +478,8 @@ class FakePlansService:
             summary="Pump after morning and evening feeds.",
             source="agent_action",
             payload={},
+            status="active",
+            version=1,
         )
         self.task = PlanTask(
             id=uuid4(),
@@ -702,7 +498,6 @@ class FakePlansService:
         self.delete_plan_kwargs = {}
         self.update_plan_metadata_kwargs = {}
         self.reschedule_milk_tasks_kwargs = {}
-        self.replace_future_milk_plan_tasks_kwargs = {}
 
     async def create_plan(self, **kwargs):
         self.create_plan_kwargs = kwargs
@@ -770,17 +565,11 @@ class FakePlansService:
         self.task.owner_user_id = kwargs["owner_user_id"]
         return [self.task]
 
-    async def replace_future_milk_plan_tasks(self, **kwargs):
-        self.replace_future_milk_plan_tasks_kwargs = kwargs
-        return [PlanTask(id=task_id, owner_user_id=kwargs["owner_user_id"], title="旧任务") for task_id in kwargs["expected_task_ids"]]
-
-
 def _action(
     *,
     apply_payload: dict,
-    action_type: str = MILK_PLAN_CREATE_ACTION,
+    action_type: str,
     target_type: str = "plan",
-    expires_at: datetime | None = None,
 ) -> AgentAction:
     return AgentAction(
         id=uuid4(),
@@ -794,6 +583,5 @@ def _action(
         preview_payload={},
         apply_payload=apply_payload,
         idempotency_key="idem-action",
-        expires_at=expires_at,
         error_code="",
     )

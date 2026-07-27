@@ -65,7 +65,7 @@ def test_agent_eval_seed_assertion_engine_scopes_forbidden_plan_calls_by_type() 
                 {
                     "tool_name": "plan_mutate",
                     "status": "completed",
-                    "safe_args": {"operation": "create", "plan_type": "milk_management"},
+                    "safe_args": {"operation": "update"},
                 }
             ],
         ),

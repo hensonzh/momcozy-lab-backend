@@ -150,12 +150,11 @@ def test_product_agent_eval_seed_keeps_pump_recommendation_read_only_and_model_o
     assert "tool_selected_recommendation" in case["expected_behavior"]["must_not"]
 
 
-def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
+def test_product_agent_eval_seed_uses_current_milk_schedule_contract() -> None:
     cases = load_product_agent_eval_seed_cases(PRODUCT_AGENT_EVAL_SEED)
     by_suite = {case["suite"]: case for case in cases}
 
     schedule_contracts = {tool_call["contract"] for tool_call in by_suite["milk_schedule_management"]["expected_tool_calls"]}
-    plan_contracts = {tool_call["contract"] for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]}
 
     assert schedule_contracts == {"schedule_timeline_mutate"}
     assert by_suite["milk_schedule_management"]["expected_tool_calls"][0]["args_subset"] == {
@@ -163,21 +162,6 @@ def test_product_agent_eval_seed_uses_current_milk_action_contracts() -> None:
         "operation": "reschedule",
     }
     assert "plan_task_update_proposal" not in schedule_contracts
-    assert plan_contracts == {"milk_analysis_manage", "plan_mutate"}
-    analysis_calls = [
-        tool_call
-        for tool_call in by_suite["milk_plan_creation"]["expected_tool_calls"]
-        if tool_call["contract"] == "milk_analysis_manage"
-    ]
-    assert [tool_call["args_subset"]["operation"] for tool_call in analysis_calls] == [
-        "start_or_resume",
-        "evaluate",
-    ]
-    assert "milk_plan_proposal" not in plan_contracts
-    assert by_suite["milk_plan_creation"]["expected_tool_calls"][-1]["args_subset"] == {
-        "operation": "create",
-        "plan_type": "milk_management",
-    }
 
 
 def test_product_agent_eval_seed_keeps_tool_idempotency_runtime_owned() -> None:
@@ -187,7 +171,6 @@ def test_product_agent_eval_seed_keeps_tool_idempotency_runtime_owned() -> None:
     for suite in (
         "hospital_bag_cart_mutate",
         "milk_schedule_management",
-        "milk_plan_creation",
     ):
         case = by_suite[suite]
         assert (
@@ -360,6 +343,7 @@ def test_product_agent_eval_seed_uses_current_pregnancy_action_contracts() -> No
             "args_subset": {
                 "operation": "delete",
                 "plan_id": "11111111-1111-4111-8111-111111111111",
+                "confirmation_evidence": "Delete this pregnancy plan now.",
             },
         }
     ]

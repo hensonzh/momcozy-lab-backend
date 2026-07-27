@@ -88,12 +88,14 @@ versioning plan.
   `PlanRead`; on `version_conflict`, reload before retrying. Never fall back to
   title matching when `item_id` is absent.
 - Treat durable `milk_plan.changed` as a privacy-safe Schedule invalidation
-  signal. Accept only `operation=created`, `reason=created`, opaque `plan_id`,
-  `plan_type=milk_management`, `source=agent_action`, and at most 30 sorted,
-  unique `YYYY-MM-DD` `affected_dates` plus executor action/presentation
-  metadata. Deduplicate by `event_id`, persist only that event ID and date keys,
-  refresh the owner-scoped authoritative plan, and never expect private plan
-  text in the event.
+  signal for changes to an existing plan. Accept `operation=updated`,
+  `operation=deleted`, or `operation=rescheduled`, an opaque `plan_id`,
+  `plan_type=milk_management`, `source=agent_action`, bounded
+  `affected_dates`, and optional changed task IDs plus executor
+  action/presentation metadata. Deduplicate by `event_id`, persist only that
+  event ID and date keys, refresh the owner-scoped authoritative plan, and
+  never expect private plan text in the event. New milk-plan creation is not a
+  supported client or agent flow.
 - Treat `voice_provider_disabled` as a stable unavailable-state response for
   voice UI; do not fall back to legacy realtime voice endpoints.
 

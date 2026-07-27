@@ -734,6 +734,39 @@ def test_agent_runtime_service_deletes_artifact_with_replay_event() -> None:
     assert repository.events[-1].payload == {"artifact_id": str(artifact.id), "artifact_type": "care_plan"}
 
 
+def test_create_artifact_once_can_reuse_only_an_exact_payload_match() -> None:
+    owner_user_id = uuid4()
+    repository = FakeAgentRuntimeRepository()
+    repository.run = _run(thread_id=uuid4(), actor_user_id=owner_user_id)
+    service = AgentRuntimeService(repository=repository)
+    base = {
+        "owner_user_id": owner_user_id,
+        "run_id": repository.run.id,
+        "artifact_type": "plan_preview",
+        "schema_version": "v1",
+        "status": "created",
+        "emit_event": False,
+        "reuse_if_payload_matches": True,
+    }
+
+    first, first_created = asyncio.run(
+        service.create_artifact_once(payload={"action_id": "one", "title": "A"}, **base)
+    )
+    replay, replay_created = asyncio.run(
+        service.create_artifact_once(payload={"action_id": "one", "title": "A"}, **base)
+    )
+    changed, changed_created = asyncio.run(
+        service.create_artifact_once(payload={"action_id": "two", "title": "B"}, **base)
+    )
+
+    assert first_created is True
+    assert replay_created is False
+    assert replay.id == first.id
+    assert changed_created is True
+    assert changed.id != first.id
+    assert len(repository.artifacts) == 2
+
+
 def _thread(*, owner_user_id: UUID) -> AgentThread:
     return AgentThread(id=uuid4(), owner_user_id=owner_user_id, title="Thread", status="active", metadata_json={})
 
@@ -763,6 +796,7 @@ class FakeAgentRuntimeRepository:
         self.context_items = []
         self.events = []
         self.artifact = None
+        self.artifacts = []
         self.deleted_artifact = None
         self.touched_thread = None
         self.touched_updated_at = None
@@ -853,6 +887,28 @@ class FakeAgentRuntimeRepository:
 
     async def get_artifact_for_owner(self, **kwargs):
         return self.artifact
+
+    async def list_artifacts_for_run(self, **kwargs):
+        return [
+            artifact
+            for artifact in self.artifacts
+            if artifact.run_id == kwargs["run_id"]
+        ]
+
+    async def create_artifact(self, **kwargs):
+        artifact = AgentArtifact(
+            id=uuid4(),
+            run_id=kwargs["run_id"],
+            owner_user_id=kwargs["owner_user_id"],
+            artifact_type=kwargs["artifact_type"],
+            schema_version=kwargs["schema_version"],
+            status=kwargs["status"],
+            payload=kwargs["payload"],
+            raw_payload_ref=kwargs["raw_payload_ref"],
+        )
+        self.artifact = artifact
+        self.artifacts.append(artifact)
+        return artifact
 
     async def mark_artifact_deleted(self, **kwargs):
         artifact = kwargs["artifact"]

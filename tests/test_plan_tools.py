@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -10,13 +10,13 @@ from app.agent_runtime.runs.models import AgentAction
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.agent_runtime.tools.validation import validate_tool_output
 from app.agents.cozymate.actions.plans import (
-    MILK_PLAN_CREATE_ACTION,
     PLAN_DELETE_ACTION,
     PLAN_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
 )
 from app.agents.cozymate.tools import default_tool_registry
 from app.agents.cozymate.tools.handlers.plans import PlanMutateToolHandler, PlanReadToolHandler
+from app.agents.cozymate.tools.policy import CozymateToolExecutionPolicy
 from app.core.errors import ApiError
 from app.modules.auth import CurrentUser
 
@@ -31,7 +31,6 @@ def test_plan_tool_contracts_unify_persisted_plan_operations() -> None:
     assert read_contract.effect_scope == "none"
     assert mutate_contract.effect_scope == "user_resource"
     assert mutate_contract.action_types == (
-        MILK_PLAN_CREATE_ACTION,
         PREGNANCY_PLAN_CREATE_ACTION,
         PLAN_UPDATE_ACTION,
         PLAN_DELETE_ACTION,
@@ -43,21 +42,23 @@ def test_plan_tool_contracts_unify_persisted_plan_operations() -> None:
         for variant in variants
     ] == [
         "create",
-        "create",
         "update",
         "delete",
     ]
-    assert variants[0]["properties"]["plan_type"]["enum"] == ["milk_management"]
-    assert variants[1]["properties"]["plan_type"]["enum"] == ["pregnancy"]
+    assert variants[0]["properties"]["plan_type"]["enum"] == ["pregnancy"]
+    assert "plan_type" not in variants[1]["properties"]
     assert "plan_type" not in variants[2]["properties"]
-    assert "plan_type" not in variants[3]["properties"]
+    assert "include_content" not in read_contract.input_schema["anyOf"][0]["properties"]
+    assert "include_content" not in read_contract.input_schema["anyOf"][1]["properties"]
+    assert read_contract.input_schema["anyOf"][0]["properties"]["limit"]["maximum"] == 20
+    assert "confirmation_evidence" in variants[2]["required"]
     for schema in (read_contract.input_schema, mutate_contract.input_schema):
         for variant in schema["anyOf"]:
             for field_name, field_schema in variant["properties"].items():
                 assert field_schema.get("description"), f"{field_name} lacks a description"
 
 
-def test_plan_read_lists_owner_scoped_plans_with_safe_type_specific_content() -> None:
+def test_plan_read_lists_owner_scoped_plan_metadata_without_expanding_content() -> None:
     owner_user_id = uuid4()
     plans = [
         _plan(
@@ -91,7 +92,10 @@ def test_plan_read_lists_owner_scoped_plans_with_safe_type_specific_content() ->
             _context(
                 owner_user_id=owner_user_id,
                 tool_name="plan_read",
-                args={"mode": "list", "include_content": True},
+                args={
+                    "mode": "list",
+                    "runtime_local_date": "2026-07-27",
+                },
             )
         )
     )
@@ -100,19 +104,13 @@ def test_plan_read_lists_owner_scoped_plans_with_safe_type_specific_content() ->
         "owner_user_id": owner_user_id,
         "plan_type": "",
         "status": "active",
+        "as_of_date": date(2026, 7, 27),
         "limit": 20,
     }
     assert result["mode"] == "list"
     assert result["count"] == 2
-    assert result["plans"][0]["content"] == {
-        "direction": "maintain",
-        "start_date": "2026-07-27",
-        "days": 7,
-        "strategy_summary": "保持当前节奏",
-    }
-    assert result["plans"][1]["content"] == {
-        "card": {"card_type": "birth_journey_plan_card", "card_json": {"title": "孕期计划"}},
-    }
+    assert result["plans"][0]["content"] == {}
+    assert result["plans"][1]["content"] == {}
     assert "must-not-leak" not in str(result)
     validate_tool_output(
         schema=default_tool_registry().get("plan_read").output_schema,
@@ -122,7 +120,17 @@ def test_plan_read_lists_owner_scoped_plans_with_safe_type_specific_content() ->
 
 def test_plan_read_detail_requires_plan_id_and_returns_version_for_updates() -> None:
     owner_user_id = uuid4()
-    plan = _plan(owner_user_id=owner_user_id, plan_type="pregnancy")
+    plan = _plan(
+        owner_user_id=owner_user_id,
+        plan_type="pregnancy",
+        payload={
+            "card": {
+                "card_type": "birth_journey_plan_card",
+                "card_json": {"title": "孕期计划"},
+            },
+            "plan_context": {"medical_notes": "must-not-leak"},
+        },
+    )
     handler = PlanReadToolHandler(plans_service=FakePlansService(plans=[plan]))
 
     result = asyncio.run(
@@ -137,6 +145,13 @@ def test_plan_read_detail_requires_plan_id_and_returns_version_for_updates() -> 
 
     assert result["plan"]["plan_id"] == str(plan.id)
     assert result["plan"]["version"] == 3
+    assert result["plan"]["content"] == {
+        "card": {
+            "card_type": "birth_journey_plan_card",
+            "card_json": {"title": "孕期计划"},
+        },
+    }
+    assert "must-not-leak" not in str(result)
 
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
@@ -151,23 +166,11 @@ def test_plan_read_detail_requires_plan_id_and_returns_version_for_updates() -> 
     assert exc_info.value.code == "validation_failed"
 
 
-@pytest.mark.parametrize(
-    ("plan_type", "expected_action"),
-    [
-        ("milk_management", MILK_PLAN_CREATE_ACTION),
-        ("pregnancy", PREGNANCY_PLAN_CREATE_ACTION),
-    ],
-)
-def test_plan_mutate_routes_create_by_plan_type(
-    plan_type: str,
-    expected_action: str,
-) -> None:
-    milk = CapturingPlanOperationHandler(action_type=MILK_PLAN_CREATE_ACTION)
+def test_plan_mutate_routes_pregnancy_create() -> None:
     pregnancy = CapturingPlanOperationHandler(action_type=PREGNANCY_PLAN_CREATE_ACTION)
     handler = PlanMutateToolHandler(
         runtime_service=FakeRuntimeService(),
         plans_service=FakePlansService(),
-        milk_create_handler=milk,
         pregnancy_create_handler=pregnancy,
     )
 
@@ -175,16 +178,19 @@ def test_plan_mutate_routes_create_by_plan_type(
         handler.execute(
             _context(
                 tool_name="plan_mutate",
-                args={"operation": "create", "plan_type": plan_type},
+                args={"operation": "create", "plan_type": "pregnancy"},
             )
         )
     )
 
-    selected = milk if plan_type == "milk_management" else pregnancy
-    assert selected.calls
+    assert pregnancy.calls
     assert result["operation"] == "create"
-    assert result["plan_type"] == plan_type
-    assert result["action_type"] == expected_action
+    assert result["plan_type"] == "pregnancy"
+    assert result["action_type"] == PREGNANCY_PLAN_CREATE_ACTION
+    assert result["status"] == "applied"
+    assert result["result_code"] == "action_applied"
+    assert result["plan_id"] == str(pregnancy.resource_id)
+    assert result["plan_version"] == 1
 
 
 def test_plan_mutate_create_requires_a_supported_plan_type() -> None:
@@ -209,7 +215,7 @@ def test_plan_mutate_create_requires_a_supported_plan_type() -> None:
             handler.execute(
                 _context(
                     tool_name="plan_mutate",
-                    args={"operation": "create", "plan_type": "general"},
+                    args={"operation": "create", "plan_type": "milk_management"},
                 )
             )
         )
@@ -259,6 +265,8 @@ def test_plan_mutate_delete_uses_runtime_owned_stable_idempotency() -> None:
         args={
             "operation": "delete",
             "plan_id": str(plan.id),
+            "confirmation_evidence": "请删除这个计划",
+            "trusted_current_user_text": "请删除这个计划",
             "idempotency_key": "model-controlled-key",
         },
     )
@@ -273,6 +281,54 @@ def test_plan_mutate_delete_uses_runtime_owned_stable_idempotency() -> None:
     assert "plan-delete-retry" not in keys[0]
     assert len(runtime.propose_once_calls) == 2
     assert all(call["reuse_existing"] is True for call in runtime.propose_once_calls)
+
+
+def test_plan_mutate_delete_rejects_confirmation_evidence_not_grounded_in_current_message() -> None:
+    owner_user_id = uuid4()
+    plan = _plan(owner_user_id=owner_user_id, plan_type="milk_management")
+    runtime = FakeRuntimeService()
+    handler = PlanMutateToolHandler(
+        runtime_service=runtime,
+        plans_service=FakePlansService(plans=[plan]),
+    )
+
+    result = asyncio.run(
+        handler.execute(
+            _context(
+                owner_user_id=owner_user_id,
+                tool_name="plan_mutate",
+                args={
+                    "operation": "delete",
+                    "plan_id": str(plan.id),
+                    "confirmation_evidence": "请删除这个计划",
+                    "trusted_current_user_text": "先让我看看这个计划",
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "input_required"
+    assert result["result_code"] == "needs_plan_delete_confirmation"
+    assert result["write_succeeded"] is False
+    assert runtime.calls == []
+
+
+def test_plan_delete_confirmation_evidence_is_not_persisted_in_safe_args() -> None:
+    policy = CozymateToolExecutionPolicy()
+
+    safe_args = policy.safe_args(
+        tool_name="plan_mutate",
+        args={
+            "operation": "delete",
+            "plan_id": "10000000-0000-4000-8000-000000000001",
+            "confirmation_evidence": "请删除这个计划",
+        },
+    )
+
+    assert safe_args == {
+        "operation": "delete",
+        "plan_id": "10000000-0000-4000-8000-000000000001",
+    }
 
 
 def test_plan_mutate_update_proposes_versioned_metadata_action() -> None:
@@ -310,6 +366,10 @@ def test_plan_mutate_update_proposes_versioned_metadata_action() -> None:
     }
     assert result["plan_type"] == "pregnancy"
     assert result["write_succeeded"] is True
+    assert result["status"] == "applied"
+    assert result["result_code"] == "action_applied"
+    assert result["plan_id"] == str(plan.id)
+    assert result["plan_version"] == 4
     validate_tool_output(
         schema=default_tool_registry().get("plan_mutate").output_schema,
         value=result,
@@ -369,6 +429,7 @@ class FakePlansService:
 class CapturingPlanOperationHandler:
     def __init__(self, *, action_type: str) -> None:
         self.action_type = action_type
+        self.resource_id = uuid4()
         self.calls: list[ToolHandlerContext] = []
 
     async def execute(self, context: ToolHandlerContext):
@@ -383,6 +444,9 @@ class CapturingPlanOperationHandler:
             "user_visible": False,
             "write_succeeded": True,
             "preview_payload": {},
+            "resource_type": "plan",
+            "resource_id": str(self.resource_id),
+            "result_details": {"version": 1},
         }
 
 
@@ -393,7 +457,7 @@ class FakeRuntimeService:
 
     async def propose_action(self, **kwargs):
         self.calls.append(kwargs)
-        return AgentAction(
+        action = AgentAction(
             id=uuid4(),
             run_id=kwargs["run_id"],
             actor_user_id=kwargs["owner_user_id"],
@@ -407,6 +471,12 @@ class FakeRuntimeService:
             idempotency_key=kwargs["idempotency_key"],
             error_code="",
         )
+        action.result_payload = {
+            "resource_type": "plan",
+            "resource_id": kwargs.get("target_id", ""),
+            "details": {"version": 4},
+        }
+        return action
 
     async def propose_action_once(self, **kwargs):
         self.propose_once_calls.append(kwargs)

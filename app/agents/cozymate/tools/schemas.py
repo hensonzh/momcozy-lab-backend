@@ -1072,7 +1072,10 @@ _PLAN_ID_PROPERTY = {
 _PLAN_READ_SCHEMA = _union(
     _closed_object(
         {
-            "mode": _literal_string("list", "list 返回当前用户仍处于 active 状态的计划列表。"),
+            "mode": _literal_string(
+                "list",
+                "list 返回当前用户仍处于 active 状态的计划元数据列表，不展开计划内容。",
+            ),
             "plan_type": {
                 "type": "string",
                 "minLength": 1,
@@ -1082,18 +1085,10 @@ _PLAN_READ_SCHEMA = _union(
                     "通用计划可使用读取结果中的其他稳定类型值；省略时读取全部计划类型。"
                 ),
             },
-            "include_content": {
-                "type": "boolean",
-                "default": False,
-                "description": (
-                    "false 只返回计划 ID、类型、标题和摘要等元数据；"
-                    "需要回答计划具体安排时传 true，同时返回类型对应的结构化计划详情。"
-                ),
-            },
             "limit": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 50,
+                "maximum": 20,
                 "default": 20,
                 "description": "最多返回的 active 计划数量，默认 20。",
             },
@@ -1102,16 +1097,11 @@ _PLAN_READ_SCHEMA = _union(
     ),
     _closed_object(
         {
-            "mode": _literal_string("detail", "detail 返回一个精确计划。"),
+            "mode": _literal_string(
+                "detail",
+                "detail 返回一个精确计划及其按类型投影的完整结构化内容。",
+            ),
             "plan_id": _PLAN_ID_PROPERTY,
-            "include_content": {
-                "type": "boolean",
-                "default": False,
-                "description": (
-                    "false 只返回目标计划的元数据；需要查看具体安排时传 true，"
-                    "同时返回类型对应的结构化计划详情。"
-                ),
-            },
         },
         required=("mode", "plan_id"),
     ),
@@ -1119,58 +1109,6 @@ _PLAN_READ_SCHEMA = _union(
 
 
 _PLAN_MUTATE_SCHEMA = _union(
-    _closed_object(
-        {
-            "operation": _operation("create", "create 根据已完成的奶量分析创建奶量管理计划。"),
-            "plan_type": _literal_string("milk_management", "milk_management 表示奶量管理计划。"),
-            "direction": {
-                "type": "string",
-                "enum": ["increase", "maintain", "decrease"],
-                "description": "计划方向：increase=追奶，maintain=稳奶，decrease=减奶。",
-            },
-            "start_date": {
-                "type": "string",
-                "format": "date",
-                "description": "计划开始日期，格式 YYYY-MM-DD；用户未指定时使用下一本地自然日。",
-            },
-            "days": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 30,
-                "default": 7,
-                "description": "计划覆盖天数，默认 7 天。",
-            },
-            "target_daily_ml": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 5000,
-                "description": (
-                    "妈妈侧每日平均吸奶产出目标，单位 ml；不是宝宝摄入量，也不是单次吸奶量。"
-                    "仅在用户明确给出该阶段目标时传入。"
-                ),
-            },
-            "preferred_pumping_times": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 10,
-                "uniqueItems": True,
-                "items": {
-                    "type": "string",
-                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-                },
-                "description": "用户明确指定的可执行吸奶时间列表，使用本地 HH:MM 格式。",
-            },
-            "calendar_write_strategy": {
-                "type": "string",
-                "enum": ["append", "replace_future_plan_tasks"],
-                "description": (
-                    "已有未来奶量任务且用户已选择时使用：append=保留并追加，"
-                    "replace_future_plan_tasks=只替换新计划日期范围内已有的未来未完成奶量计划任务。"
-                ),
-            },
-        },
-        required=("operation", "plan_type", "direction"),
-    ),
     _closed_object(
         {
             "operation": _operation("create", "create 根据已完成并确认的孕期资料采集创建孕期计划。"),
@@ -1220,8 +1158,14 @@ _PLAN_MUTATE_SCHEMA = _union(
             "operation": _operation("delete", "delete 删除整个现有计划；计划内单项日程删除不用本操作。"),
             "plan_id": _PLAN_ID_PROPERTY,
             "reason": _REASON | {"description": "用户明确提供的删除整个计划的原因；没有时省略。"},
+            "confirmation_evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "description": "逐字引用当前用户消息中明确要求删除整个计划的原文，不得由模型自行生成。",
+            },
         },
-        required=("operation", "plan_id"),
+        required=("operation", "plan_id", "confirmation_evidence"),
     ),
 )
 

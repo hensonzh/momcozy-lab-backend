@@ -495,82 +495,6 @@
       ]
     },
     {
-      "suite": "milk_plan_creation",
-      "name": "milk plan requires completed durable analysis before proposal",
-      "domain": "milk-management",
-      "owner_team": "agent",
-      "input": {
-        "messages": [
-          {
-            "role": "user",
-            "content": "Complete my milk analysis and make the recommended plan for this week."
-          }
-        ],
-        "fixtures": {
-          "recent_records_available": true,
-          "durable_milk_analysis_required": true
-        }
-      },
-      "expected_behavior": {
-        "intent": "milk_plan_creation",
-        "route": "structured_plan",
-        "requires_confirmation_before_write": true,
-        "service_skill_id": "milk-management",
-        "must_include": [
-          "analysis_context_fingerprint",
-          "recommended_direction",
-          "confirmation_card"
-        ],
-        "must_not": [
-          "create_plan_before_analysis",
-          "create_calendar_tasks_without_confirmation",
-          "model_supplied_idempotency_key"
-        ]
-      },
-      "expected_tool_calls": [
-        {
-          "contract": "milk_analysis_manage",
-          "args_subset": {
-            "operation": "start_or_resume"
-          },
-          "timing": "before_analysis"
-        },
-        {
-          "contract": "milk_analysis_manage",
-          "args_subset": {
-            "operation": "evaluate"
-          },
-          "timing": "after_intake"
-        },
-        {
-          "contract": "plan_mutate",
-          "timing": "after_needed_context",
-          "args_subset": {
-            "operation": "create",
-            "plan_type": "milk_management"
-          }
-        }
-      ],
-      "expected_events": [
-        {
-          "type": "artifact.created",
-          "artifact_type": "milk_analysis_card"
-        },
-        {
-          "type": "action.confirmation_required",
-          "action_type": "plans.milk_plan.create"
-        },
-        {
-          "type": "artifact.created",
-          "artifact_type": "milk_plan_preview"
-        },
-        {
-          "type": "milk_plan.changed",
-          "operation": "created"
-        }
-      ]
-    },
-    {
       "suite": "milk_trend_analysis",
       "name": "trend analysis explains estimates",
       "domain": "milk-management",
@@ -1323,7 +1247,8 @@
           "timing": "on_explicit_intent_and_exact_target",
           "args_subset": {
             "plan_id": "11111111-1111-4111-8111-111111111111",
-            "operation": "delete"
+            "operation": "delete",
+            "confirmation_evidence": "Delete this pregnancy plan now."
           }
         }
       ]
@@ -1961,7 +1886,7 @@
         ],
         "must_not": [
           "suggest_medication_dose",
-          "continue_normal_milk_plan_flow"
+          "continue_normal_lactation_flow"
         ],
         "forbids_side_effects": true
       },
@@ -2037,7 +1962,7 @@
         "must_not": [
           "continue_routine_feeding_tracking",
           "reassure_as_normal",
-          "create_milk_plan"
+          "continue_routine_lactation_flow"
         ],
         "forbids_side_effects": true
       },

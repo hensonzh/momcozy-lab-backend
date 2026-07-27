@@ -61,8 +61,15 @@ system prompt。它们不是模型可发现、可选择或可动态加载的 Ski
 - 每个智能体仅接收自己的静态 Tool Allowlist；Tool 调用和结果按 Agent Loop 顺序进入上下文。
 - 跨领域计划摘要、日程和已关联实际事实统一从 `schedule_timeline_read` 读取；不再为泌乳、孕期或产后康复分别提供日历读取 Tool。
 - 计划日程和实际记录统一由 `schedule_timeline_mutate` 管理，并通过 `entry_type=schedule|execution` 区分；完成 feeding/pumping 泌乳任务必须同时写入实际时间和对应奶量，由实际记录 Action 原子完成关联任务。
-- 已持久化的计划统一由 `plan_read` 读取，由 `plan_mutate` 创建、更新和删除；创建时使用 `plan_type` 选择领域构建器，更新和删除以后端读取到的真实计划类型为准。
+- 已持久化的计划统一由 `plan_read` 读取，由 `plan_mutate` 创建、更新和删除；列表读取只返回最多 20 条元数据，
+  精确详情读取才展开计划内容。创建时使用 `plan_type` 选择领域构建器，更新和删除以后端读取到的真实计划类型为准。
+- 计划持久化生效和结束日期；active 列表与日程时间线排除已过有效期的计划。同一用户同时只允许一个 active
+  孕期计划，删除计划时同时软删除其关联日程任务。
+- 删除整个计划只在模型逐字引用当前用户消息中的明确删除原文、且 Runtime 校验引用确实来自本轮可信消息后执行；
+  引用仅用于意图校验，不进入 Action payload、日志安全参数或领域数据。
 - `plan_read` 不代替日程时间线读取；计划下的任务、完成状态和实际执行事实仍由 `schedule_timeline_read` / `schedule_timeline_mutate` 管理。
+- 孕期计划卡片中的 todo 在计划创建时同步持久化为时间线任务；从时间线或 App 卡片任一侧更新完成状态时，
+  后端同步另一侧，避免同一事项出现两份状态事实。
 - 日记统一由 `diary_read` / `diary_mutate` 读取和变更；同一用户、同一日期最多一条。孕期、产后恢复和育儿只是
   日记内容语义，不作为资源类型或存储分区；不再提供孕期专用的模型 Tool。
 - `pregnancy_intake_manage` 只负责孕期资料采集；采集完成后通过 `plan_mutate` 创建孕期计划，不在一个工具内混合采集与业务资源写入。

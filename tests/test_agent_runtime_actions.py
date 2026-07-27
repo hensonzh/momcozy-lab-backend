@@ -112,18 +112,17 @@ def test_duplicate_confirmation_is_idempotent_and_does_not_requeue_twice() -> No
     assert [event.event_type for event in repository.events].count("run.queued") == 2  # initial run plus resume
 
 
-@pytest.mark.parametrize("action_type", ["plans.milk_plan.create", "plans.milk_schedule.reschedule"])
-def test_milk_actions_reject_confirmation_payload_edits(action_type: str) -> None:
+def test_milk_schedule_action_rejects_confirmation_payload_edits() -> None:
     owner_user_id = uuid4()
     repository = FakeActionRepository()
     service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
     run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Create milk plan"))
-    original_payload = {"title": "稳奶计划", "payload": {"direction": "maintain"}}
+    original_payload = {"plan_id": str(uuid4()), "updates": []}
     action = asyncio.run(
         service.propose_action(
             owner_user_id=owner_user_id,
             run_id=run.id,
-            action_type=action_type,
+            action_type="plans.milk_schedule.reschedule",
             target_type="plan",
             apply_payload=original_payload,
         )
@@ -135,7 +134,7 @@ def test_milk_actions_reject_confirmation_payload_edits(action_type: str) -> Non
             service.confirm_action(
                 owner_user_id=owner_user_id,
                 action_id=action.id,
-                edited_apply_payload={"title": "追奶计划", "payload": {"direction": "increase"}},
+                edited_apply_payload={"plan_id": str(uuid4()), "updates": []},
             )
         )
 
@@ -275,26 +274,6 @@ def test_explicit_intent_actions_apply_synchronously_without_confirmation_card(
     assert applied.payload["requires_confirmation"] is False
     assert applied.payload["confirmation_policy"] == "explicit_intent"
     assert applied.payload["user_visible"] is False
-
-
-def test_value_bearing_preview_action_still_requires_one_confirmation() -> None:
-    owner_user_id = uuid4()
-    repository = FakeActionRepository()
-    service = AgentRuntimeService(action_policy=ACTION_POLICY, repository=repository)
-    run = asyncio.run(service.create_run(actor_user_id=owner_user_id, thread_id=None, message="Prepare action"))
-
-    action = asyncio.run(
-        service.propose_action(
-            owner_user_id=owner_user_id,
-            run_id=run.id,
-            action_type="plans.milk_plan.create",
-            target_type="plan",
-            side_effect_level="medium",
-        )
-    )
-
-    assert action.status == "confirmation_required"
-    assert repository.events[-1].event_type == "action.confirmation_required"
 
 
 def test_current_infant_replacement_requires_confirmation_and_rejects_payload_edits() -> None:
@@ -478,9 +457,25 @@ def test_pregnancy_plan_applies_synchronously_and_changed_event_replays_once() -
             idempotency_key="pregnancy-plan-1",
         )
     )
+    replay_outcome, outcome_created = asyncio.run(
+        service.propose_action_once_with_outcome(
+            owner_user_id=owner_user_id,
+            run_id=run.id,
+            action_type=PREGNANCY_PLAN_CREATE_ACTION,
+            target_type="plan",
+            side_effect_level="medium",
+            apply_payload=action.apply_payload,
+            idempotency_key="pregnancy-plan-1",
+        )
+    )
 
     assert action.status == "applied"
     assert replay.id == action.id and created is False
+    assert outcome_created is False
+    assert replay_outcome.replayed is True
+    assert replay_outcome.apply_result is not None
+    assert replay_outcome.apply_result.resource_id == str(plans_service.plans[0].id)
+    assert replay_outcome.apply_result.details["version"] == 1
     assert len(plans_service.plans) == 1
     assert plans_service.plans[0].plan_type == "pregnancy"
     event_types = [event.event_type for event in repository.events]
@@ -637,6 +632,7 @@ class FakeAgentPlansService:
             source=kwargs["source"],
             payload=kwargs["payload"],
             status="active",
+            version=1,
         )
         self.plans.append(plan)
         return plan

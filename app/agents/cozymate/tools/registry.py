@@ -203,13 +203,12 @@ def default_tool_registry() -> ToolContractRegistry:
             name="plan_mutate",
             domain="plans",
             description=(
-                "创建奶量或孕期计划，更新已有计划的标题或摘要，或删除整个计划；"
-                "不修改计划内单项日程。当奶量分析或孕期资料采集已满足计划生成条件，"
-                "或用户要修改计划标题、摘要或删除整份计划时使用。"
+                "创建孕期计划，更新已有计划的标题或摘要，或删除整个计划；"
+                "不修改计划内单项日程。当孕期资料采集已满足计划生成条件，"
+                "或需要修改计划标题、摘要或删除整份计划时使用。"
             ),
             effect_scope="user_resource",
             action_types=(
-                "plans.milk_plan.create",
                 "pregnancy.plan.create",
                 "plans.plan.update",
                 "plans.plan.delete",

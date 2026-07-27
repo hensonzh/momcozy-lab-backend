@@ -366,6 +366,13 @@ class AgentAction(Base):
         server_default=text("'{}'::jsonb"),
         nullable=False,
     )
+    result_payload: Mapped[dict[str, Any]] = mapped_column(
+        "result_payload_json",
+        postgresql.JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
     idempotency_key: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

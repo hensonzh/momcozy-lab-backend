@@ -80,7 +80,13 @@ class AgentActionExecutor:
                 return AgentActionExecutionOutcome(action=failed)
             raise ApiError(code="agent_action_scope_violation", message="Agent action owner scope is invalid.", status=403)
         if action.status in {"applied", "failed"}:
-            return AgentActionExecutionOutcome(action=action, replayed=True)
+            return AgentActionExecutionOutcome(
+                action=action,
+                apply_result=_apply_result_from_payload(
+                    getattr(action, "result_payload", None)
+                ),
+                replayed=True,
+            )
 
         handler = self.handlers.get(action.action_type)
         if handler is None:
@@ -91,6 +97,7 @@ class AgentActionExecutor:
         try:
             async with _action_apply_scope(self.repository):
                 result = await handler(action)
+                action.result_payload = _apply_result_payload(result)
                 applied = await self.repository.mark_action_applied(action=action, applied_at=_utcnow())
                 await self._append_success_events(run=run, action=applied, result=result)
         except Exception as exc:
@@ -169,6 +176,31 @@ def _action_error_code(exc: Exception) -> str:
     if isinstance(exc, (PermanentActionError, RetryableActionError, ApiError)):
         return exc.code
     return "agent_action_handler_error"
+
+
+def _apply_result_payload(result: AgentActionApplyResult) -> dict[str, Any]:
+    return {
+        "resource_type": result.resource_type,
+        "resource_id": result.resource_id,
+        "details": dict(result.details or {}),
+    }
+
+
+def _apply_result_from_payload(payload: Any) -> AgentActionApplyResult | None:
+    if not isinstance(payload, dict) or not payload:
+        return None
+    resource_type = str(payload.get("resource_type") or "")
+    resource_id = str(payload.get("resource_id") or "")
+    details = payload.get("details")
+    if not isinstance(details, dict):
+        details = {}
+    if not resource_type and not resource_id and not details:
+        return None
+    return AgentActionApplyResult(
+        resource_type=resource_type,
+        resource_id=resource_id,
+        details=dict(details),
+    )
 
 
 def _utcnow() -> datetime:

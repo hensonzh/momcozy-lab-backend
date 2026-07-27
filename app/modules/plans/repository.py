@@ -32,6 +32,8 @@ class PlansRepository:
         summary: str,
         source: str,
         payload: dict[str, Any],
+        starts_on: date | None = None,
+        ends_on: date | None = None,
     ) -> Plan:
         plan = Plan(
             owner_user_id=owner_user_id,
@@ -40,6 +42,8 @@ class PlansRepository:
             summary=summary,
             source=source,
             payload=payload,
+            starts_on=starts_on,
+            ends_on=ends_on,
         )
         self.session.add(plan)
         await self.session.flush()
@@ -57,6 +61,33 @@ class PlansRepository:
                 Plan.owner_user_id == owner_user_id,
                 Plan.deleted_at.is_(None),
             )
+            .with_for_update()
+        )
+        return cast(Plan | None, await self.session.scalar(statement))
+
+    async def lock_plan_type(self, *, owner_user_id: UUID, plan_type: str) -> None:
+        lock_key = _plan_type_advisory_lock_key(
+            owner_user_id=owner_user_id,
+            plan_type=plan_type,
+        )
+        await self.session.execute(select(func.pg_advisory_xact_lock(lock_key)))
+
+    async def get_active_plan_by_type_for_update(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_type: str,
+    ) -> Plan | None:
+        statement = (
+            select(Plan)
+            .where(
+                Plan.owner_user_id == owner_user_id,
+                Plan.plan_type == plan_type,
+                Plan.status == "active",
+                Plan.deleted_at.is_(None),
+            )
+            .order_by(Plan.updated_at.desc(), Plan.id.desc())
+            .limit(1)
             .with_for_update()
         )
         return cast(Plan | None, await self.session.scalar(statement))
@@ -97,8 +128,24 @@ class PlansRepository:
         await self.session.flush()
         return plan
 
-    async def list_plans(self, *, owner_user_id: UUID, plan_type: str, status: str, limit: int) -> list[Plan]:
-        statement = select(Plan).where(Plan.owner_user_id == owner_user_id, Plan.status == status, Plan.deleted_at.is_(None))
+    async def list_plans(
+        self,
+        *,
+        owner_user_id: UUID,
+        plan_type: str,
+        status: str,
+        as_of_date: date,
+        limit: int,
+    ) -> list[Plan]:
+        statement = select(Plan).where(
+            Plan.owner_user_id == owner_user_id,
+            Plan.status == status,
+            Plan.deleted_at.is_(None),
+        )
+        if status == "active":
+            statement = statement.where(
+                or_(Plan.ends_on.is_(None), Plan.ends_on >= as_of_date)
+            )
         if plan_type:
             statement = statement.where(Plan.plan_type == plan_type)
         statement = statement.order_by(Plan.updated_at.desc(), Plan.id.desc()).limit(limit)
@@ -111,6 +158,7 @@ class PlansRepository:
         owner_user_id: UUID,
         domains: tuple[str, ...],
         status: str,
+        as_of_date: date,
         limit: int,
     ) -> list[Plan]:
         statement = (
@@ -121,9 +169,15 @@ class PlansRepository:
                 Plan.deleted_at.is_(None),
                 _plan_domain_condition(domains),
             )
-            .order_by(Plan.updated_at.desc(), Plan.id.desc())
-            .limit(limit)
         )
+        if status == "active":
+            statement = statement.where(
+                or_(Plan.ends_on.is_(None), Plan.ends_on >= as_of_date)
+            )
+        statement = statement.order_by(
+            Plan.updated_at.desc(),
+            Plan.id.desc(),
+        ).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
 
@@ -135,6 +189,29 @@ class PlansRepository:
         plan.deleted_at = deleted_at
         await self.session.flush()
         return plan
+
+    async def soft_delete_tasks_for_plan(
+        self,
+        *,
+        plan_id: UUID,
+        owner_user_id: UUID,
+        deleted_at: datetime,
+    ) -> list[PlanTask]:
+        statement = (
+            select(PlanTask)
+            .where(
+                PlanTask.plan_id == plan_id,
+                PlanTask.owner_user_id == owner_user_id,
+                PlanTask.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        tasks = list((await self.session.scalars(statement)).all())
+        for task in tasks:
+            task.status = "deleted"
+            task.deleted_at = deleted_at
+        await self.session.flush()
+        return tasks
 
     async def create_task(
         self,
@@ -285,37 +362,6 @@ class PlansRepository:
         result = await self.session.scalars(statement)
         return list(result.all())
 
-    async def list_future_milk_plan_tasks(
-        self,
-        *,
-        owner_user_id: UUID,
-        start_date: date,
-        end_date: date,
-        for_update: bool,
-        limit: int,
-    ) -> list[PlanTask]:
-        statement = (
-            select(PlanTask)
-            .join(Plan, Plan.id == PlanTask.plan_id)
-            .where(
-                PlanTask.owner_user_id == owner_user_id,
-                PlanTask.deleted_at.is_(None),
-                PlanTask.status == "pending",
-                PlanTask.task_date >= start_date,
-                PlanTask.task_date <= end_date,
-                Plan.owner_user_id == owner_user_id,
-                Plan.plan_type == "milk_management",
-                Plan.status == "active",
-                Plan.deleted_at.is_(None),
-            )
-            .order_by(PlanTask.task_date.asc(), PlanTask.task_time.asc(), PlanTask.id.asc())
-            .limit(limit)
-        )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await self.session.scalars(statement)
-        return list(result.all())
-
     async def set_task_completed(
         self,
         *,
@@ -375,6 +421,13 @@ class PlansRepository:
 
 def _schedule_advisory_lock_key(*, owner_user_id: UUID, task_date: date) -> int:
     digest = hashlib.sha256(f"plan-task-schedule:{owner_user_id}:{task_date.isoformat()}".encode()).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def _plan_type_advisory_lock_key(*, owner_user_id: UUID, plan_type: str) -> int:
+    digest = hashlib.sha256(
+        f"plan-type:{owner_user_id}:{plan_type}".encode()
+    ).digest()
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
 

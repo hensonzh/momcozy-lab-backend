@@ -9,16 +9,16 @@ from app.agents.cozymate.tools.milk_analysis_flow import (
 )
 
 
-def _records_snapshot(*, status: str = "under_supply_alert") -> dict:
+def _records_snapshot() -> dict:
     return {
         "window": {"days": 7},
-        "status": status,
+        "status": {"data_coverage": "ready", "pumping_trend": "decreasing"},
         "counts": {"recent_feedings": 5, "recent_pumpings": 8, "recent_growth": 1},
         "volumes": {"recent_pumped_volume_ml": 1960.0},
         "pumping_trends": [
             {"date": "2026-07-12", "pumped_milk_volume_ml": 280.0, "pumping_count": 5},
         ],
-        "analysis": {"status": status, "growth_observation": "stable"},
+        "analysis": {"data_coverage": "ready", "pumping_trend": "decreasing"},
     }
 
 
@@ -100,7 +100,6 @@ def test_later_partial_safety_answer_preserves_previously_observed_red_flags() -
     assert "有寒战和硬块" in completed["answers"]["maternal_red_flags"]
     assert "没有发烧" in completed["answers"]["maternal_red_flags"]
     assert assessment["risk"]["maternal_red_flags"] is True
-    assert assessment["plan_decision"]["can_start_plan"] is False
 
 
 def test_explicit_safety_correction_can_replace_previous_red_flag_evidence() -> None:
@@ -126,7 +125,6 @@ def test_explicit_safety_correction_can_replace_previous_red_flag_evidence() -> 
 
     assert completed["answers"]["maternal_red_flags"] == "我刚才说错了，其实没有寒战和硬块"
     assert assessment["risk"]["maternal_red_flags"] is False
-    assert assessment["plan_decision"]["can_start_plan"] is True
 
 
 def test_partial_safety_correction_does_not_clear_other_previous_red_flags() -> None:
@@ -152,44 +150,35 @@ def test_partial_safety_correction_does_not_clear_other_previous_red_flags() -> 
 
     assert "有发烧和硬块" in completed["answers"]["maternal_red_flags"]
     assert assessment["risk"]["maternal_red_flags"] is True
-    assert assessment["plan_decision"]["can_start_plan"] is False
 
 
-def test_assessment_requires_complete_intake_and_fingerprints_the_exact_context() -> None:
+def test_assessment_requires_complete_intake_and_returns_analysis_only() -> None:
     incomplete = initialize_milk_analysis_intake(records_snapshot=_records_snapshot())
     with pytest.raises(MilkAnalysisFlowError, match="milk_analysis_intake_incomplete"):
         build_milk_analysis_assessment(incomplete)
 
     first = build_milk_analysis_assessment(_complete_intake())
-    second_workflow = _complete_intake()
-    second_workflow["answers"]["maternal_breast_comfort"] = "吸完后还是有一点胀"
-    second = build_milk_analysis_assessment(second_workflow)
 
-    assert first["analysis_context_fingerprint"]
-    assert first["analysis_context_fingerprint"] != second["analysis_context_fingerprint"]
-    assert first["plan_decision"] == {
-        "can_start_plan": True,
-        "recommended_direction": "increase",
-        "reason": "recent_milk_below_expected_eligible_for_plan",
+    assert first["findings"] == {
+        "data_coverage": "ready",
+        "pumping_trend": "decreasing",
     }
+    assert "analysis_context_fingerprint" not in first
+    assert "plan_decision" not in first
     assert first["card"]["title"] == "奶量分析"
-    assert "analysis_context_fingerprint" not in first["card"]
+    assert "can_start_plan" not in first["card"]
+    assert "recommended_direction" not in first["card"]
     assert first["card"]["headline"]
     assert [section["id"] for section in first["card"]["sections"]] == ["milk", "signals", "next"]
 
 
-def test_explicit_maternal_red_flags_block_plan_eligibility_but_negation_does_not() -> None:
+def test_explicit_maternal_red_flags_are_reported_but_negation_is_not() -> None:
     safe = build_milk_analysis_assessment(_complete_intake())
     unsafe = build_milk_analysis_assessment(_complete_intake(red_flags="有发热，右侧乳房红肿而且越来越痛"))
 
     assert safe["risk"]["maternal_red_flags"] is False
-    assert safe["plan_decision"]["can_start_plan"] is True
     assert unsafe["risk"]["maternal_red_flags"] is True
-    assert unsafe["plan_decision"] == {
-        "can_start_plan": False,
-        "recommended_direction": None,
-        "reason": "maternal_red_flags_require_professional_support",
-    }
+    assert "需要优先处理" in unsafe["card"]["headline"]
 
 
 @pytest.mark.parametrize(
@@ -202,11 +191,10 @@ def test_explicit_maternal_red_flags_block_plan_eligibility_but_negation_does_no
         "无发热，但疼痛加重",
     ],
 )
-def test_mixed_negated_and_positive_maternal_red_flags_still_block_plan(red_flags: str) -> None:
+def test_mixed_negated_and_positive_maternal_red_flags_are_still_reported(red_flags: str) -> None:
     assessment = build_milk_analysis_assessment(_complete_intake(red_flags=red_flags))
 
     assert assessment["risk"]["maternal_red_flags"] is True
-    assert assessment["plan_decision"]["can_start_plan"] is False
 
 
 @pytest.mark.parametrize(
@@ -222,11 +210,9 @@ def test_maternal_red_flag_negation_can_cover_an_explicit_symptom_list(red_flags
     assessment = build_milk_analysis_assessment(_complete_intake(red_flags=red_flags))
 
     assert assessment["risk"]["maternal_red_flags"] is False
-    assert assessment["plan_decision"]["can_start_plan"] is True
 
 
 def test_infant_signal_negation_does_not_create_a_false_safety_block() -> None:
     assessment = build_milk_analysis_assessment(_complete_intake(wet_diapers="尿布没有明显变少，24 小时大约 7 片"))
 
     assert assessment["risk"]["infant_intake_risk"] is False
-    assert assessment["plan_decision"]["can_start_plan"] is True

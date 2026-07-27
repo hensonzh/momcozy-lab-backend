@@ -10,7 +10,6 @@ from app.agents.cozymate.actions.diary import (
 )
 from app.agents.cozymate.actions.hospital_bag import HOSPITAL_BAG_CART_UPDATE_ACTION, HospitalBagCartUpdateActionHandler
 from app.agents.cozymate.actions.plans import (
-    MILK_PLAN_CREATE_ACTION,
     MILK_SCHEDULE_RESCHEDULE_ACTION,
     PLAN_DELETE_ACTION,
     PLAN_UPDATE_ACTION,
@@ -19,7 +18,6 @@ from app.agents.cozymate.actions.plans import (
     PLAN_TASK_DELETE_ACTION,
     PLAN_TASK_UPDATE_ACTION,
     PREGNANCY_PLAN_CREATE_ACTION,
-    MilkPlanCreateActionHandler,
     MilkScheduleRescheduleActionHandler,
     PlanDeleteActionHandler,
     PlanUpdateActionHandler,
@@ -77,7 +75,6 @@ def build_cozymate_action_handlers(
         PROFILE_CURRENT_INFANTS_REPLACE_ACTION: profile_update_handler,
         DIARY_SAVE_ACTION: DiarySaveActionHandler(service=diary_service),
         DIARY_DELETE_ACTION: DiaryDeleteActionHandler(service=diary_service),
-        MILK_PLAN_CREATE_ACTION: MilkPlanCreateActionHandler(service=plans_service),
         MILK_SCHEDULE_RESCHEDULE_ACTION: MilkScheduleRescheduleActionHandler(service=plans_service),
         PREGNANCY_PLAN_CREATE_ACTION: PregnancyPlanCreateActionHandler(service=plans_service),
         PLAN_TASK_CREATE_ACTION: PlanTaskCreateActionHandler(service=plans_service),

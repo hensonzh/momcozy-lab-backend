@@ -25,6 +25,7 @@ def test_action_executor_applies_in_process_and_marks_direct_event_non_visible()
         return AgentActionApplyResult(
             resource_type="plan",
             resource_id="plan-1",
+            details={"version": 2},
             application_events=(
                 AgentApplicationEvent(event_type="pregnancy_plan.changed", payload={"operation": "created"}),
             ),
@@ -36,6 +37,19 @@ def test_action_executor_applies_in_process_and_marks_direct_event_non_visible()
 
     assert calls == [repository.action.id]
     assert outcome.action.status == "applied"
+    assert outcome.apply_result == AgentActionApplyResult(
+        resource_type="plan",
+        resource_id="plan-1",
+        details={"version": 2},
+        application_events=(
+            AgentApplicationEvent(event_type="pregnancy_plan.changed", payload={"operation": "created"}),
+        ),
+    )
+    assert repository.action.result_payload == {
+        "resource_type": "plan",
+        "resource_id": "plan-1",
+        "details": {"version": 2},
+    }
     assert outcome.replayed is False
     assert [event.event_type for event in repository.events] == ["action.applied", "pregnancy_plan.changed"]
     assert repository.events[0].payload == {
@@ -49,7 +63,7 @@ def test_action_executor_applies_in_process_and_marks_direct_event_non_visible()
         "user_visible": False,
         "resource_type": "plan",
         "resource_id": "plan-1",
-        "details": {},
+        "details": {"version": 2},
     }
     assert repository.events[1].payload["action_id"] == str(repository.action.id)
     assert repository.events[1].payload["requires_confirmation"] is False
@@ -58,6 +72,11 @@ def test_action_executor_applies_in_process_and_marks_direct_event_non_visible()
 
 def test_action_executor_replays_applied_action_without_calling_handler_or_emitting_events() -> None:
     repository = FakeActionRepository(action_status="applied")
+    repository.action.result_payload = {
+        "resource_type": "plan",
+        "resource_id": "plan-existing",
+        "details": {"version": 4},
+    }
 
     async def should_not_run(_action: AgentAction) -> AgentActionApplyResult:
         raise AssertionError("applied actions must not execute twice")
@@ -68,6 +87,11 @@ def test_action_executor_replays_applied_action_without_calling_handler_or_emitt
 
     assert outcome.action is repository.action
     assert outcome.replayed is True
+    assert outcome.apply_result == AgentActionApplyResult(
+        resource_type="plan",
+        resource_id="plan-existing",
+        details={"version": 4},
+    )
     assert repository.events == []
 
 
@@ -230,6 +254,7 @@ class FakeSavepoint:
         self.repository = repository
         self.action_status = repository.action.status
         self.action_applied_at = repository.action.applied_at
+        self.action_result_payload = dict(getattr(repository.action, "result_payload", None) or {})
         self.events = list(repository.events)
         self.domain_rows = list(getattr(repository, "domain_rows", []))
 
@@ -240,6 +265,7 @@ class FakeSavepoint:
         if exc_type is not None:
             self.repository.action.status = self.action_status
             self.repository.action.applied_at = self.action_applied_at
+            self.repository.action.result_payload = self.action_result_payload
             self.repository.events[:] = self.events
             if hasattr(self.repository, "domain_rows"):
                 self.repository.domain_rows[:] = self.domain_rows

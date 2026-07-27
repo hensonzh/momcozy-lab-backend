@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any, Mapping
 
 from app.core.errors import ApiError
@@ -9,7 +8,6 @@ from app.agent_runtime.tools.executor import DEFERRED_AGENT_EVENTS_KEY, ToolHand
 
 _MAX_MEDIA_VOICE_ITEMS = 2
 _DEVICE_GUIDANCE_IMAGE_SPOKEN_LABEL = "我放了一张当前步骤的对照图，你可以边看图边完成这一步。"
-_MILK_ANALYSIS_PLAN_TTL = timedelta(minutes=30)
 _MUTATION_TOOL_SUFFIXES = ("_mutate", "_create", "_update", "_delete")
 _ToolOperationOutput = ToolResult | dict[str, Any]
 

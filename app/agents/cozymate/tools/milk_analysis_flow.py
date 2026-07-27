@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from copy import deepcopy
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 MILK_ANALYSIS_FIELDS = (
@@ -25,7 +25,8 @@ MILK_ANALYSIS_QUESTIONS = {
 }
 
 MILK_ANALYSIS_WORKFLOW_TYPE = "milk_analysis"
-MILK_ANALYSIS_SCHEMA_VERSION = "milk_analysis.v1"
+MILK_ANALYSIS_SCHEMA_VERSION = "milk_analysis.v2"
+MAX_REPRESENTATIVE_PUMPING_TIMES = 10
 
 
 class MilkAnalysisFlowError(ValueError):
@@ -89,69 +90,23 @@ def build_milk_analysis_assessment(workflow: dict[str, Any]) -> dict[str, Any]:
     infant_intake_risk = _has_infant_intake_risk(answers)
     data_coverage = _data_coverage(snapshot)
     trend = _trend(snapshot)
-    direction = _recommended_direction(snapshot=snapshot, trend=trend)
-
-    plan_decision: dict[str, Any]
-    if maternal_red_flags:
-        plan_decision = {
-            "can_start_plan": False,
-            "recommended_direction": None,
-            "reason": "maternal_red_flags_require_professional_support",
-        }
-    elif infant_intake_risk:
-        plan_decision = {
-            "can_start_plan": False,
-            "recommended_direction": None,
-            "reason": "infant_intake_signals_require_professional_support",
-        }
-    elif data_coverage == "no_recent_data":
-        plan_decision = {
-            "can_start_plan": False,
-            "recommended_direction": None,
-            "reason": "recent_records_required_before_plan",
-        }
-    elif direction is None:
-        plan_decision = {
-            "can_start_plan": False,
-            "recommended_direction": None,
-            "reason": "no_supported_plan_direction",
-        }
-    else:
-        reason = {
-            "increase": "recent_milk_below_expected_eligible_for_plan",
-            "maintain": "recent_milk_stable_eligible_for_plan",
-            "decrease": "recent_milk_above_expected_eligible_for_plan",
-        }[direction]
-        plan_decision = {"can_start_plan": True, "recommended_direction": direction, "reason": reason}
-
-    context: dict[str, Any] = {
-        "schema_version": MILK_ANALYSIS_SCHEMA_VERSION,
-        "records_snapshot": snapshot,
-        "answers": answers,
-    }
-    fingerprint = milk_analysis_context_fingerprint(context)
     assessment: dict[str, Any] = {
         "phase": "assessment_complete",
-        "analysis_context": context,
-        "analysis_context_fingerprint": fingerprint,
         "risk": {
             "maternal_red_flags": maternal_red_flags,
             "infant_intake_risk": infant_intake_risk,
         },
-        "eligibility": {
+        "findings": {
             "data_coverage": data_coverage,
-            "trend": trend,
-            "direction": direction,
+            "pumping_trend": trend,
         },
-        "plan_decision": plan_decision,
     }
-    assessment["card"] = _milk_analysis_card(assessment)
+    assessment["card"] = _milk_analysis_card(
+        assessment,
+        snapshot=snapshot,
+        answers=answers,
+    )
     return assessment
-
-
-def milk_analysis_context_fingerprint(context: dict[str, Any]) -> str:
-    encoded = json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
 
 
 def _project_intake(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -204,21 +159,6 @@ def _trend(snapshot: dict[str, Any]) -> str:
     raw_status = snapshot.get("status")
     status: dict[str, Any] = dict(raw_status) if isinstance(raw_status, dict) else {}
     return _text(analysis.get("pumping_trend")) or _text(status.get("pumping_trend")) or "insufficient_data"
-
-
-def _recommended_direction(*, snapshot: dict[str, Any], trend: str) -> str | None:
-    raw_analysis = snapshot.get("analysis")
-    analysis: dict[str, Any] = dict(raw_analysis) if isinstance(raw_analysis, dict) else {}
-    explicit = _text(analysis.get("status")) or (_text(snapshot.get("status")) if not isinstance(snapshot.get("status"), dict) else "")
-    if explicit in {"under_supply_alert", "low", "below_expected"} or trend == "decreasing":
-        return "increase"
-    if explicit in {"over_supply_alert", "high", "above_expected"} or trend == "increasing":
-        return "decrease"
-    if explicit in {"normal", "stable"} or trend == "stable":
-        return "maintain"
-    if _data_coverage(snapshot) == "ready":
-        return "maintain"
-    return None
 
 
 def _has_maternal_red_flags(answer: str) -> bool:
@@ -334,26 +274,66 @@ def _has_infant_intake_risk(answers: dict[str, Any]) -> bool:
     )
 
 
-def _milk_analysis_card(assessment: dict[str, Any]) -> dict[str, Any]:
-    context = assessment["analysis_context"]
-    snapshot = context["records_snapshot"]
-    answers = context["answers"]
-    decision = assessment["plan_decision"]
-    direction_labels = {
-        "increase": "更适合先讨论追奶计划",
-        "maintain": "可继续当前节奏或制定稳奶计划",
-        "decrease": "更适合先讨论温和减奶计划",
+def summarize_pumping_rhythm(pumpings: list[dict[str, Any]], *, timezone_name: str) -> dict[str, Any]:
+    timezone_info = _timezone(timezone_name)
+    values_by_date: dict[date, list[str]] = {}
+    for pumping in pumpings:
+        if not isinstance(pumping, dict):
+            continue
+        raw = str(pumping.get("pump_start_time") or "").strip()
+        if not raw:
+            continue
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone_info)
+        values_by_date.setdefault(parsed.date(), []).append(parsed.strftime("%H:%M"))
+    if not values_by_date:
+        return {
+            "timezone": timezone_info.key,
+            "representative_date": None,
+            "representative_times": [],
+        }
+    representative_date = max(
+        values_by_date,
+        key=lambda item: (len(values_by_date[item]), item),
+    )
+    return {
+        "timezone": timezone_info.key,
+        "representative_date": representative_date.isoformat(),
+        "representative_times": sorted(set(values_by_date[representative_date]))[
+            :MAX_REPRESENTATIVE_PUMPING_TIMES
+        ],
     }
-    if decision["can_start_plan"]:
-        headline = direction_labels.get(decision["recommended_direction"], "已完成奶量分析")
-    elif assessment["risk"]["maternal_red_flags"]:
-        headline = "当前先处理乳房或全身不适，再考虑奶量计划"
+
+
+def _milk_analysis_card(
+    assessment: dict[str, Any],
+    *,
+    snapshot: dict[str, Any],
+    answers: dict[str, Any],
+) -> dict[str, Any]:
+    findings = assessment["findings"]
+    if assessment["risk"]["maternal_red_flags"]:
+        headline = "当前存在需要优先处理的乳房或全身不适信号"
     elif assessment["risk"]["infant_intake_risk"]:
-        headline = "当前先确认宝宝摄入和生长信号，再考虑奶量计划"
+        headline = "当前存在需要优先确认的宝宝摄入或生长信号"
+    elif findings["data_coverage"] == "no_recent_data":
+        headline = "近期记录不足，暂时无法判断奶量趋势"
+    elif findings["pumping_trend"] == "increasing":
+        headline = "近期有测量值的吸奶产出呈上升趋势"
+    elif findings["pumping_trend"] == "decreasing":
+        headline = "近期有测量值的吸奶产出呈下降趋势"
+    elif findings["pumping_trend"] == "stable":
+        headline = "近期有测量值的吸奶产出整体稳定"
     else:
-        headline = "近期记录还不足，先补记录再判断"
-    counts = snapshot.get("counts") if isinstance(snapshot.get("counts"), dict) else {}
-    volumes = snapshot.get("volumes") if isinstance(snapshot.get("volumes"), dict) else {}
+        headline = "当前记录可供参考，但还不足以确认奶量趋势"
+    raw_counts = snapshot.get("counts")
+    counts: dict[str, Any] = dict(raw_counts) if isinstance(raw_counts, dict) else {}
+    raw_volumes = snapshot.get("volumes")
+    volumes: dict[str, Any] = dict(raw_volumes) if isinstance(raw_volumes, dict) else {}
     return {
         "card_type": "milk_analysis_card",
         "title": "奶量分析",
@@ -381,9 +361,14 @@ def _milk_analysis_card(assessment: dict[str, Any]) -> dict[str, Any]:
             },
             {"id": "next", "title": "下一步", "items": [headline]},
         ],
-        "can_start_plan": decision["can_start_plan"],
-        "recommended_direction": decision["recommended_direction"],
     }
+
+
+def _timezone(value: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(value or "UTC")
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
 
 
 def _text(value: Any) -> str:

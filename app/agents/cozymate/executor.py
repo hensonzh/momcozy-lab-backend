@@ -562,7 +562,7 @@ class CozymateAgentExecutor:
             ),
         )
         output = dict(execution.canonical_output)
-        if _text(output, "status") == "urgent_care_required":
+        if _is_urgent_plan_output(output):
             required_response = _text(output, "required_response")
             if required_response:
                 self._turn_state(run.id).authoritative_final_text = required_response
@@ -1368,7 +1368,7 @@ class CozymateAgentExecutor:
         if trusted_args:
             execute_kwargs["trusted_args"] = trusted_args
         result = await self.tool_executor.execute(**execute_kwargs)
-        if _text(result.canonical_output, "status") == "urgent_care_required":
+        if _is_urgent_plan_output(result.canonical_output):
             required_response = _text(result.canonical_output, "required_response")
             if required_response:
                 self._turn_state(run.id).authoritative_final_text = required_response
@@ -1426,6 +1426,7 @@ class CozymateAgentExecutor:
             plan_trusted_args: dict[str, Any] = {
                 "runtime_local_date": self._turn_state(run.id).local_date,
                 "runtime_timezone": self._turn_state(run.id).timezone,
+                "trusted_current_user_text": self._turn_state(run.id).current_user_text,
             }
             if (
                 _text(args or {}, "operation") == "create"
@@ -1438,9 +1439,6 @@ class CozymateAgentExecutor:
                             workflow=workflow
                         ),
                         "runtime_workflow_context": _dict(workflow, "state"),
-                        "trusted_current_user_text": self._turn_state(
-                            run.id
-                        ).current_user_text,
                         "runtime_checkup_attachment_count": self._turn_state(
                             run.id
                         ).checkup_attachment_count,
@@ -2038,6 +2036,14 @@ def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> 
         and _text(_dict(tool_call, "safe_args"), "command") == "submit_form"
         and _text(_dict(tool_call, "output"), "status") in {"intake_analyzed", "intake_in_progress"}
         for tool_call in tool_calls
+    )
+
+
+def _is_urgent_plan_output(output: dict[str, Any]) -> bool:
+    return (
+        _text(output, "status") == "urgent_care_required"
+        or _text(output, "result_code") == "urgent_care_required"
+        or output.get("blocks_plan_flow") is True
     )
 
 

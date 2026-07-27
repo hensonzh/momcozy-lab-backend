@@ -157,26 +157,30 @@ return server-side `apply_payload` or action idempotency keys.
 The `plan_mutate` path for `operation=create, plan_type=pregnancy` executes the
 `pregnancy.plan.create` Action and also emits the durable application
 event `pregnancy_plan.changed` in the same transaction as the authoritative
-Plan and action result. Its payload is intentionally limited to
+Plan, its expanded timeline tasks, and the action result. Its payload is intentionally limited to
 `operation=created`, opaque `plan_id`, `plan_type=pregnancy`,
-`source=agent_action`, and `action_id`. Failed apply states do not emit this business
+`source=agent_action`, `task_count`, and `action_id`. Failed apply states do not emit this business
 event, and it never contains the personalized card, plan context, or health
 facts. Clients use it only as an invalidation/notification signal and reload the
 owner-scoped resource through
 `GET /v1/plans?plan_type=pregnancy&status=active`.
 
-After an authorized milk plan is actually created, the same executor
-transaction persists both the owner-scoped Plan and every expanded PlanTask.
-The proposal must contain at least one bounded, schedulable task template;
-templates without an explicit date repeat across the persisted `start_date`
-and `days` range. Any plan or task failure rolls the entire action back. The
-same transaction emits durable `milk_plan.changed`. Before executor metadata is
-added, its exact domain payload is `operation=created`, `reason=created`, opaque
-`plan_id`, `plan_type=milk_management`, `source=agent_action`, and a deduplicated,
-sorted `affected_dates` list derived from the PlanTasks actually written. The
-executor adds `action_id` and stable presentation fields. The event contains no
-title, summary, task text, reminder text, lactation history, or health facts;
-failed writes and applied-action replays emit no duplicate event.
+Plan list reads return bounded metadata only; callers use the detail mode for
+type-specific content. Plans persist effective start/end dates, expired active
+rows are excluded from current lists and the schedule timeline, and an owner can
+have only one active pregnancy plan. Deleting a plan also soft-deletes all linked
+timeline tasks. Agent-side whole-plan deletion requires model-provided verbatim
+evidence from the current user message; runtime-owned current-message text
+grounds that evidence before an Action can be proposed.
+
+New `milk_management` plan creation is retired. It is absent from the
+model-facing `plan_mutate` contract, and the service rejects direct creation
+attempts with `unsupported_plan_type`. Existing owner-scoped milk plans remain
+readable, updatable, deletable, and available to schedule-task management.
+Changes to those existing resources emit durable `milk_plan.changed` events
+with operations such as `updated`, `deleted`, or `rescheduled`; the event is an
+invalidation signal and does not contain plan text, lactation history, or
+health facts.
 
 ## Files
 

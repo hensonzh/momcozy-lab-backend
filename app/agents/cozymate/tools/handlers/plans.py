@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -12,10 +12,10 @@ from app.core.errors import ApiError
 from app.modules.plans.service import PlansService
 
 from .base import _StandardToolHandler
-from .milk import MilkPlanProposeToolHandler
 from .plans_diary import PlanDeleteProposeToolHandler, PregnancyPlanProposeToolHandler
 from .shared import (
     _limit,
+    _optional_date_arg,
     _optional_uuid_arg,
     _proposal_result,
     _propose_action_reusing_idempotency,
@@ -30,7 +30,6 @@ class PlanReadToolHandler(_StandardToolHandler):
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         mode = _text(context.args, "mode") or "list"
-        include_content = context.args.get("include_content") is True
         if mode == "detail":
             plan_id = _optional_uuid_arg(context.args, "plan_id")
             if plan_id is None:
@@ -42,25 +41,26 @@ class PlanReadToolHandler(_StandardToolHandler):
             return {
                 "status": "plan_read",
                 "mode": "detail",
-                "plan": _plan_item(plan, include_content=include_content),
+                "plan": _plan_item(plan, include_content=True),
                 "plans": [],
                 "count": 1,
                 "truncated": False,
             }
         if mode != "list":
             raise ApiError(code="validation_failed", message="mode must be list or detail.", status=422)
-        limit = _limit(context.args.get("limit"), default=20, max_limit=50)
+        limit = _limit(context.args.get("limit"), default=20, max_limit=20)
         plans = await self.plans_service.list_plans(
             owner_user_id=context.actor.user_id,
             plan_type=_text(context.args, "plan_type"),
             status="active",
+            as_of_date=_optional_date_arg(context.args, "runtime_local_date"),
             limit=limit,
         )
         return {
             "status": "plans_read",
             "mode": "list",
             "plan": None,
-            "plans": [_plan_item(plan, include_content=include_content) for plan in plans],
+            "plans": [_plan_item(plan, include_content=False) for plan in plans],
             "count": len(plans),
             "truncated": len(plans) >= limit,
         }
@@ -72,16 +72,11 @@ class PlanMutateToolHandler(_StandardToolHandler):
         *,
         runtime_service: AgentRuntimeService,
         plans_service: PlansService,
-        milk_create_handler: Any | None = None,
         pregnancy_create_handler: Any | None = None,
         delete_handler: Any | None = None,
     ) -> None:
         self.runtime_service = runtime_service
         self.plans_service = plans_service
-        self.milk_create_handler = milk_create_handler or MilkPlanProposeToolHandler(
-            runtime_service=runtime_service,
-            plans_service=plans_service,
-        )
         self.pregnancy_create_handler = pregnancy_create_handler or PregnancyPlanProposeToolHandler(
             runtime_service=runtime_service,
         )
@@ -106,15 +101,12 @@ class PlanMutateToolHandler(_StandardToolHandler):
                 message="plan_type is required for plan creation.",
                 status=422,
             )
-        handlers = {
-            "milk_management": self.milk_create_handler,
-            "pregnancy": self.pregnancy_create_handler,
-        }
+        handlers = {"pregnancy": self.pregnancy_create_handler}
         handler = handlers.get(plan_type)
         if handler is None:
             raise ApiError(
                 code="unsupported_plan_type",
-                message="Plan creation currently supports milk_management and pregnancy.",
+                message="Plan creation currently supports pregnancy.",
                 status=422,
             )
         result = await handler.execute(context)
@@ -202,7 +194,11 @@ class PlanMutateToolHandler(_StandardToolHandler):
                 apply_payload,
             ),
         )
-        return _proposal_result(action=action, preview_payload=preview_payload)
+        return _proposal_result(
+            action=action,
+            preview_payload=preview_payload,
+            include_apply_result=True,
+        )
 
 
 def _plan_item(plan: Any, *, include_content: bool) -> dict[str, Any]:
@@ -214,6 +210,8 @@ def _plan_item(plan: Any, *, include_content: bool) -> dict[str, Any]:
         "status": str(plan.status or ""),
         "source": str(plan.source or ""),
         "version": int(plan.version),
+        "starts_on": _date_iso(getattr(plan, "starts_on", None)),
+        "ends_on": _date_iso(getattr(plan, "ends_on", None)),
         "created_at": _datetime_iso(getattr(plan, "created_at", None)),
         "updated_at": _datetime_iso(getattr(plan, "updated_at", None)),
         "content": _safe_plan_content(
@@ -252,13 +250,11 @@ def _plan_mutate_result(
     plan_id: UUID | None,
 ) -> dict[str, Any] | ToolResult:
     if isinstance(result, ToolResult):
-        canonical_output = dict(result.canonical_output)
-        canonical_output.update(
-            {
-                "operation": operation,
-                "plan_type": plan_type,
-                "plan_id": str(plan_id) if plan_id is not None else None,
-            }
+        canonical_output = _normalized_plan_mutate_output(
+            output=dict(result.canonical_output),
+            operation=operation,
+            plan_type=plan_type,
+            plan_id=plan_id,
         )
         return ToolResult(
             canonical_output=canonical_output,
@@ -266,21 +262,77 @@ def _plan_mutate_result(
             serialization=result.serialization,
             deferred_events=result.deferred_events,
         )
-    output = {
-        **result,
-        "operation": operation,
-        "plan_type": plan_type,
-        "plan_id": str(plan_id) if plan_id is not None else None,
-    }
-    if not _text(output, "status"):
-        if output.get("write_succeeded") is True:
-            output["status"] = "plan_change_applied"
-        elif output.get("requires_confirmation") is True:
-            output["status"] = "plan_change_pending_confirmation"
-        else:
-            output["status"] = "plan_change_proposed"
+    return _normalized_plan_mutate_output(
+        output=dict(result),
+        operation=operation,
+        plan_type=plan_type,
+        plan_id=plan_id,
+    )
+
+
+def _normalized_plan_mutate_output(
+    *,
+    output: dict[str, Any],
+    operation: str,
+    plan_type: str,
+    plan_id: UUID | None,
+) -> dict[str, Any]:
+    original_status = _text(output, "status")
+    action_status = _text(output, "action_status")
+    resource_type = _text(output, "resource_type")
+    resource_id = _text(output, "resource_id")
+    result_details = output.get("result_details")
+    details = dict(result_details) if isinstance(result_details, dict) else {}
+    resolved_plan_id = str(plan_id) if plan_id is not None else None
+    if plan_id is None and resource_type == "plan" and resource_id:
+        resolved_plan_id = resource_id
+    version = details.get("version")
+    plan_version = (
+        version
+        if isinstance(version, int) and not isinstance(version, bool) and version >= 1
+        else None
+    )
+    if output.get("task_count") is None:
+        task_count = details.get("task_count")
+        if isinstance(task_count, int) and not isinstance(task_count, bool) and task_count >= 0:
+            output["task_count"] = task_count
+    output.update(
+        {
+            "status": _plan_mutate_status(
+                action_status=action_status,
+                original_status=original_status,
+                output=output,
+            ),
+            "result_code": f"action_{action_status}" if action_status else original_status or "input_required",
+            "operation": operation,
+            "plan_type": plan_type,
+            "plan_id": resolved_plan_id,
+            "plan_version": plan_version,
+        }
+    )
     return output
+
+
+def _plan_mutate_status(
+    *,
+    action_status: str,
+    original_status: str,
+    output: dict[str, Any],
+) -> str:
+    if action_status == "applied" or output.get("write_succeeded") is True:
+        return "applied"
+    if action_status == "confirmation_required" or output.get("requires_confirmation") is True:
+        return "confirmation_required"
+    if action_status == "failed" or output.get("error_code"):
+        return "failed"
+    if output.get("blocks_plan_flow") is True or original_status == "urgent_care_required":
+        return "blocked"
+    return "input_required"
 
 
 def _datetime_iso(value: Any) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else None
+
+
+def _date_iso(value: Any) -> str | None:
+    return value.isoformat() if isinstance(value, date) and not isinstance(value, datetime) else None

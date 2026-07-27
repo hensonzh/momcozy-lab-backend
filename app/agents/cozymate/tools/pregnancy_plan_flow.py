@@ -6,6 +6,8 @@ from datetime import date, datetime, timezone
 from enum import StrEnum
 from typing import Any
 
+from app.modules.plans.pregnancy_plan_todos import normalize_pregnancy_todo_periods
+
 
 PREGNANCY_PLAN_INTAKE_FORM_ID = "birth_journey_basic_info_intake"
 PREGNANCY_PLAN_WORKFLOW_TYPE = "pregnancy_plan"
@@ -1416,7 +1418,9 @@ def build_pregnancy_plan_card_json(plan_context: dict[str, Any]) -> dict[str, An
         "medical_notes": _first_text(context.get("medical_notes")),
         "doctor_notes": _first_text(context.get("doctor_notes")),
     }
-    periods = _pregnancy_plan_todo_periods(week=week, current_items=current_items)
+    periods = normalize_pregnancy_todo_periods(
+        _pregnancy_plan_todo_periods(week=week, current_items=current_items)
+    )
     phases = _pregnancy_plan_phases(week=week, context=context, scope=scope)
     return {
         "card_type": "birth_journey_plan_card",

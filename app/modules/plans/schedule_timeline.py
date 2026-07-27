@@ -82,6 +82,7 @@ class ScheduleTimelineService:
             owner_user_id=owner_user_id,
             domains=normalized_domains,
             status="active",
+            as_of_date=as_of_date,
             limit=MAX_ACTIVE_SCHEDULE_PLANS,
         )
         task_rows = await self.plans_service.list_schedule_timeline_tasks(
@@ -141,9 +142,13 @@ class ScheduleTimelineService:
 
 def _plan_summary(plan: Plan) -> ScheduleTimelinePlanSummary:
     payload = plan.payload if isinstance(plan.payload, dict) else {}
-    start_date = _payload_date(payload.get("start_date"))
+    start_date = plan.starts_on or _payload_date(payload.get("start_date"))
     days = _payload_positive_int(payload.get("days"))
-    end_date = start_date + timedelta(days=days - 1) if start_date is not None and days is not None else None
+    end_date = plan.ends_on or (
+        start_date + timedelta(days=days - 1)
+        if start_date is not None and days is not None
+        else None
+    )
     direction = str(payload.get("direction") or "").strip() or None
     return ScheduleTimelinePlanSummary(
         plan_id=plan.id,

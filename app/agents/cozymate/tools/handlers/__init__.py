@@ -25,7 +25,6 @@ from .milk import (
     GrowthRecordProposeToolHandler,
     GrowthRecordUpdateProposeToolHandler,
     GrowthRecordDeleteProposeToolHandler,
-    MilkPlanProposeToolHandler,
     MilkScheduleRescheduleProposeToolHandler,
 )
 from .plans_diary import (
@@ -67,7 +66,6 @@ __all__ = [
     "MilkAnalysisEvaluateToolHandler",
     "MilkAnalysisIntakeToolHandler",
     "MilkAnalysisReadToolHandler",
-    "MilkPlanProposeToolHandler",
     "MilkScheduleRescheduleProposeToolHandler",
     "MilkStatusReadToolHandler",
     "PlanDeleteProposeToolHandler",

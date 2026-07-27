@@ -77,9 +77,10 @@ def _handler(
             "workflow_state_id": str(uuid4()),
             "artifact_id": str(uuid4()),
             "artifact_type": "milk_analysis_card",
-            "can_start_plan": True,
-            "recommended_direction": "stabilize",
-            "reason": "Signals are stable.",
+            "maternal_red_flags": False,
+            "infant_intake_risk": False,
+            "data_coverage": "ready",
+            "pumping_trend": "stable",
         }
     )
     return (
@@ -251,9 +252,10 @@ def test_milk_analysis_evaluate_normalizes_result_and_preserves_deferred_events(
             "workflow_state_id": str(uuid4()),
             "artifact_id": str(uuid4()),
             "artifact_type": "milk_analysis_card",
-            "can_start_plan": False,
-            "recommended_direction": None,
-            "reason": "More data is required.",
+            "maternal_red_flags": False,
+            "infant_intake_risk": False,
+            "data_coverage": "limited",
+            "pumping_trend": "insufficient_data",
             DEFERRED_AGENT_EVENTS_KEY: [deferred_event],
         }
     )

@@ -229,7 +229,7 @@ def test_stream_run_event_chunks_yields_transient_delta_while_following() -> Non
     assert payloads[0]["payload"]["delta"] == "hello"
 
 
-def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(monkeypatch) -> None:
+def test_pregnancy_plan_stream_resumes_after_follow_window_and_reaches_confirmation(monkeypatch) -> None:
     thread_id = uuid4()
     run_id = uuid4()
     progress = AgentEvent(
@@ -238,7 +238,7 @@ def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(m
         run_id=run_id,
         sequence=1,
         event_type="run.progress",
-        payload={"phase": "tool_running", "label": "正在生成追奶计划"},
+        payload={"phase": "tool_running", "label": "正在生成孕期计划"},
     )
     resumed_events = [
         AgentEvent(
@@ -255,7 +255,7 @@ def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(m
             run_id=run_id,
             sequence=3,
             event_type="artifact.created",
-            payload={"artifact_type": "milk_plan_preview"},
+            payload={"artifact_type": "plan_preview"},
         ),
         AgentEvent(
             event_id=uuid4(),
@@ -263,7 +263,7 @@ def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(m
             run_id=run_id,
             sequence=4,
             event_type="action.confirmation_required",
-            payload={"action_type": "plans.milk_plan.create"},
+            payload={"action_type": "pregnancy.plan.create"},
         ),
         AgentEvent(
             event_id=uuid4(),
@@ -271,7 +271,7 @@ def test_milk_plan_stream_resumes_after_follow_window_and_reaches_confirmation(m
             run_id=run_id,
             sequence=5,
             event_type="message.completed",
-            payload={"role": "assistant", "text": "请确认后创建追奶计划。"},
+            payload={"role": "assistant", "text": "请确认后创建孕期计划。"},
         ),
         AgentEvent(
             event_id=uuid4(),

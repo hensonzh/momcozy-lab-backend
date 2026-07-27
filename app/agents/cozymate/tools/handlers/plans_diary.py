@@ -29,9 +29,10 @@ from .base import (
     _ToolOperationOutput,
 )
 from .shared import (
+    _create_payload_scoped_artifact_once,
     _date_iso,
+    _delete_confirmation_evidence_is_trusted,
     _deferred_artifact_created_event,
-    _diary_delete_confirmation_evidence_is_trusted,
     _diary_entry_date,
     _diary_payload,
     _dict,
@@ -169,7 +170,7 @@ class DiaryDeleteToolHandler(_StandardToolHandler):
 
     async def execute(self, context: ToolHandlerContext) -> dict[str, Any]:
         entry_date = _diary_entry_date(context.args)
-        if not _diary_delete_confirmation_evidence_is_trusted(context.args):
+        if not _delete_confirmation_evidence_is_trusted(context.args):
             return {
                 "status": "needs_delete_confirmation",
                 "side_effect_performed": False,
@@ -287,23 +288,20 @@ class PregnancyPlanProposeToolHandler(_StandardToolHandler):
         }
         propose_once = getattr(self.runtime_service, "propose_action_once", None)
         if callable(propose_once):
-            action, action_created = await propose_once(**action_kwargs)
+            action, _action_created = await propose_once(**action_kwargs)
         else:
             action = await self.runtime_service.propose_action(**action_kwargs)
-            action_created = True
         if str(getattr(action, "status", "") or "") == "failed":
             return _failed_action_result(action=action, preview_payload=preview_payload)
-        if not action_created:
-            return _proposal_result(action=action, preview_payload=dict(action.preview_payload or preview_payload))
         artifact_payload = {**dict(artifact_record["payload"]), "action_id": str(action.id)}
-        artifact = await self.runtime_service.create_artifact(
+        artifact, artifact_created = await _create_payload_scoped_artifact_once(
+            self.runtime_service,
             owner_user_id=context.actor.user_id,
             run_id=context.run_id,
             artifact_type=str(artifact_record["artifact_type"]),
             schema_version=str(artifact_record["schema_version"]),
             status="created",
             payload=artifact_payload,
-            emit_event=False,
         )
         workflow = _dict(context.args, "runtime_workflow_context")
         workflow.update(
@@ -320,13 +318,19 @@ class PregnancyPlanProposeToolHandler(_StandardToolHandler):
             context=context,
             workflow=workflow,
         )
-        return {
-            **_proposal_result(action=action, preview_payload=preview_payload),
+        output = {
+            **_proposal_result(
+                action=action,
+                preview_payload=dict(action.preview_payload or preview_payload),
+                include_apply_result=True,
+            ),
             "artifact_id": str(artifact.id),
             "artifact_type": artifact.artifact_type,
             "status": artifact.status,
-            DEFERRED_AGENT_EVENTS_KEY: [_deferred_artifact_created_event(artifact)],
         }
+        if artifact_created:
+            output[DEFERRED_AGENT_EVENTS_KEY] = [_deferred_artifact_created_event(artifact)]
+        return output
 
 
 class PlanDeleteProposeToolHandler(_StandardToolHandler):
@@ -339,6 +343,12 @@ class PlanDeleteProposeToolHandler(_StandardToolHandler):
         raw_plan_id = _text(apply_payload, "plan_id")
         if not raw_plan_id:
             raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
+        if not _delete_confirmation_evidence_is_trusted(context.args):
+            return {
+                "status": "needs_plan_delete_confirmation",
+                "write_succeeded": False,
+                "plan_id": raw_plan_id,
+            }
         plan_id = _optional_uuid_arg(apply_payload, "plan_id")
         if plan_id is None:
             raise ApiError(code="validation_failed", message="plan_id is required.", status=422)
@@ -362,4 +372,8 @@ class PlanDeleteProposeToolHandler(_StandardToolHandler):
                 apply_payload,
             ),
         )
-        return _proposal_result(action=action, preview_payload=preview_payload)
+        return _proposal_result(
+            action=action,
+            preview_payload=preview_payload,
+            include_apply_result=True,
+        )

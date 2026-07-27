@@ -1,29 +1,22 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID
 
 from app.agent_runtime.actions import AgentActionApplyResult, AgentApplicationEvent, PermanentActionError
 from app.agent_runtime.runs.models import AgentAction
 from app.core.errors import ApiError
-from app.modules.plans.milk_plan_schedule import (
-    MilkPlanScheduleValidationError,
-    normalize_milk_plan_payload,
-    scheduled_task_dates,
-)
 from app.modules.plans.milk_schedule_calendar import (
     MilkScheduleCalendarEventError,
     normalize_milk_schedule_calendar_events,
 )
+from app.modules.plans.pregnancy_plan_tasks import pregnancy_plan_task_drafts
 from app.modules.plans.service import PlansService
 
 
-MILK_PLAN_CREATE_ACTION = "plans.milk_plan.create"
 MILK_PLAN_CHANGED_EVENT = "milk_plan.changed"
 MILK_SCHEDULE_RESCHEDULE_ACTION = "plans.milk_schedule.reschedule"
-MILK_PLAN_CALENDAR_APPEND = "append"
-MILK_PLAN_CALENDAR_REPLACE = "replace_future_plan_tasks"
 PREGNANCY_PLAN_CREATE_ACTION = "pregnancy.plan.create"
 PREGNANCY_PLAN_CHANGED_EVENT = "pregnancy_plan.changed"
 PLAN_TASK_CREATE_ACTION = "plans.task.create"
@@ -32,109 +25,6 @@ PLAN_TASK_UPDATE_ACTION = "plans.task.update"
 PLAN_TASK_DELETE_ACTION = "plans.task.delete"
 PLAN_UPDATE_ACTION = "plans.plan.update"
 PLAN_DELETE_ACTION = "plans.plan.delete"
-
-
-class MilkPlanCreateActionHandler:
-    def __init__(self, *, service: PlansService) -> None:
-        self.service = service
-
-    async def __call__(self, action: AgentAction) -> AgentActionApplyResult:
-        if _is_expired(action.expires_at):
-            raise PermanentActionError("milk_analysis_expired_before_plan")
-        payload = dict(action.apply_payload or {})
-        title = _text(payload, "title")
-        if not title:
-            raise PermanentActionError("missing_plan_title")
-
-        plan_payload = payload.get("payload")
-        if not isinstance(plan_payload, dict):
-            plan_payload = {}
-        _validate_milk_plan_lineage(plan_payload)
-        try:
-            normalized_plan_payload, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
-        except MilkPlanScheduleValidationError as exc:
-            raise PermanentActionError("invalid_milk_plan_schedule") from exc
-        calendar_write_strategy = _text(payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND
-        if calendar_write_strategy not in {MILK_PLAN_CALENDAR_APPEND, MILK_PLAN_CALENDAR_REPLACE}:
-            raise PermanentActionError("invalid_milk_plan_calendar_write_strategy")
-        replaced_tasks: list[Any] = []
-        try:
-            if calendar_write_strategy == MILK_PLAN_CALENDAR_REPLACE:
-                expected_task_ids = _required_uuid_list(
-                    payload,
-                    "expected_replaced_task_ids",
-                    "invalid_expected_replaced_task_ids",
-                )
-                start_date = date.fromisoformat(str(normalized_plan_payload["start_date"]))
-                end_date = start_date + timedelta(days=int(normalized_plan_payload["days"]) - 1)
-                replaced_tasks = await self.service.replace_future_milk_plan_tasks(
-                    owner_user_id=action.actor_user_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                    expected_task_ids=expected_task_ids,
-                    request_id=f"agent-action:{action.id}",
-                )
-            plan = await self.service.create_plan(
-                owner_user_id=action.actor_user_id,
-                plan_type="milk_management",
-                title=title,
-                summary=_text(payload, "summary"),
-                source="agent_action",
-                payload={
-                    **normalized_plan_payload,
-                    "agent_action_id": str(action.id),
-                    "agent_run_id": str(action.run_id),
-                },
-                request_id=f"agent-action:{action.id}",
-                idempotency_key=action.idempotency_key or f"agent-action:{action.id}",
-            )
-            for index, scheduled in enumerate(scheduled_tasks):
-                await self.service.create_task(
-                    owner_user_id=action.actor_user_id,
-                    plan_id=plan.id,
-                    task_date=scheduled.task_date,
-                    task_time=scheduled.task_time,
-                    title=scheduled.title,
-                    description=scheduled.description,
-                    payload={
-                        "task_type": scheduled.task_type,
-                        "source": "agent_action",
-                        "agent_action_id": str(action.id),
-                        "agent_run_id": str(action.run_id),
-                        **({"duration_minutes": scheduled.duration_minutes} if scheduled.duration_minutes is not None else {}),
-                    },
-                    request_id=f"agent-action:{action.id}",
-                    idempotency_key=f"agent-action:{action.id}:schedule:{index}",
-                )
-        except ApiError as exc:
-            raise PermanentActionError(exc.code) from exc
-
-        return AgentActionApplyResult(
-            resource_type="plan",
-            resource_id=str(plan.id),
-            details={
-                "plan_type": plan.plan_type,
-                "task_count": len(scheduled_tasks),
-                "replaced_task_count": len(replaced_tasks),
-                "calendar_write_strategy": calendar_write_strategy,
-                "agent_action_id": str(action.id),
-                "agent_run_id": str(action.run_id),
-            },
-            application_events=(
-                AgentApplicationEvent(
-                    event_type=MILK_PLAN_CHANGED_EVENT,
-                    payload={
-                        "operation": "created",
-                        "reason": "created",
-                        "plan_id": str(plan.id),
-                        "plan_type": plan.plan_type,
-                        "source": "agent_action",
-                        "affected_dates": scheduled_task_dates(scheduled_tasks),
-                        "replaced_task_count": len(replaced_tasks),
-                    },
-                ),
-            ),
-        )
 
 
 class MilkScheduleRescheduleActionHandler:
@@ -259,6 +149,23 @@ class PregnancyPlanCreateActionHandler:
                 request_id=f"agent-action:{action.id}",
                 idempotency_key=action.idempotency_key or f"agent-action:{action.id}",
             )
+            task_drafts = pregnancy_plan_task_drafts(plan.payload)
+            for index, draft in enumerate(task_drafts):
+                await self.service.create_task(
+                    owner_user_id=action.actor_user_id,
+                    plan_id=plan.id,
+                    task_date=draft.task_date,
+                    task_time="",
+                    title=draft.title,
+                    description=draft.description,
+                    payload={
+                        **draft.payload,
+                        "agent_action_id": str(action.id),
+                        "agent_run_id": str(action.run_id),
+                    },
+                    request_id=f"agent-action:{action.id}",
+                    idempotency_key=f"agent-action:{action.id}:pregnancy-task:{index}",
+                )
         except ApiError as exc:
             raise PermanentActionError(exc.code) from exc
 
@@ -267,6 +174,9 @@ class PregnancyPlanCreateActionHandler:
             resource_id=str(plan.id),
             details={
                 "plan_type": plan.plan_type,
+                "status": plan.status,
+                "version": plan.version,
+                "task_count": len(task_drafts),
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -278,6 +188,7 @@ class PregnancyPlanCreateActionHandler:
                         "plan_id": str(plan.id),
                         "plan_type": plan.plan_type,
                         "source": plan.source,
+                        "task_count": len(task_drafts),
                     },
                 ),
             ),
@@ -464,6 +375,7 @@ class PlanDeleteActionHandler:
                 owner_user_id=action.actor_user_id,
                 plan_id=plan_id,
                 request_id=f"agent-action:{action.id}",
+                reason=_text(payload, "reason"),
             )
         except ApiError as exc:
             raise PermanentActionError(exc.code) from exc
@@ -499,6 +411,15 @@ class PlanDeleteActionHandler:
             resource_type="plan",
             resource_id=str(plan_id),
             details={
+                **(
+                    {
+                        "plan_type": plan.plan_type,
+                        "status": "deleted",
+                        "version": plan.version,
+                    }
+                    if plan is not None
+                    else {}
+                ),
                 "agent_action_id": str(action.id),
                 "agent_run_id": str(action.run_id),
             },
@@ -622,24 +543,6 @@ def _text(payload: dict[str, Any], key: str) -> str:
     return str(payload.get(key) or "").strip()
 
 
-def _is_expired(expires_at: datetime | None) -> bool:
-    if expires_at is None:
-        return False
-    comparable = expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=timezone.utc)
-    return comparable <= datetime.now(timezone.utc)
-
-
-def _validate_milk_plan_lineage(payload: dict[str, Any]) -> None:
-    if _text(payload, "direction") not in {"increase", "maintain", "decrease"}:
-        raise PermanentActionError("invalid_milk_analysis_lineage")
-    if not _text(payload, "analysis_context_fingerprint"):
-        raise PermanentActionError("invalid_milk_analysis_lineage")
-    try:
-        UUID(_text(payload, "analysis_workflow_state_id"))
-    except (TypeError, ValueError) as exc:
-        raise PermanentActionError("invalid_milk_analysis_lineage") from exc
-
-
 def _required_uuid(payload: dict[str, Any], key: str, missing_code: str, invalid_code: str) -> UUID:
     value = _text(payload, key)
     if not value:
@@ -677,22 +580,6 @@ def _optional_bool(payload: dict[str, Any], key: str, *, default: bool, code: st
     if isinstance(value, bool):
         return value
     raise PermanentActionError(code)
-
-
-def _required_uuid_list(payload: dict[str, Any], key: str, code: str) -> list[UUID]:
-    values = payload.get(key)
-    if not isinstance(values, list):
-        raise PermanentActionError(code)
-    parsed: list[UUID] = []
-    for value in values:
-        try:
-            item = UUID(str(value or ""))
-        except ValueError as exc:
-            raise PermanentActionError(code) from exc
-        if item in parsed:
-            raise PermanentActionError(code)
-        parsed.append(item)
-    return parsed
 
 
 def _task_updates(payload: dict[str, Any]) -> dict[str, Any]:

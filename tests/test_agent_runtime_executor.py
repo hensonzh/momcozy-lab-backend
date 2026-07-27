@@ -1283,10 +1283,8 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["plan_read"]["required"] == ["mode"]
     assert backend.tool_schemas["plan_mutate"]["required"] == ["operation"]
     assert "tasks" not in backend.tool_schemas["plan_mutate"]["properties"]
-    assert backend.tool_schemas["plan_mutate"]["properties"]["calendar_write_strategy"]["enum"] == [
-        "append",
-        "replace_future_plan_tasks",
-    ]
+    assert "direction" not in backend.tool_schemas["plan_mutate"]["properties"]
+    assert "calendar_write_strategy" not in backend.tool_schemas["plan_mutate"]["properties"]
     assert backend.tool_schemas["schedule_timeline_mutate"]["required"] == ["operation", "entry_type"]
     assert backend.tool_schemas["schedule_timeline_mutate"]["properties"]["completed"]["type"] == "boolean"
     assert backend.tool_schemas["schedule_timeline_mutate"]["properties"]["operation"]["enum"] == [
@@ -1407,6 +1405,32 @@ def test_agent_runtime_executor_injects_current_user_text_for_diary_confirmation
     assert trusted_args == {
         "runtime_local_date": "2026-07-12",
         "trusted_current_user_text": "请删除 7 月 4 日的日记",
+    }
+
+
+def test_agent_runtime_executor_injects_current_user_text_for_plan_delete_confirmation_evidence() -> None:
+    run = _run(thread_id=uuid4())
+    executor = CozymateAgentExecutor(
+        repository=FakeRuntimeRepository(messages=[], current_message=None),
+        sdk_runner=OpenAIResponsesRunner(backend=CapturingSdkBackend(result=SdkNodeResult(final_text=""))),
+    )
+    turn_state = executor._initialize_turn_state(run.id)
+    turn_state.current_user_text = "请删除这个计划"
+    turn_state.local_date = "2026-07-12"
+    turn_state.timezone = "Asia/Shanghai"
+
+    trusted_args = asyncio.run(
+        executor._trusted_tool_args(
+            run=run,
+            contract_name="plan_mutate",
+            args={"operation": "delete"},
+        )
+    )
+
+    assert trusted_args == {
+        "runtime_local_date": "2026-07-12",
+        "runtime_timezone": "Asia/Shanghai",
+        "trusted_current_user_text": "请删除这个计划",
     }
 
 
@@ -1993,7 +2017,7 @@ def test_agent_runtime_routes_to_milk_specialist_with_only_milk_tools() -> None:
         "milk_analysis_manage",
         "ibclc_consult_card_create",
     )
-    assert "奶量管理仅处理三类任务" in specialist_request.instructions
+    assert "奶量管理仅处理两类任务" in specialist_request.instructions
     assert "制定孕期计划" not in specialist_request.instructions
     assert run.service_skill_id == "milk-management"
     routing_events = [
@@ -2123,6 +2147,8 @@ def test_agent_runtime_runs_multi_scene_specialists_then_main_synthesis() -> Non
     assert backend.requests[2].tool_names == (
         "plan_read",
         "plan_mutate",
+        "schedule_timeline_read",
+        "schedule_timeline_mutate",
         "pregnancy_intake_manage",
         "hospital_bag_manage",
         "hospital_bag_cart_mutate",
@@ -3015,7 +3041,8 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
         workflow.active_step = ""
         return ToolResult.json(
             {
-                "status": "created",
+                "status": "applied",
+                "result_code": "action_applied",
                 "operation": "create",
                 "plan_type": "pregnancy",
                 "plan_id": None,
@@ -3371,7 +3398,8 @@ def test_agent_runtime_executor_passes_urgent_text_to_model_while_awaiting_plan_
         captured_args.update(context.args)
         return ToolResult.json(
             {
-                "status": "urgent_care_required",
+                "status": "blocked",
+                "result_code": "urgent_care_required",
                 "operation": "create",
                 "plan_type": "pregnancy",
                 "plan_id": None,

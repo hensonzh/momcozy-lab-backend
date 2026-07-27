@@ -18,13 +18,7 @@ from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.modules.assets.models import ProductAsset
 from app.modules.assets.service import ProductAssetService
 from app.modules.diary.models import DiaryEntry
-from app.agents.cozymate.actions.plans import (
-    MILK_PLAN_CALENDAR_APPEND,
-)
 from app.modules.plans.models import Plan, PlanTask
-from app.modules.plans.milk_plan_schedule import (
-    normalize_milk_plan_payload,
-)
 from app.modules.profiles.models import InfantProfile, UserProfile
 from app.modules.records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from app.agents.cozymate.device_guidance import AIR1_UNBOXING_STEPS
@@ -808,50 +802,6 @@ def _growth_update_fields(payload: dict[str, Any]) -> list[str]:
     return sorted(key for key in ("infant_id", "measured_at", "height_cm", "weight_kg", "head_cm") if key in payload)
 
 
-def _milk_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
-    plan_payload = _dict(apply_payload, "payload")
-    _, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
-    preview = {
-        "plan_type": "milk_management",
-        "title": _text(apply_payload, "title"),
-        "summary": _text(apply_payload, "summary"),
-        "has_payload": bool(plan_payload),
-        "start_date": _text(plan_payload, "start_date"),
-        "days": plan_payload.get("days"),
-        "scheduled_task_count": len(scheduled_tasks),
-        "calendar_write_strategy": _text(apply_payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND,
-    }
-    return {key: value for key, value in preview.items() if value not in ("", None)}
-
-
-def _milk_plan_artifact_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
-    plan_payload = _dict(apply_payload, "payload")
-    _, scheduled_tasks = normalize_milk_plan_payload(plan_payload)
-    payload: dict[str, Any] = {
-        "title": _text(apply_payload, "title"),
-        "summary": _text(apply_payload, "summary"),
-        "direction": _text(plan_payload, "direction") or "unknown",
-        "start_date": _text(plan_payload, "start_date"),
-        "days": _optional_int(plan_payload, "days"),
-        "scheduled_task_count": len(scheduled_tasks),
-        "calendar_write_strategy": _text(apply_payload, "calendar_write_strategy") or MILK_PLAN_CALENDAR_APPEND,
-    }
-    for key in (
-        "tasks",
-        "reminders",
-        "goal",
-        "strategy_summary",
-        "checkpoints",
-        "observation_items",
-        "safety_notes",
-        "generation",
-    ):
-        value = plan_payload.get(key)
-        if isinstance(value, list | dict | str):
-            payload[key] = value
-    return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
-
-
 def _pregnancy_plan_apply_payload(args: dict[str, Any]) -> dict[str, Any]:
     runtime_plan_context = _dict(args, "runtime_plan_context")
     generation_context = dict(runtime_plan_context)
@@ -1306,7 +1256,7 @@ def _required_diary_content(args: dict[str, Any]) -> str:
     return content
 
 
-def _diary_delete_confirmation_evidence_is_trusted(args: dict[str, Any]) -> bool:
+def _delete_confirmation_evidence_is_trusted(args: dict[str, Any]) -> bool:
     evidence = _normalize_confirmation_evidence(args.get("confirmation_evidence"))
     current_user_text = _normalize_confirmation_evidence(args.get("trusted_current_user_text"))
     return bool(evidence and current_user_text and evidence in current_user_text)
@@ -1324,7 +1274,12 @@ def _diary_entry_not_found(entry_date: date) -> dict[str, Any]:
     }
 
 
-def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[str, Any]:
+def _proposal_result(
+    *,
+    action: Any,
+    preview_payload: dict[str, Any],
+    include_apply_result: bool = False,
+) -> dict[str, Any]:
     requires_confirmation = _action_requires_confirmation(action)
     action_status = str(getattr(action, "status", "") or "")
     result = {
@@ -1337,6 +1292,17 @@ def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[st
         "write_succeeded": action_status == "applied",
         "preview_payload": preview_payload,
     }
+    if include_apply_result:
+        apply_result = getattr(action, "result_payload", None)
+        if isinstance(apply_result, dict) and apply_result:
+            details = apply_result.get("details")
+            result.update(
+                {
+                    "resource_type": str(apply_result.get("resource_type") or ""),
+                    "resource_id": str(apply_result.get("resource_id") or ""),
+                    "result_details": dict(details) if isinstance(details, dict) else {},
+                }
+            )
     if action_status == "failed":
         result["status"] = "action_failed"
         result["error_code"] = str(getattr(action, "error_code", "") or "agent_action_handler_error")
@@ -1759,11 +1725,11 @@ def _milk_analysis_payload(*, status: dict[str, Any], growth: list[GrowthRecord]
     elif data_coverage == "no_recent_data":
         pathway = "先补近期记录"
     elif trend == "decreasing":
-        pathway = "评估是否需要追奶或排乳节奏调整"
+        pathway = "结合宝宝摄入和妈妈状态解释下降趋势"
     elif trend == "increasing":
-        pathway = "观察是否需要稳奶或减奶"
+        pathway = "结合宝宝摄入和妈妈状态解释上升趋势"
     elif data_coverage == "ready":
-        pathway = "可以进入追奶/稳奶/减奶方向判断"
+        pathway = "结合宝宝和妈妈状态完成综合判断"
     else:
         pathway = "继续补齐关键记录后再判断"
     return {
@@ -1784,8 +1750,8 @@ def _milk_analysis_next_step(*, data_coverage: str, trend: str, flags: list[Any]
     if data_coverage == "limited":
         return "只追问当前最影响判断的一项缺失信息。"
     if trend in {"decreasing", "increasing"}:
-        return "结合宝宝状态和妈妈乳房/全身状态判断是否进入计划。"
-    return "给出简短结论，并询问是否开始制定计划。"
+        return "结合宝宝状态和妈妈乳房/全身状态解释趋势与风险。"
+    return "给出简短的奶量趋势、数据边界和安全结论。"
 
 
 def _growth_payload(record: GrowthRecord) -> dict[str, Any]:
@@ -2083,6 +2049,47 @@ def _air1_flange_recommendation(value: Any) -> dict[str, Any] | None:
         "purchase_note": purchase_note,
         "message": f"{display_measurement:g}mm 落在 {range_label} 区间，建议使用 {accessory_label}。{purchase_note}",
     }
+
+
+async def _create_payload_scoped_artifact_once(
+    runtime_service: AgentRuntimeService,
+    *,
+    owner_user_id: UUID,
+    run_id: UUID,
+    artifact_type: str,
+    schema_version: str,
+    status: str,
+    payload: dict[str, Any],
+) -> tuple[Any, bool]:
+    create_once = getattr(runtime_service, "create_artifact_once", None)
+    if callable(create_once):
+        result = await create_once(
+            owner_user_id=owner_user_id,
+            run_id=run_id,
+            artifact_type=artifact_type,
+            schema_version=schema_version,
+            status=status,
+            payload=payload,
+            emit_event=False,
+            reuse_if_payload_matches=True,
+        )
+        if (
+            not isinstance(result, tuple)
+            or len(result) != 2
+            or not isinstance(result[1], bool)
+        ):
+            raise TypeError("create_artifact_once must return (artifact, created).")
+        return result[0], result[1]
+    artifact = await runtime_service.create_artifact(
+        owner_user_id=owner_user_id,
+        run_id=run_id,
+        artifact_type=artifact_type,
+        schema_version=schema_version,
+        status=status,
+        payload=payload,
+        emit_event=False,
+    )
+    return artifact, True
 
 
 def _deferred_artifact_created_event(artifact: Any) -> dict[str, Any]:

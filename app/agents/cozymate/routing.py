@@ -30,6 +30,8 @@ MAIN_AGENT_TOOL_NAMES = (
 BIRTH_PREP_TOOL_NAMES = (
     "plan_read",
     "plan_mutate",
+    "schedule_timeline_read",
+    "schedule_timeline_mutate",
     "pregnancy_intake_manage",
     "hospital_bag_manage",
     "hospital_bag_cart_mutate",
@@ -66,7 +68,7 @@ ROUTER_INSTRUCTIONS = """
   历史图片理解，以及不属于下列专业服务的请求。
 - birth-prep：孕期事项规划、孕期计划资料采集与计划、临产/住院准备、待产包清单和待产包购物车。
   普通孕期症状、检查、用药、疫苗、补剂或是否就医属于主智能体，不进入 birth-prep。
-- milk-management：奶量产出与宝宝摄入分析、追奶/稳奶/减奶计划、泌乳日程和实际记录调整、IBCLC 咨询入口。
+- milk-management：奶量产出与宝宝摄入分析、泌乳日程和实际记录管理、已有日程调整、IBCLC 咨询入口。
 - device-guidance：Momcozy 设备开箱、使用、清洁、排障、型号比较与推荐，以及售后工单。
 
 路由规则：

@@ -71,10 +71,16 @@ description 中重复展开。
 
 `plan_read`、`plan_mutate`、`schedule_timeline_read`、`schedule_timeline_mutate`、`diary_read`、`diary_mutate`
 
-其中 `plan_read` 统一读取已持久化的计划列表或计划详情；`plan_mutate` 统一创建、更新和删除计划，
-通过 `plan_type` 选择创建计划的领域构建器。当前创建支持 `milk_management` 和 `pregnancy`；
+其中 `plan_read` 统一读取已持久化的计划列表或计划详情：列表只返回最多 20 条计划元数据，详情才展开
+按计划类型投影的结构化内容。`plan_mutate` 统一创建、更新和删除计划；当前只支持创建 `pregnancy` 计划，
+不支持创建 `milk_management` 计划。
 更新和删除只传可信 `plan_id`，先按当前用户读取目标计划，再以后端持久化的真实类型执行，不让模型重复传
-`plan_type`。
+`plan_type`。删除还必须逐字引用本轮用户明确删除原文，由 Runtime 可信当前消息校验；引用不进入持久化
+Action payload 或安全日志参数。
+
+计划持久化 `starts_on` / `ends_on`，active 列表和日程时间线会排除已经结束的计划；同一用户只允许一个
+active 孕期计划。删除计划会一并软删除关联日程任务。孕期计划 todo 创建为时间线任务，时间线任务与 App
+计划卡片的完成状态双向同步。
 
 `schedule_timeline_read` / `schedule_timeline_mutate` 统一处理泌乳、孕期、产后恢复和通用日程，
 并通过 `entry_type=schedule|execution` 区分计划日程与实际记录；完成 feeding/pumping 泌乳任务时必须同时提交
@@ -110,7 +116,7 @@ App/API 层的网络请求幂等仍由请求头或应用请求参数负责。
   `profile.current_infants.replace`，后者必须确认且带关系新鲜度前置条件
 - `schedule_timeline_mutate`：跨领域任务创建、完成、更新和删除，奶量日程冲突感知重排，以及喂养、吸奶和宝宝生长实际记录 Action
 - `diary_mutate`：通用日记创建、完整更新与删除 Action
-- `plan_mutate`：奶量计划创建、孕期计划创建、计划元数据更新和计划删除 Action
+- `plan_mutate`：孕期计划创建、已有计划元数据更新和计划删除 Action
 - `hospital_bag_cart_mutate`：待产包购物车更新 Action
 
 `pregnancy_intake_manage` 只维护孕期资料采集工作流；达到 `ready_to_generate` 后由 `plan_mutate`

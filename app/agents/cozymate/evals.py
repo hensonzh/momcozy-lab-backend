@@ -22,7 +22,6 @@ REQUIRED_PRODUCT_AGENT_EVAL_SUITES = (
     "milk_schedule_management",
     "milk_task_completion_measured",
     "milk_task_completion_missing_volume",
-    "milk_plan_creation",
     "milk_trend_analysis",
     "pregnancy_plan_creation",
     "pregnancy_task_completion",

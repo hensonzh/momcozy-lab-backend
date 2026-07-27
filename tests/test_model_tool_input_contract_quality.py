@@ -213,6 +213,13 @@ def test_profile_update_rejects_values_that_only_match_a_shallow_any_of(
                 "plan_type": "pregnancy",
             },
         ),
+        (
+            "plan_mutate",
+            {
+                "operation": "delete",
+                "plan_id": "10000000-0000-4000-8000-000000000001",
+            },
+        ),
         ("pregnancy_intake_manage", {"command": "edit_answer", "answer": "改成自然分娩"}),
         ("pregnancy_intake_manage", {"command": "submit_form"}),
         ("hospital_bag_manage", {"generation_mode": "quick"}),
@@ -276,6 +283,14 @@ def test_operation_specific_contracts_reject_irrelevant_or_incomplete_inputs(
         ("devices_guidance_manage", {"operation": "complete_current"}),
         ("plan_read", {"mode": "detail", "plan_id": "10000000-0000-4000-8000-000000000001"}),
         ("plan_mutate", {"operation": "create", "plan_type": "pregnancy"}),
+        (
+            "plan_mutate",
+            {
+                "operation": "delete",
+                "plan_id": "10000000-0000-4000-8000-000000000001",
+                "confirmation_evidence": "请删除这个计划",
+            },
+        ),
         ("pregnancy_intake_manage", {"command": "pause"}),
         ("hospital_bag_manage", {"generation_mode": "standard"}),
         (
@@ -531,25 +546,17 @@ def test_input_descriptions_state_defaults_units_sources_and_enum_meanings() -> 
         assert f"{enum_value}=" in device_topic["description"]
 
     plan_read = registry.get("plan_read").input_schema["anyOf"]
-    assert "元数据" in plan_read[0]["properties"]["include_content"]["description"]
-    assert "结构化计划详情" in plan_read[1]["properties"]["include_content"]["description"]
+    assert "元数据" in plan_read[0]["properties"]["mode"]["description"]
+    assert "完整结构化内容" in plan_read[1]["properties"]["mode"]["description"]
+    assert "include_content" not in plan_read[0]["properties"]
+    assert "include_content" not in plan_read[1]["properties"]
 
-    plan_create = registry.get("plan_mutate").input_schema["anyOf"]
-    milk_create = plan_create[0]["properties"]
-    pregnancy_create = plan_create[1]["properties"]
-    assert "下一本地自然日" in milk_create["start_date"]["description"]
-    assert "妈妈侧每日平均吸奶产出目标" in milk_create["target_daily_ml"]["description"]
-    assert "新计划日期范围内" in milk_create["calendar_write_strategy"]["description"]
+    plan_variants = registry.get("plan_mutate").input_schema["anyOf"]
+    pregnancy_create = plan_variants[0]["properties"]
+    plan_delete = plan_variants[2]
+    assert "confirmation_evidence" in plan_delete["required"]
+    assert "逐字引用" in plan_delete["properties"]["confirmation_evidence"]["description"]
     _assert_invalid(
-        "plan_mutate",
-        {
-            "operation": "create",
-            "plan_type": "milk_management",
-            "direction": "maintain",
-            "preferred_pumping_times": ["8:00"],
-        },
-    )
-    _validate(
         "plan_mutate",
         {
             "operation": "create",

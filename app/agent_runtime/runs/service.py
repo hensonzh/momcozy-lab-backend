@@ -667,7 +667,12 @@ class AgentRuntimeService:
                             ),
                             status=409,
                         )
-                    if not decision.requires_confirmation and existing.status in {"confirmed", "applying"}:
+                    if not decision.requires_confirmation and existing.status in {
+                        "confirmed",
+                        "applying",
+                        "applied",
+                        "failed",
+                    }:
                         assert action_executor is not None
                         outcome = await action_executor.apply(existing)
                         return outcome, False
@@ -789,9 +794,11 @@ class AgentRuntimeService:
         status: str = "created",
         raw_payload_ref: str = "",
         emit_event: bool = True,
+        reuse_if_payload_matches: bool = False,
     ) -> tuple[AgentArtifact, bool]:
         run = await self.get_run(owner_user_id=owner_user_id, run_id=run_id)
         normalized_artifact_type = _normalize_text(artifact_type, max_length=120, required=True)
+        normalized_schema_version = _normalize_text(schema_version, max_length=80) or "v1"
         lock = getattr(self.repository, "lock_run_for_action_proposal", None)
         if callable(lock):
             await lock(run_id=run.id)
@@ -803,6 +810,13 @@ class AgentRuntimeService:
                 if artifact.owner_user_id == owner_user_id
                 and artifact.artifact_type == normalized_artifact_type
                 and artifact.status != "deleted"
+                and (
+                    not reuse_if_payload_matches
+                    or (
+                        artifact.schema_version == normalized_schema_version
+                        and dict(artifact.payload or {}) == dict(payload)
+                    )
+                )
             ),
             None,
         )
@@ -812,7 +826,7 @@ class AgentRuntimeService:
             run_id=run.id,
             owner_user_id=owner_user_id,
             artifact_type=normalized_artifact_type,
-            schema_version=_normalize_text(schema_version, max_length=80) or "v1",
+            schema_version=normalized_schema_version,
             status=_normalize_text(status, max_length=32) or "created",
             payload=payload,
             raw_payload_ref=_normalize_text(raw_payload_ref, max_length=512),

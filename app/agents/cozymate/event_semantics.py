@@ -190,8 +190,6 @@ def _dynamic_tool_started_label(*, tool_name: str, safe_args: dict[str, Any]) ->
             return "我先帮你删除这份计划～"
         if operation == "update":
             return "我先帮你更新这份计划～"
-        if plan_type == "milk_management":
-            return "我先帮你整理奶量计划～"
         if plan_type == "pregnancy":
             return "我先帮你整理孕期计划～"
     return ""
@@ -229,8 +227,6 @@ def _dynamic_tool_completed_label(
         plan_type = str(output.get("plan_type") or safe_args.get("plan_type") or "").strip()
         if status == "action_failed":
             return "这次计划没有处理成功"
-        if status == "milk_plan_calendar_strategy_required":
-            return "奶量计划还需要确认日程写入方式"
         if status == "urgent_care_required":
             return "我先帮你处理需要立即确认的情况"
         if output.get("write_succeeded") is True:
@@ -240,8 +236,6 @@ def _dynamic_tool_completed_label(
                 return "这份计划已经更新"
             if plan_type == "pregnancy":
                 return "孕期计划已生成"
-            if plan_type == "milk_management":
-                return "奶量计划已生成"
     if tool_name == "pregnancy_intake_manage":
         return {
             "ready_to_generate": "孕期计划信息已经确认好啦",
@@ -267,7 +261,6 @@ def _dynamic_tool_completed_label(
 def _artifact_subject(artifact_type: str) -> str:
     return {
         "milk_analysis_card": "分析卡片",
-        "milk_plan_card": "结果卡片",
         "rich_text": "说明内容",
         "rich_text_card": "说明内容",
         "hospital_bag_card": "待产包清单",
@@ -282,7 +275,6 @@ def _artifact_completed_label(artifact_type: str) -> str:
         "support_ticket_draft": "请确认售后信息",
         "mom_baby_status_card": "我已经整理好宝宝和我页面啦",
         "milk_analysis_card": "我已经整理好奶量分析结果啦",
-        "milk_plan_card": "我已经整理好奶量计划啦",
         "hospital_bag_card": "我已经帮你生成好待产包清单啦",
         "birth_journey_plan_card": "我已经帮你整理好孕期计划啦",
     }.get(artifact_type, f"我已经整理好{_artifact_subject(artifact_type)}啦")
