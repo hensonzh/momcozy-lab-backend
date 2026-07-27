@@ -36,20 +36,39 @@ def test_pregnancy_plan_uses_one_model_visible_workflow_contract() -> None:
 
 
 def test_pregnancy_intake_manage_contract_exposes_state_machine_commands() -> None:
-    schema = default_tool_registry().get(PREGNANCY_PLAN_WORKFLOW_TOOL).input_schema
-    command = schema["properties"]["command"]
+    contract = default_tool_registry().get(PREGNANCY_PLAN_WORKFLOW_TOOL)
+    schema = contract.input_schema
+    variants = schema["anyOf"]
 
-    assert schema["required"] == ["command"]
-    assert set(command["enum"]) == {
+    assert all("command" in variant["required"] for variant in variants)
+    assert {
+        variant["properties"]["command"]["enum"][0]
+        for variant in variants
+    } == {
         "start_or_resume",
-        "submit_form",
         "answer_current",
         "edit_answer",
         "pause",
         "resume",
         "abandon",
     }
-    assert {"choice_id", "answer", "step_id", "restart"} <= set(schema["properties"])
+    assert {"choice_id", "answer", "step_id", "restart"} <= {
+        name
+        for variant in variants
+        for name in variant["properties"]
+    }
+    answer_variants = [
+        variant
+        for variant in variants
+        if variant["properties"]["command"]["enum"] == ["answer_current"]
+    ]
+    assert len(answer_variants) == 3
+    assert all("step_id" not in variant["properties"] for variant in answer_variants)
+    assert contract.internal_input_schema is not None
+    assert {
+        variant["properties"]["command"]["enum"][0]
+        for variant in contract.internal_input_schema["anyOf"]
+    } == {"submit_form", "answer_current"}
 
 
 def test_pregnancy_intake_manage_is_the_only_model_visible_intake_contract() -> None:
@@ -173,9 +192,9 @@ def test_pregnancy_intake_manage_facade_pauses_and_resumes_without_advancing() -
         handler.execute(_context({"command": "resume", "runtime_workflow_context": paused}))
     )
 
-    assert paused_result.audit_output["status"] == "pregnancy_plan_workflow_paused"
+    assert paused_result.canonical_output["status"] == "pregnancy_plan_workflow_paused"
     assert paused["paused"] is True
-    assert resumed_result.audit_output["status"] == "pregnancy_plan_workflow_resumed"
+    assert resumed_result.canonical_output["status"] == "pregnancy_plan_workflow_resumed"
     assert runtime.persisted[-1]["phase"] == "checkup_records_upload"
     assert "paused" not in runtime.persisted[-1]
 
@@ -209,7 +228,7 @@ def test_pregnancy_intake_manage_facade_resumes_a_safety_pause_without_restartin
         )
     )
 
-    assert result.audit_output["status"] == "pregnancy_plan_workflow_resumed"
+    assert result.canonical_output["status"] == "pregnancy_plan_workflow_resumed"
     assert start_calls == []
     assert runtime.persisted[-1]["phase"] == "checkup_records_upload"
     assert "paused" not in runtime.persisted[-1]
@@ -333,8 +352,8 @@ def test_pregnancy_intake_manage_facade_interrupts_an_urgent_historical_text_edi
         )
     )
 
-    assert result.audit_output["status"] == "urgent_care_required"
-    assert result.audit_output["blocks_plan_flow"] is True
+    assert result.canonical_output["status"] == "urgent_care_required"
+    assert result.canonical_output["blocks_plan_flow"] is True
     interrupted = runtime.persisted[-1]
     assert interrupted["phase"] == "ready_to_generate"
     assert interrupted["resume_phase"] == "ready_to_generate"

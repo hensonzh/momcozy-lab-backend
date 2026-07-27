@@ -52,7 +52,12 @@ from app.agents.cozymate.tools.milk_analysis_flow import (
     milk_analysis_context_fingerprint,
 )
 
-from app.agents.cozymate.tools.milk_schedule_adjustment import MilkScheduleAdjustmentError, build_milk_schedule_preview
+from app.agents.cozymate.tools.milk_schedule_adjustment import (
+    DEFAULT_DURATION_MINUTES,
+    DEFAULT_MIN_GAP_MINUTES,
+    MilkScheduleAdjustmentError,
+    build_milk_schedule_preview,
+)
 
 from .base import (
     _MILK_ANALYSIS_PLAN_TTL,
@@ -164,7 +169,6 @@ def _lactation_record_context(
             "milk_volume_ml",
             "duration_seconds",
             "pump_type",
-            "source",
             "height_cm",
             "weight_kg",
             "head_cm",
@@ -554,6 +558,9 @@ class MilkAnalysisToolHandler(_StandardToolHandler):
                 context.args,
                 allowed={"operation", "observed_answers"},
             )
+            _reject_duplicate_milk_analysis_answer_fields(
+                context.args.get("observed_answers")
+            )
             intake_args = {
                 "action": "answer",
                 **_selected_milk_analysis_args(
@@ -591,6 +598,22 @@ class MilkAnalysisToolHandler(_StandardToolHandler):
 
 def _selected_milk_analysis_args(args: dict[str, Any], *, keys: tuple[str, ...]) -> dict[str, Any]:
     return {key: args[key] for key in keys if key in args}
+
+
+def _reject_duplicate_milk_analysis_answer_fields(value: Any) -> None:
+    if not isinstance(value, list):
+        return
+    fields = [
+        _text(item, "field")
+        for item in value
+        if isinstance(item, dict) and _text(item, "field")
+    ]
+    if len(fields) != len(set(fields)):
+        raise ApiError(
+            code="validation_failed",
+            message="Each milk-analysis observation field may be answered once per tool call.",
+            status=422,
+        )
 
 
 def _reject_milk_analysis_arguments(args: dict[str, Any], *, allowed: set[str]) -> None:
@@ -1243,8 +1266,8 @@ class MilkScheduleRescheduleProposeToolHandler(_StandardToolHandler):
                     busy_windows=context.args.get("busy_windows"),
                     calendar_events=calendar_events,
                 ),
-                min_gap_minutes=int(context.args.get("min_gap_minutes") or 90),
-                default_duration_minutes=int(context.args.get("default_duration_minutes") or 30),
+                min_gap_minutes=DEFAULT_MIN_GAP_MINUTES,
+                default_duration_minutes=DEFAULT_DURATION_MINUTES,
             )
         except (MilkScheduleAdjustmentError, TypeError, ValueError) as exc:
             code = str(exc) if isinstance(exc, MilkScheduleAdjustmentError) else "invalid_milk_schedule_adjustment"

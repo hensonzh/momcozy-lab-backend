@@ -18,6 +18,11 @@ from app.modules.diary.tool_schema import DiaryMutateOutput, DiaryReadOutput
 
 JsonSchema = dict[str, Any]
 
+_CANONICAL_OBJECT_OUTPUT_SCHEMA: JsonSchema = {
+    "type": "object",
+    "minProperties": 1,
+}
+
 
 _TOOL_OUTPUT_SCHEMAS: dict[str, JsonSchema] = {
     "schedule_timeline_read": ScheduleTimelineReadOutput.model_json_schema(),
@@ -29,6 +34,44 @@ _TOOL_OUTPUT_SCHEMAS: dict[str, JsonSchema] = {
     "profile_update": MaternalInfantProfileUpdateOutput.model_json_schema(),
     "diary_read": DiaryReadOutput.model_json_schema(),
     "diary_mutate": DiaryMutateOutput.model_json_schema(),
+    "devices_guidance_manage": _CANONICAL_OBJECT_OUTPUT_SCHEMA,
+    "conversation_history_image_read": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["status", "image_url", "detail", "agent_instruction"],
+        "properties": {
+            "status": {
+                "type": "string",
+                "enum": ["image_context_ready"],
+            },
+            "image_url": {
+                "type": "string",
+                "minLength": 1,
+            },
+            "detail": {
+                "type": "string",
+                "enum": ["low", "high"],
+            },
+            "agent_instruction": {
+                "type": "string",
+                "minLength": 1,
+                "description": "模型理解该历史图片时必须遵循的范围约束。",
+            },
+            "asset_id": {
+                "type": "string",
+                "minLength": 1,
+            },
+            "content_type": {
+                "type": "string",
+                "minLength": 1,
+            },
+        },
+    },
+    "pregnancy_intake_manage": _CANONICAL_OBJECT_OUTPUT_SCHEMA,
+    "hospital_bag_manage": _CANONICAL_OBJECT_OUTPUT_SCHEMA,
+    "hospital_bag_cart_mutate": _CANONICAL_OBJECT_OUTPUT_SCHEMA,
+    "ibclc_consult_card_create": _CANONICAL_OBJECT_OUTPUT_SCHEMA,
+    "support_ticket_draft_create": _CANONICAL_OBJECT_OUTPUT_SCHEMA,
     "pump_models_read": {
         "type": "object",
         "additionalProperties": False,
@@ -125,6 +168,8 @@ _TOOL_OUTPUT_SCHEMAS: dict[str, JsonSchema] = {
 }
 
 
-def output_schema_for_tool(tool_name: str) -> JsonSchema | None:
+def output_schema_for_tool(tool_name: str) -> JsonSchema:
     schema = _TOOL_OUTPUT_SCHEMAS.get(tool_name)
-    return deepcopy(schema) if schema is not None else None
+    if schema is None:
+        raise KeyError(f"Tool output schema is not registered: {tool_name}")
+    return deepcopy(schema)

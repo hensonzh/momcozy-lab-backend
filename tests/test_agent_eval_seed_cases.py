@@ -73,11 +73,13 @@ def test_product_agent_eval_seed_mutation_calls_always_assert_operation() -> Non
 
     for case in cases:
         for tool_call in case["expected_tool_calls"]:
-            if tool_call["contract"] == "profile_update":
+            if tool_call["contract"] in {
+                "profile_update",
+                "ibclc_consult_card_create",
+                "support_ticket_draft_create",
+            }:
                 assert "operation" not in tool_call.get("args_subset", {})
-            elif tool_call["contract"].endswith(
-                ("_mutate", "_create", "_update", "_delete")
-            ):
+            elif tool_call["contract"].endswith("_mutate"):
                 assert "operation" in tool_call.get("args_subset", {}), (
                     case["suite"],
                     tool_call["contract"],
@@ -573,14 +575,14 @@ def test_product_agent_eval_seed_splits_device_hazard_from_ibclc_artifact_contra
     assert support_contracts == set()
     assert {call["contract"] for call in by_suite["device_support_handoff"]["forbidden_tool_calls"]} == {
         "devices_guidance_manage",
-        "support_ticket_create",
+        "support_ticket_draft_create",
     }
     assert ibclc_contracts == {"ibclc_consult_card_create"}
     assert by_suite["ibclc_consult"]["expected_tool_calls"][0]["args_subset"] == {
-        "operation": "create"
+        "reason": "latch pain"
     }
     assert by_suite["ibclc_consult"]["expected_behavior"]["requires_confirmation_before_write"] is False
-    assert by_suite["ibclc_consult"]["forbidden_tool_calls"] == [{"contract": "support_ticket_create"}]
+    assert by_suite["ibclc_consult"]["forbidden_tool_calls"] == [{"contract": "support_ticket_draft_create"}]
 
 
 def test_product_agent_eval_seed_uses_only_supported_device_guidance_contracts() -> None:

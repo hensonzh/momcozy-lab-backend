@@ -166,7 +166,7 @@
         "turn_outcome": {
           "tools": [
             {
-              "name": "support_ticket_create",
+              "name": "support_ticket_draft_create",
               "execution_status": "completed",
               "result": {
                 "status": "needs_support_ticket_confirmation",

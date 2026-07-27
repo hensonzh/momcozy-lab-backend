@@ -367,7 +367,7 @@ def test_agent_eval_seed_assertion_engine_forbids_cart_update_during_pump_recomm
                 "tool_name": "hospital_bag_cart_mutate",
                 "status": "completed",
                 "safe_args": {
-                    "operation": "replace_pump_model",
+                    "operation": "set_pump_model",
                     "product_sku_id": "pump-m9",
                 },
             },
@@ -417,7 +417,6 @@ def test_agent_eval_seed_assertion_engine_forbids_only_matching_device_guidance_
                 "tool_name": "devices_guidance_manage",
                 "status": "completed",
                 "safe_args": {
-                    "model": "Air1",
                     "operation": "complete_current",
                 },
             }

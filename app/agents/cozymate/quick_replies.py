@@ -195,18 +195,18 @@ def _tool_outcome_payload(tool_calls: list[dict[str, Any]], *, max_count: int) -
         execution_status = str(tool_call.get("status") or "").strip()
         if execution_status:
             item["execution_status"] = execution_status
-        safe_output = tool_call.get("safe_output")
-        result = _tool_result_signals(safe_output if isinstance(safe_output, dict) else {})
+        output = tool_call.get("output")
+        result = _tool_result_signals(output if isinstance(output, dict) else {})
         if result:
             item["result"] = result
         projected.append(item)
     return projected
 
 
-def _tool_result_signals(safe_output: dict[str, Any]) -> dict[str, Any]:
-    sources = [safe_output]
+def _tool_result_signals(output: dict[str, Any]) -> dict[str, Any]:
+    sources = [output]
     for container_key in ("payload_summary", "result", "workflow"):
-        value = safe_output.get(container_key)
+        value = output.get(container_key)
         if isinstance(value, dict):
             sources.append(value)
 

@@ -101,15 +101,21 @@ def test_milk_analysis_contract_has_described_inputs_and_outputs() -> None:
 
     assert contract.domain == "lactation_analysis"
     assert contract.effect_scope == "agent_internal"
-    assert contract.input_schema["required"] == ["operation"]
-    assert contract.input_schema["properties"]["operation"]["enum"] == [
+    variants = contract.input_schema["anyOf"]
+    assert all("operation" in variant["required"] for variant in variants)
+    assert [
+        variant["properties"]["operation"]["enum"][0]
+        for variant in variants
+    ] == [
         "review",
         "start_or_resume",
         "answer",
         "evaluate",
     ]
-    assert contract.input_schema["properties"]["detail_level"]["description"]
-    assert contract.input_schema["properties"]["observed_answers"]["items"]["properties"]["field"]["description"]
+    review_schema = variants[0]
+    answer_schema = variants[2]
+    assert review_schema["properties"]["detail_level"]["description"]
+    assert answer_schema["properties"]["observed_answers"]["items"]["properties"]["field"]["description"]
     assert contract.output_schema is not None
     assert contract.output_schema["properties"]["operation"]["description"]
     assert contract.output_schema["$defs"]["MilkAnalysisStatus"]["properties"]["data_coverage"]["description"]
@@ -203,6 +209,35 @@ def test_milk_analysis_routes_durable_workflow_operations(
     if expected_action == "answer":
         assert intake.calls[0].args["trusted_current_user_text"] == "24 小时有 7 片湿尿布"
         assert intake.calls[0].args["observed_answers"] == args["observed_answers"]
+
+
+def test_milk_analysis_rejects_duplicate_observed_answer_fields() -> None:
+    handler, _, _, intake, _ = _handler()
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            handler.execute(
+                _context(
+                    args={
+                        "operation": "answer",
+                        "observed_answers": [
+                            {
+                                "field": "infant_wet_diapers",
+                                "evidence": "白天有 4 片湿尿布",
+                            },
+                            {
+                                "field": "infant_wet_diapers",
+                                "evidence": "夜里有 3 片湿尿布",
+                            },
+                        ],
+                        "trusted_current_user_text": "白天有 4 片湿尿布，夜里有 3 片湿尿布",
+                    }
+                )
+            )
+        )
+
+    assert exc_info.value.code == "validation_failed"
+    assert intake.calls == []
 
 
 def test_milk_analysis_evaluate_normalizes_result_and_preserves_deferred_events() -> None:

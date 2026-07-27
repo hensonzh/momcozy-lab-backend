@@ -21,7 +21,6 @@ from app.agent_runtime.runs.repository import AgentRuntimeRepository
 from app.agent_runtime.tools.result import ToolResult
 from app.modules.auth import CurrentUser
 
-from .output_policy import strip_instructional_tool_output_keys
 from .policy import ToolExecutionPolicy
 from .registry import ToolContractRegistry
 from .validation import validate_tool_input, validate_tool_output
@@ -49,7 +48,7 @@ class _ToolCommitFailure(Exception):
 @dataclass(frozen=True)
 class ToolExecutionResult:
     tool_call: AgentToolCall
-    safe_output: dict[str, Any]
+    canonical_output: dict[str, Any]
     tool_result: ToolResult
 
 
@@ -86,6 +85,7 @@ class ToolExecutor:
         call_id: str,
         args: dict[str, Any],
         trusted_args: dict[str, Any] | None = None,
+        use_internal_input_schema: bool = False,
         handler_override: ToolHandler | None = None,
     ) -> ToolExecutionResult:
         started_at = perf_counter()
@@ -97,7 +97,18 @@ class ToolExecutor:
         try:
             contract = self.registry.get(tool_name)
             self._enforce_actor_scope(args=args)
-            validate_tool_input(schema=contract.input_schema, value=args)
+            validation_schema = (
+                contract.internal_input_schema
+                if use_internal_input_schema
+                else contract.input_schema
+            )
+            if validation_schema is None:
+                raise ApiError(
+                    code="tool_input_invalid",
+                    message="Tool does not define a trusted internal input contract.",
+                    status=422,
+                )
+            validate_tool_input(schema=validation_schema, value=args)
             handler = handler_override or self.handlers.get(tool_name)
             if handler is None:
                 raise ApiError(code="unsupported_operation", message="Tool handler is not configured.", status=501)
@@ -161,26 +172,13 @@ class ToolExecutor:
                 ),
                 timeout=contract.timeout_seconds,
             )
-            if not isinstance(raw_result, ToolResult) or raw_result.audit_output is None:
-                raise TypeError("Tool handlers must return ToolResult with audit_output.")
-            output_payload = dict(raw_result.audit_output)
-            deferred_events = _extract_deferred_agent_events(output_payload)
+            if not isinstance(raw_result, ToolResult) or not isinstance(raw_result.canonical_output, dict):
+                raise TypeError("Tool handlers must return ToolResult with a canonical object output.")
+            output_payload = dict(raw_result.canonical_output)
+            deferred_events = list(raw_result.deferred_events)
             validate_tool_output(schema=contract.output_schema, value=output_payload)
-            model_output = (
-                ToolResult.json(
-                    self.policy.model_output(
-                        tool_name=tool_name,
-                        output=output_payload,
-                    )
-                ).output
-                if contract.output_schema is not None
-                else raw_result.output
-            )
-            safe_output = strip_instructional_tool_output_keys(
-                self.policy.safe_output(tool_name=tool_name, output=output_payload)
-            )
             externalized_output = await maybe_externalize_json_payload(
-                payload=safe_output,
+                payload=output_payload,
                 object_storage=self.object_storage,
                 run_id=run.id,
                 payload_kind="tool-outputs",
@@ -188,14 +186,19 @@ class ToolExecutor:
                 max_inline_bytes=self.max_inline_output_bytes,
             )
             tool_result = ToolResult(
-                output=model_output,
-                audit_output=externalized_output.inline_payload,
+                canonical_output=output_payload,
+                supplemental_content=raw_result.supplemental_content,
+                serialization="json",
             )
             completed = await self.repository.complete_tool_call(tool_call=tool_call, completed_at=_utcnow())
             output = await self.repository.create_tool_output(
                 tool_call_id=completed.id,
-                safe_output=externalized_output.inline_payload,
-                raw_output_ref=externalized_output.raw_payload_ref,
+                output=externalized_output.inline_payload,
+                output_ref=externalized_output.raw_payload_ref,
+            )
+            output_summary = self.policy.event_output_summary(
+                tool_name=completed.tool_name,
+                output=output_payload,
             )
             completed_payload = {
                 "tool_call_id": str(completed.id),
@@ -203,13 +206,13 @@ class ToolExecutor:
                 "tool_name": completed.tool_name,
                 "call_id": completed.call_id,
                 "label": self.policy.event_label(tool_name=completed.tool_name, payload=output_payload),
-                "safe_output": externalized_output.inline_payload,
+                "output_summary": output_summary,
             }
             completed_payload = self.policy.enrich_event(
                 completed_payload,
                 event_type="tool.completed",
                 tool_name=completed.tool_name,
-                safe_output=externalized_output.inline_payload,
+                output=output_payload,
                 effect_scope=effect_scope,
             )
             await self._publish_optimistic_tool_event(
@@ -333,7 +336,7 @@ class ToolExecutor:
         self._record(tool_name=tool_name, outcome="completed", error_code="", started_at=started_at)
         return ToolExecutionResult(
             tool_call=completed,
-            safe_output=externalized_output.inline_payload,
+            canonical_output=output_payload,
             tool_result=tool_result,
         )
 
@@ -557,21 +560,6 @@ async def _commit_tool_scope(scope: Any | None) -> None:
 async def _rollback_tool_scope(scope: Any | None, *, exc: BaseException) -> None:
     if scope is not None:
         await scope.__aexit__(type(exc), exc, exc.__traceback__)
-
-
-def _extract_deferred_agent_events(result: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_events = result.pop(DEFERRED_AGENT_EVENTS_KEY, [])
-    if not isinstance(raw_events, list):
-        return []
-    events: list[dict[str, Any]] = []
-    for item in raw_events:
-        if not isinstance(item, dict):
-            continue
-        event_type = str(item.get("event_type") or "").strip()
-        payload = item.get("payload")
-        if event_type and isinstance(payload, dict):
-            events.append({"event_type": event_type, "payload": payload})
-    return events
 
 
 def _tool_live_dedupe_key(*, run_id: UUID, event_type: str, payload: dict[str, Any]) -> str:

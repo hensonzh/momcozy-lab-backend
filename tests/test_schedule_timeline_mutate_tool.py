@@ -32,21 +32,36 @@ def test_schedule_timeline_mutate_contract_is_generic_and_described() -> None:
     assert "跨领域" in contract.description
     assert "实际记录" in contract.description
     schema = contract.input_schema
-    assert schema["required"] == ["operation", "entry_type"]
-    assert schema["properties"]["entry_type"]["enum"] == ["schedule", "execution"]
-    assert schema["properties"]["domain"]["enum"] == [
+    variants = schema["anyOf"]
+    assert all(variant["required"][:2] == ["operation", "entry_type"] for variant in variants)
+    assert {
+        variant["properties"]["entry_type"]["enum"][0]
+        for variant in variants
+    } == {"schedule", "execution"}
+    create_schedule = next(
+        variant
+        for variant in variants
+        if variant["properties"]["operation"]["enum"] == ["create"]
+        and variant["properties"]["entry_type"]["enum"] == ["schedule"]
+    )
+    assert create_schedule["properties"]["domain"]["enum"] == [
         "lactation",
         "pregnancy",
         "postpartum_recovery",
         "general",
     ]
-    assert schema["properties"]["record_type"]["enum"] == [
+    assert {
+        variant["properties"]["record_type"]["enum"][0]
+        for variant in variants
+        if "record_type" in variant["properties"]
+    } == {
         "feeding",
         "pumping",
         "growth",
-    ]
-    for field_name, field_schema in schema["properties"].items():
-        assert field_schema.get("description"), f"{field_name} lacks a description"
+    }
+    for variant in variants:
+        for field_name, field_schema in variant["properties"].items():
+            assert field_schema.get("description"), f"{field_name} lacks a description"
 
     output_schema = contract.output_schema
     assert output_schema is not None

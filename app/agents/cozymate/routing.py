@@ -47,7 +47,7 @@ MILK_MANAGEMENT_TOOL_NAMES = (
 DEVICE_GUIDANCE_TOOL_NAMES = (
     "devices_guidance_manage",
     "pump_models_read",
-    "support_ticket_create",
+    "support_ticket_draft_create",
 )
 
 ROUTABLE_AGENT_IDS = (

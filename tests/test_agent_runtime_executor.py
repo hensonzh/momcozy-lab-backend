@@ -22,7 +22,7 @@ from app.agent_runtime.runs.models import (
 )
 from app.agent_runtime.context.items import message_context_item
 from app.agent_runtime.events.publisher import AgentEventPublisher
-from app.agent_runtime.tools.result import ToolImageOutput, ToolResult, ToolTextOutput
+from app.agent_runtime.tools.result import ToolImageOutput, ToolResult
 from app.agents.cozymate.prompts import DEFAULT_STABLE_SYSTEM_PROMPT
 from app.agents.cozymate.health_guidance import (
     HEALTH_GUIDANCE_ALLOWED_DOMAINS,
@@ -66,6 +66,38 @@ from app.agents.cozymate.tools.pregnancy_plan_flow import (
     PREGNANCY_PLAN_URGENT_RESPONSE,
     pregnancy_plan_workflow_context,
 )
+
+
+def _union_contract_view(schema: dict[str, Any]) -> dict[str, Any]:
+    variants = schema.get("anyOf")
+    if not isinstance(variants, list):
+        return schema
+    object_variants = [variant for variant in variants if isinstance(variant, dict)]
+    properties: dict[str, Any] = {}
+    for variant in object_variants:
+        for name, property_schema in (variant.get("properties") or {}).items():
+            if name not in properties:
+                properties[name] = dict(property_schema)
+                continue
+            current_enum = properties[name].get("enum")
+            next_enum = property_schema.get("enum")
+            if isinstance(current_enum, list) and isinstance(next_enum, list):
+                properties[name]["enum"] = list(
+                    dict.fromkeys([*current_enum, *next_enum])
+                )
+    common_required = (
+        set.intersection(
+            *(set(variant.get("required") or []) for variant in object_variants)
+        )
+        if object_variants
+        else set()
+    )
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [name for name in properties if name in common_required],
+        "properties": properties,
+    }
 
 
 def test_agent_runtime_executor_uses_internal_ledger_context_and_sdk_result(caplog) -> None:
@@ -349,11 +381,11 @@ def test_executor_runs_structured_pregnancy_choice_without_calling_the_model() -
             workflow.active_step = "final_confirmation"
             workflow.revision = 5
             workflow.step_token = "next-step-token"
-            safe_output = {
+            output = {
                 "status": "intake_in_progress",
                 "workflow_context": pregnancy_plan_workflow_context(workflow.state),
             }
-            return SimpleNamespace(safe_output=safe_output)
+            return SimpleNamespace(canonical_output=output)
 
     tool_executor = MutatingWorkflowToolExecutor()
     backend = CapturingSdkBackend(result=SdkNodeResult(final_text="不应调用模型"))
@@ -671,6 +703,8 @@ def test_agent_runtime_executor_injects_trusted_ibclc_consent_context() -> None:
     assert trusted_args == {
         "trusted_current_user_text": "好的",
         "trusted_previous_assistant_text": "需要我帮你打开 IBCLC 在线咨询入口吗？",
+        "locale": "zh-CN",
+        "timezone": "UTC",
     }
 
 
@@ -682,9 +716,12 @@ def test_agent_runtime_executor_injects_trusted_support_ticket_confirmation_text
     )
     executor._initialize_turn_state(run.id).current_user_text = "好的，请现在帮我创建售后工单"
 
-    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support_ticket_create"))
+    trusted_args = asyncio.run(executor._trusted_tool_args(run=run, contract_name="support_ticket_draft_create"))
 
-    assert trusted_args == {"trusted_current_user_text": "好的，请现在帮我创建售后工单"}
+    assert trusted_args == {
+        "trusted_current_user_text": "好的，请现在帮我创建售后工单",
+        "locale": "zh-CN",
+    }
 
 
 def test_agent_runtime_executor_injects_runtime_timezone_into_milk_analysis_snapshot() -> None:
@@ -1075,7 +1112,7 @@ def test_agent_runtime_executor_never_streams_partial_tool_json_after_visible_te
                 final_text="我先帮你看一下。",
                 text_deltas=(
                     '我先帮你看一下。\n{"tool_name":',
-                    '"schedule_timeline_read","safe_output":{"preferred_name":"Mai"}}',
+                    '"schedule_timeline_read","output":{"preferred_name":"Mai"}}',
                 ),
             )
         ]
@@ -1184,7 +1221,7 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    tool_executor = FakeToolExecutor(safe_output={"profile": {"preferred_name": "Mai"}})
+    tool_executor = FakeToolExecutor(output={"profile": {"preferred_name": "Mai"}})
     backend = InvokingSdkBackend()
 
     result = asyncio.run(
@@ -1201,17 +1238,30 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     contracts = {contract.name: contract for contract in default_tool_registry().list()}
     assert backend.tool_descriptions_by_contract == {contract_name: contract.description for contract_name, contract in contracts.items()}
     assert backend.tool_schemas_by_contract == {contract_name: contract.input_schema for contract_name, contract in contracts.items()}
+    for tool_name in (
+        "hospital_bag_cart_mutate",
+        "devices_guidance_manage",
+        "diary_read",
+        "diary_mutate",
+        "plan_read",
+        "plan_mutate",
+        "schedule_timeline_mutate",
+        "pregnancy_intake_manage",
+        "milk_analysis_manage",
+    ):
+        backend.tool_schemas[tool_name] = _union_contract_view(
+            backend.tool_schemas[tool_name]
+        )
     assert backend.tool_schemas["hospital_bag_manage"]["additionalProperties"] is False
     assert backend.tool_schemas["hospital_bag_manage"]["properties"]["generation_mode"]["enum"] == [
         "standard",
-        "quick",
         "immediate",
     ]
     assert backend.tool_schemas["hospital_bag_manage"]["properties"]["restart"]["type"] == "boolean"
     assert "hospital_bag_form_create" not in backend.tool_schemas
     assert "hospital_bag_card_create" not in backend.tool_schemas
     assert backend.tool_schemas["hospital_bag_cart_mutate"]["required"] == ["operation"]
-    assert backend.tool_schemas["devices_guidance_manage"]["required"] == ["model", "operation"]
+    assert backend.tool_schemas["devices_guidance_manage"]["required"] == ["operation"]
     assert backend.tool_schemas["devices_guidance_manage"]["properties"]["operation"]["enum"] == [
         "read",
         "start_or_resume",
@@ -1249,7 +1299,6 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     assert backend.tool_schemas["pregnancy_intake_manage"]["required"] == ["command"]
     assert backend.tool_schemas["pregnancy_intake_manage"]["properties"]["command"]["enum"] == [
         "start_or_resume",
-        "submit_form",
         "answer_current",
         "edit_answer",
         "pause",
@@ -1281,12 +1330,12 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
         "answer",
         "evaluate",
     ]
-    assert backend.tool_schemas["support_ticket_create"]["required"] == ["operation", "issue_summary", "user_confirmed"]
-    assert backend.tool_schemas["support_ticket_create"]["additionalProperties"] is False
+    assert backend.tool_schemas["support_ticket_draft_create"]["required"] == ["issue_summary"]
+    assert backend.tool_schemas["support_ticket_draft_create"]["additionalProperties"] is False
     assert {
         "devices_guidance_manage",
         "pump_models_read",
-        "support_ticket_create",
+        "support_ticket_draft_create",
     } <= set(backend.tool_names)
     assert {
         "load_service_skill",
@@ -1298,14 +1347,17 @@ def test_agent_runtime_executor_routes_sdk_tool_calls_through_tool_executor() ->
     }.isdisjoint(backend.tool_names)
 
 
-def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_read() -> None:
+def test_agent_runtime_executor_uses_one_canonical_diary_output() -> None:
     thread_id = uuid4()
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read today's diary", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
     tool_executor = FakeToolExecutor(
-        safe_output={"status": "entry_read", "entry_date": "2026-07-12"},
-        model_output={"status": "entry_read", "entry": {"content": "private diary content"}},
+        output={
+            "status": "entry_read",
+            "entry_date": "2026-07-12",
+            "entry": {"content": "private diary content"},
+        },
     )
     backend = CapturingDiaryToolOutputSdkBackend()
 
@@ -1320,11 +1372,13 @@ def test_agent_runtime_executor_uses_ephemeral_model_output_for_private_diary_re
 
     assert json.loads(backend.function_output) == {
         "status": "entry_read",
+        "entry_date": "2026-07-12",
         "entry": {"content": "private diary content"},
     }
-    assert backend.safe_output == {
+    assert backend.output == {
         "status": "entry_read",
         "entry_date": "2026-07-12",
+        "entry": {"content": "private diary content"},
     }
     assert tool_executor.calls[0]["actor"].user_id == run.actor_user_id
     assert tool_executor.calls[0]["run_id"] == run.id
@@ -1400,18 +1454,27 @@ def test_agent_runtime_executor_adds_model_selected_visible_image_to_current_loo
         sequence=2,
     )
     repository = FakeRuntimeRepository(messages=[prior_assistant, current_user], current_message=current_user)
-    tool_result = ToolResult(
-        output=(
-            ToolTextOutput(text="Inspect the selected image."),
+    tool_result = ToolResult.json(
+        {
+            "status": "image_context_ready",
+            "image_url": image_url,
+            "detail": "low",
+            "agent_instruction": "Inspect the selected image.",
+        },
+        supplemental_content=(
             ToolImageOutput(
                 image_url="data:image/png;base64,aW1hZ2U=",
                 detail="low",
             ),
         ),
-        audit_output={"status": "image_context_ready", "image_url": image_url, "detail": "low"},
     )
     tool_executor = FakeToolExecutor(
-        safe_output={"status": "image_context_ready", "image_url": image_url, "detail": "low"},
+        output={
+            "status": "image_context_ready",
+            "image_url": image_url,
+            "detail": "low",
+            "agent_instruction": "Inspect the selected image.",
+        },
         tool_result=tool_result,
     )
     backend = ConversationHistoryImageLoadingSdkBackend(image_url=image_url)
@@ -1567,7 +1630,7 @@ def test_agent_runtime_executor_generates_quick_replies_with_finalizer() -> None
                     {
                         "tool_name": "milk_analysis_manage",
                         "status": "completed",
-                        "safe_output": {
+                        "output": {
                             "status": "intake_question_ready",
                             "next_question": "最近有没有发热、寒战或乳房红肿硬块？",
                             "internal_debug_payload": "must-not-reach-finalizer",
@@ -1831,7 +1894,7 @@ def test_agent_runtime_executor_exposes_tools_directly_to_responses_runner() -> 
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="Read my profile", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    tool_executor = FakeToolExecutor(safe_output={"profile": {"preferred_name": "Mai"}})
+    tool_executor = FakeToolExecutor(output={"profile": {"preferred_name": "Mai"}})
     backend = InvokingSdkBackend()
 
     result = asyncio.run(
@@ -1903,7 +1966,7 @@ def test_agent_runtime_routes_to_milk_specialist_with_only_milk_tools() -> None:
             repository=repository,
             sdk_runner=runner,
             tool_registry=tool_registry,
-            tool_executor=FakeToolExecutor(safe_output={}),
+            tool_executor=FakeToolExecutor(output={}),
             service_router=CozymateAgentRouter(sdk_runner=runner),
             agent_catalog=default_cozymate_agent_catalog(
                 tool_registry=tool_registry,
@@ -1975,7 +2038,7 @@ def test_agent_runtime_routes_general_request_to_main_public_tools() -> None:
             repository=repository,
             sdk_runner=runner,
             tool_registry=tool_registry,
-            tool_executor=FakeToolExecutor(safe_output={}),
+            tool_executor=FakeToolExecutor(output={}),
             service_router=CozymateAgentRouter(sdk_runner=runner),
             agent_catalog=default_cozymate_agent_catalog(
                 tool_registry=tool_registry,
@@ -2037,7 +2100,7 @@ def test_agent_runtime_runs_multi_scene_specialists_then_main_synthesis() -> Non
             repository=repository,
             sdk_runner=runner,
             tool_registry=tool_registry,
-            tool_executor=FakeToolExecutor(safe_output={}),
+            tool_executor=FakeToolExecutor(output={}),
             service_router=CozymateAgentRouter(sdk_runner=runner),
             agent_catalog=default_cozymate_agent_catalog(
                 tool_registry=tool_registry,
@@ -2055,7 +2118,7 @@ def test_agent_runtime_runs_multi_scene_specialists_then_main_synthesis() -> Non
     assert backend.requests[1].tool_names == (
         "devices_guidance_manage",
         "pump_models_read",
-        "support_ticket_create",
+        "support_ticket_draft_create",
     )
     assert backend.requests[2].tool_names == (
         "plan_read",
@@ -2117,7 +2180,7 @@ def test_agent_runtime_rejects_invalid_route_without_exposing_all_tools() -> Non
                 repository=repository,
                 sdk_runner=runner,
                 tool_registry=tool_registry,
-                tool_executor=FakeToolExecutor(safe_output={}),
+                tool_executor=FakeToolExecutor(output={}),
                 service_router=CozymateAgentRouter(sdk_runner=runner),
                 agent_catalog=default_cozymate_agent_catalog(
                     tool_registry=tool_registry,
@@ -2199,7 +2262,7 @@ def test_agent_runtime_executor_exposes_service_tool_without_skill_projection() 
     run = _run(thread_id=thread_id)
     current_user = _message(thread_id=thread_id, run_id=run.id, role="user", text="继续看奶量", sequence=1)
     repository = FakeRuntimeRepository(messages=[current_user], current_message=current_user)
-    tool_executor = FakeToolExecutor(safe_output={"milk_status": {"total_ml": 420}})
+    tool_executor = FakeToolExecutor(output={"milk_status": {"total_ml": 420}})
     backend = ScriptedSdkBackend(
         [
             scripted_sdk_response(
@@ -2244,7 +2307,7 @@ def test_agent_runtime_executor_ignores_legacy_run_summaries() -> None:
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低，建议今天观察补水和吸奶频率。",
             "tools_used": ["milk_analysis_manage"],
-            "tool_facts": [{"tool_name": "milk_analysis_manage", "safe_output": {"total_ml": 420}}],
+            "tool_facts": [{"tool_name": "milk_analysis_manage", "output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
@@ -2300,7 +2363,7 @@ def test_agent_runtime_executor_uses_history_without_reinjecting_run_summary_fac
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低。",
             "tools_used": ["milk_analysis_manage"],
-            "tool_facts": [{"tool_name": "milk_analysis_manage", "safe_output": {"total_ml": 420}}],
+            "tool_facts": [{"tool_name": "milk_analysis_manage", "output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
@@ -2355,7 +2418,7 @@ def test_agent_runtime_executor_does_not_restore_missing_history_from_run_summar
             "user_goal": "昨天奶量怎么样？",
             "assistant_conclusion": "昨天总奶量偏低。",
             "tools_used": ["milk_analysis_manage"],
-            "tool_facts": [{"tool_name": "milk_analysis_manage", "safe_output": {"total_ml": 420}}],
+            "tool_facts": [{"tool_name": "milk_analysis_manage", "output": {"total_ml": 420}}],
             "loaded_service_skills": [
                 {
                     "service_skill_id": "milk-management",
@@ -3020,7 +3083,7 @@ def test_agent_runtime_executor_generates_the_plan_in_the_same_final_confirmatio
             "guide.controls",
             {"phase": "guiding", "device_model": "Air1", "completed_steps": ["guide.parts"]},
             "devices_guidance_manage",
-            {"model": "Air1", "operation": "complete_current"},
+            {"operation": "complete_current"},
         ),
     ],
 )
@@ -3221,26 +3284,23 @@ def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_uplo
     registry = default_tool_registry()
 
     async def capture_handler(_context: ToolHandlerContext) -> ToolResult:
-        return ToolResult(
-            output=ToolResult.json(
-                {
-                    "status": "intake_in_progress",
-                    "workflow_phase": "checkup_records_upload",
-                    "trusted_pregnancy_plan_intake": {
-                        "analysis": {
-                            "focuses": [
-                                {
-                                    "management_meaning": "孕中期检查有明确时间窗。",
-                                    "plan_impact": "计划会按孕周安排检查和结果复核。",
-                                }
-                            ]
-                        },
-                        "visible_question": PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
-                        "instruction": "Explain 1-2 analysis items, then ask exactly visible_question and stop.",
+        return ToolResult.json(
+            {
+                "status": "intake_in_progress",
+                "workflow_phase": "checkup_records_upload",
+                "trusted_pregnancy_plan_intake": {
+                    "analysis": {
+                        "focuses": [
+                            {
+                                "management_meaning": "孕中期检查有明确时间窗。",
+                                "plan_impact": "计划会按孕周安排检查和结果复核。",
+                            }
+                        ]
                     },
-                }
-            ).output,
-            audit_output={"status": "intake_in_progress", "workflow_phase": "checkup_records_upload"},
+                    "visible_question": PREGNANCY_PLAN_CHECKUP_UPLOAD_QUESTION,
+                    "instruction": "Explain 1-2 analysis items, then ask exactly visible_question and stop.",
+                },
+            }
         )
 
     tool_executor = CozymateToolExecutor(
@@ -3254,10 +3314,10 @@ def test_agent_runtime_executor_preserves_initial_analysis_then_one_checkup_uplo
             scripted_sdk_response(
                 final_text=final_text,
                 tool_invocations=(
-                    scripted_tool_invocation(
-                        "pregnancy_intake_manage",
-                        {"command": "submit_form"},
-                    ),
+                        scripted_tool_invocation(
+                            "pregnancy_intake_manage",
+                            {"command": "start_or_resume"},
+                        ),
                 ),
             )
         ]
@@ -4008,8 +4068,8 @@ class FakeRuntimeRepository:
     async def create_tool_output(self, **kwargs):
         self.tool_output = FakeToolOutput(
             tool_call_id=kwargs["tool_call_id"],
-            safe_output=kwargs["safe_output"],
-            raw_output_ref=kwargs.get("raw_output_ref", ""),
+            output=kwargs["output"],
+            output_ref=kwargs.get("output_ref", ""),
         )
         return self.tool_output
 
@@ -4322,25 +4382,16 @@ class FakeTransientStream:
 
 
 class FakeToolExecutor:
-    def __init__(self, *, safe_output, tool_result=None, model_output=None):
-        self.safe_output = safe_output
-        self.model_output = model_output
-        if tool_result is None:
-            model_value = model_output if model_output is not None else safe_output
-            self.tool_result = ToolResult(
-                output=ToolResult.json(model_value).output,
-                audit_output=safe_output,
-            )
-        else:
-            self.tool_result = tool_result
+    def __init__(self, *, output, tool_result=None):
+        self.canonical_output = output
+        self.tool_result = tool_result or ToolResult.json(output)
         self.calls = []
 
     async def execute(self, **kwargs):
         self.calls.append(kwargs)
         return FakeToolExecutionResult(
-            safe_output=self.safe_output,
+            canonical_output=self.canonical_output,
             tool_result=self.tool_result,
-            model_output=self.model_output,
         )
 
 
@@ -4365,19 +4416,17 @@ class FakeFactService:
 
 
 class FakeToolExecutionResult:
-    def __init__(self, *, safe_output, tool_result, model_output=None):
-        self.safe_output = safe_output
+    def __init__(self, *, canonical_output, tool_result):
+        self.canonical_output = canonical_output
         self.tool_result = tool_result
-        if model_output is not None:
-            self.model_output = model_output
 
 
 class FakeToolOutput:
-    def __init__(self, *, tool_call_id, safe_output, raw_output_ref=""):
+    def __init__(self, *, tool_call_id, output, output_ref=""):
         self.id = uuid4()
         self.tool_call_id = tool_call_id
-        self.safe_output = safe_output
-        self.raw_output_ref = raw_output_ref
+        self.output = output
+        self.output_ref = output_ref
 
 
 class FakeObjectStorage:
@@ -4432,7 +4481,7 @@ class InvokingSdkBackend:
 class CapturingDiaryToolOutputSdkBackend:
     def __init__(self) -> None:
         self.function_output = ""
-        self.safe_output: dict[str, Any] = {}
+        self.output: dict[str, Any] = {}
 
     async def run(self, request: SdkNodeRequest) -> SdkNodeResult:
         diary_tool = next(tool for tool in request.tools if tool.contract_name == "diary_read")
@@ -4444,7 +4493,7 @@ class CapturingDiaryToolOutputSdkBackend:
             )
         )
         self.function_output = str(invocation.to_function_call_output())
-        self.safe_output = invocation.to_observation()
+        self.output = invocation.to_observation()
         return SdkNodeResult(final_text="我已经读到这篇日记。")
 
 

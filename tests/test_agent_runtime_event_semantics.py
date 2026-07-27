@@ -84,7 +84,7 @@ def test_tool_event_semantic_uses_one_merge_key_for_the_whole_call() -> None:
         event_type="tool.completed",
         tool_name="milk_analysis_manage",
         tool_call_id="call-1",
-        safe_output={"status": "completed"},
+        output={"status": "completed"},
         effect_scope="none",
     )
 
@@ -152,7 +152,7 @@ def test_diary_semantics_follow_action_and_result(
     completed = tool_event_semantic(
         event_type="tool.completed",
         tool_name=tool_name,
-        safe_output={"status": status},
+        output={"status": status},
         effect_scope=effect_scope,
     )
 
@@ -169,7 +169,7 @@ def test_conversation_history_image_read_event_semantic_uses_history_image_copy(
     completed = tool_event_semantic(
         event_type="tool.completed",
         tool_name="conversation_history_image_read",
-        safe_output={"status": "image_context_ready"},
+        output={"status": "image_context_ready"},
         effect_scope="none",
     )
 
@@ -181,7 +181,7 @@ def test_tool_event_semantic_maps_confirmation_outputs() -> None:
     semantic = tool_event_semantic(
         event_type="tool.completed",
         tool_name="schedule_timeline_mutate",
-        safe_output={"requires_confirmation": True},
+        output={"requires_confirmation": True},
         effect_scope="user_resource",
     )
 
@@ -201,7 +201,7 @@ def test_plan_tool_event_semantics_distinguish_preview_from_applied_pregnancy_pl
         event_type="tool.completed",
         tool_name="plan_mutate",
         safe_args={"operation": "create", "plan_type": "pregnancy"},
-        safe_output={
+        output={
             "status": "created",
             "operation": "create",
             "plan_type": "pregnancy",
@@ -228,7 +228,7 @@ def test_diary_no_op_completion_does_not_claim_write_success(
     semantic = tool_event_semantic(
         event_type="tool.completed",
         tool_name=tool_name,
-        safe_output={"status": status},
+        output={"status": status},
         effect_scope="user_resource",
     )
 

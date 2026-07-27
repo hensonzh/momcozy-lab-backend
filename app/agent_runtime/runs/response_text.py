@@ -249,7 +249,7 @@ def _looks_like_tool_or_runtime_json(value: Any) -> bool:
         "tool_call_id",
         "tool_name",
         "safe_args",
-        "safe_output",
+        "output_summary",
         "preferred_name",
         "profile",
         "quick_replies",

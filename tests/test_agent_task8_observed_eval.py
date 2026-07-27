@@ -401,21 +401,42 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
     assert scenario.workflow("milk_analysis").active_step == "infant_wet_diapers"
 
     answers = (
-        "24 小时有 7 片湿尿布",
-        "精神不错，吃奶后能安稳",
-        "最近体重增长正常",
-        "没有发热、寒战、红肿、硬块或疼痛加重",
-        "吸完后舒服，没有持续胀痛",
+        ("infant_wet_diapers", "24 小时有 7 片湿尿布"),
+        ("infant_state_or_satisfaction", "精神不错，吃奶后能安稳"),
+        ("infant_growth_signal", "最近体重增长正常"),
+        ("maternal_red_flags", "没有发热、寒战、红肿、硬块或疼痛加重"),
+        ("maternal_breast_comfort", "吸完后舒服，没有持续胀痛"),
     )
-    for answer in answers:
+    for field, answer in answers:
         turn = scenario.run_turn(
             text=answer,
             handlers=handlers,
-            tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "answer"}),),
+            tool_invocations=(
+                scripted_tool_invocation(
+                    "milk_analysis_manage",
+                    {
+                        "operation": "answer",
+                        "observed_answers": [
+                            {
+                                "field": field,
+                                "evidence": answer,
+                            }
+                        ],
+                    },
+                ),
+            ),
             final_text="继续下一项。",
         )
         _assert_tools(turn.trace, "milk_analysis_manage")
-        assert turn.trace.tool_calls[0]["safe_args"] == {"operation": "answer"}
+        assert turn.trace.tool_calls[0]["safe_args"] == {
+            "operation": "answer",
+            "observed_answers": [
+                {
+                    "field": field,
+                    "evidence": answer,
+                }
+            ],
+        }
 
     assert scenario.workflow("milk_analysis").active_step == "ready_to_evaluate"
     evaluated = scenario.run_turn(
@@ -475,10 +496,11 @@ def test_observed_milk_analysis_plan_and_schedule_persist_real_action_lifecycles
             scripted_tool_invocation(
                 "schedule_timeline_mutate",
                 {
-                    "operation": "reschedule",
-                    "entry_type": "schedule",
-                    "plan_id": str(plan.id),
-                    "calendar_events": [
+                        "operation": "reschedule",
+                        "entry_type": "schedule",
+                        "plan_id": str(plan.id),
+                        "target_dates": [plan_date_text],
+                        "calendar_events": [
                         {
                             "date": plan_date_text,
                             "start_time": "10:30",
@@ -515,17 +537,30 @@ def test_observed_milk_red_flags_block_plan_action_and_artifact() -> None:
         tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "start_or_resume"}),),
         final_text="开始分析。",
     )
-    for answer in (
-        "24 小时有 7 片湿尿布",
-        "精神不错，吃奶后能安稳",
-        "最近体重增长正常",
-        "没有发热，不过寒战",
-        "吸完后仍然很痛",
+    for field, answer in (
+        ("infant_wet_diapers", "24 小时有 7 片湿尿布"),
+        ("infant_state_or_satisfaction", "精神不错，吃奶后能安稳"),
+        ("infant_growth_signal", "最近体重增长正常"),
+        ("maternal_red_flags", "没有发热，不过寒战"),
+        ("maternal_breast_comfort", "吸完后仍然很痛"),
     ):
         scenario.run_turn(
             text=answer,
             handlers=handlers,
-            tool_invocations=(scripted_tool_invocation("milk_analysis_manage", {"operation": "answer"}),),
+            tool_invocations=(
+                scripted_tool_invocation(
+                    "milk_analysis_manage",
+                    {
+                        "operation": "answer",
+                        "observed_answers": [
+                            {
+                                "field": field,
+                                "evidence": answer,
+                            }
+                        ],
+                    },
+                ),
+            ),
             final_text="继续。",
         )
     scenario.run_turn(
@@ -590,14 +625,13 @@ def test_observed_device_unboxing_complete_current_advances_exactly_one_persiste
         tool_invocations=(
             scripted_tool_invocation(
                 "devices_guidance_manage",
-                {"model": "Air1", "operation": "complete_current"},
+                {"operation": "complete_current"},
             ),
         ),
         final_text="下一步熟悉主机按键。",
     )
     _assert_tools(advanced.trace, "devices_guidance_manage")
     assert advanced.trace.tool_calls[0]["safe_args"] == {
-        "model": "Air1",
         "operation": "complete_current",
     }
     assert scenario.workflow("device_unboxing").active_step == "guide.controls"
@@ -629,23 +663,10 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
     offered = scenario.run_turn(
         text="Air1 开箱后发现少了一个配件，我很着急。",
         handlers=handlers,
-        tool_invocations=(
-            scripted_tool_invocation(
-                "support_ticket_create",
-                {
-                    "operation": "create",
-                    "issue_type": "missing_parts",
-                    "issue_summary": "Air1 开箱后缺少配件",
-                    "product_model": "Air1",
-                    "user_emotion": "着急",
-                    "user_confirmed": False,
-                },
-            ),
-        ),
         final_text="这件事确实很影响使用体验，我可以帮你创建一个售后工单。需要我现在帮你创建吗？",
     )
 
-    _assert_tools(offered.trace, "support_ticket_create")
+    assert all(call["tool_name"] != "support_ticket_draft_create" for call in offered.trace.tool_calls)
     _assert_event_types(offered.trace, forbidden={"artifact.created", "action.confirmation_required"})
     assert scenario.repository.artifacts == []
 
@@ -654,21 +675,18 @@ def test_observed_device_aftersales_requires_confirmation_then_creates_editable_
         handlers=handlers,
         tool_invocations=(
             scripted_tool_invocation(
-                "support_ticket_create",
+                "support_ticket_draft_create",
                 {
-                    "operation": "create",
                     "issue_type": "missing_parts",
                     "issue_summary": "Air1 开箱后缺少配件",
                     "product_model": "Air1",
-                    "user_emotion": "着急",
-                    "user_confirmed": True,
                 },
             ),
         ),
         final_text="我已经把售后信息整理好了，你可以检查并提交。",
     )
 
-    _assert_tools(confirmed.trace, "support_ticket_create")
+    _assert_tools(confirmed.trace, "support_ticket_draft_create")
     _assert_artifact_events(confirmed.trace, "support_ticket_draft")
     assert confirmed.trace.actions == []
     assert scenario.repository.artifacts[-1].payload["submit_label"] == "确认并提交"
@@ -785,7 +803,7 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         text="IBCLC 是什么？",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("ibclc_consult_card_create", {"operation": "create", "reason": "衔乳疼痛"}),
+            scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),
         ),
         final_text="IBCLC 是国际认证哺乳顾问。",
     )
@@ -803,7 +821,7 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
         text="好的",
         handlers=handlers,
         tool_invocations=(
-            scripted_tool_invocation("ibclc_consult_card_create", {"operation": "create", "reason": "衔乳疼痛"}),
+            scripted_tool_invocation("ibclc_consult_card_create", {"reason": "衔乳疼痛"}),
         ),
         final_text="当前不创建咨询入口。",
     )
@@ -818,7 +836,6 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
             scripted_tool_invocation(
                 "ibclc_consult_card_create",
                 {
-                    "operation": "create",
                     "reason": "衔乳疼痛",
                     "feeding_context": "左侧喂奶后疼",
                     "urgency": "soon",
@@ -830,7 +847,7 @@ def test_observed_ibclc_requires_semantic_consent_and_creates_no_support_action(
     _assert_tools(opened.trace, "ibclc_consult_card_create")
     _assert_artifact_events(opened.trace, "ibclc_consult_card")
     assert opened.trace.actions == []
-    assert all(call["tool_name"] != "support_ticket_create" for call in opened.trace.tool_calls)
+    assert all(call["tool_name"] != "support_ticket_draft_create" for call in opened.trace.tool_calls)
     _assert_event_types(opened.trace, forbidden={"action.confirmation_required"})
 
 
@@ -849,7 +866,7 @@ def test_observed_ibclc_canonical_offer_opens_on_first_short_confirmation() -> N
         tool_invocations=(
             scripted_tool_invocation(
                 "ibclc_consult_card_create",
-                {"operation": "create", "reason": "衔乳疼痛", "feeding_context": "宝宝吸不住"},
+                {"reason": "衔乳疼痛", "feeding_context": "宝宝吸不住"},
             ),
         ),
         final_text="IBCLC 咨询入口已经准备好。",
@@ -1025,7 +1042,7 @@ class ObservedScenario:
         return {"ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=self.runtime_service)}
 
     def support_handlers(self) -> dict[str, Any]:
-        return {"support_ticket_create": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
+        return {"support_ticket_draft_create": SupportTicketProposeToolHandler(runtime_service=self.runtime_service)}
 
     def diary_handlers(self) -> dict[str, Any]:
         return {"diary_mutate": DiaryMutateToolHandler(runtime_service=self.runtime_service)}

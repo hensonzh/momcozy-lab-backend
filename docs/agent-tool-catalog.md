@@ -6,6 +6,22 @@
 
 `ToolContract` 声明 `name`、`domain`、`description`、Input/Output Schema、`effect_scope`、`action_types`、等待策略、结果依赖和超时；用户业务写入必须经过 Action Policy 与 Action Handler。
 
+每个 Tool 只生成一份经过 Output Schema 校验的 `canonical_output`。该结果原样进入模型上下文并作为工具
+输出持久化的事实来源，不维护模型专用或审计专用的第二份业务输出。延迟事件通过独立控制字段传递，媒体通过
+结构化内容块追加；`tool.completed` 只发送界面所需的 `output_summary`。
+
+模型可见 `description` 统一采用两句式：第一句说明 Tool 是什么、能做什么（What），第二句以“当……时使用”
+说明调用时机（When）。参数含义、枚举、必填条件和操作约束放在 Input Schema 字段描述中，不在 Tool
+description 中重复展开。
+
+模型可见 Input Schema 按具体 `operation` / `command` 使用封闭对象分支：每个分支只暴露当前动作可用的
+字段，并拒绝额外字段。每个输入字段都描述含义、单位、枚举映射、适用时机及可省略条件；owner、可信本地
+日期、locale、timezone、source、用户确认状态和幂等键由 Runtime 注入，不交给模型生成。可信 UI 专用命令
+使用独立的内部 Input Schema 校验，不注册到模型 SDK Tool。
+
+`pregnancy_intake_manage.answer_current` 在模型侧不暴露 `step_id`；App 的结构化回复通过内部 Input Schema
+携带该字段进行过期步骤校验。
+
 ## 数量
 
 | 项目 | 数量 |
@@ -24,7 +40,7 @@
 | 主智能体 | 9 | `profile_read`、`profile_update`、`plan_read`、`plan_mutate`、`schedule_timeline_read`、`schedule_timeline_mutate`、`diary_read`、`diary_mutate`、`conversation_history_image_read` |
 | 产前服务 | 5 | `plan_read`、`plan_mutate`、`pregnancy_intake_manage`、`hospital_bag_manage`、`hospital_bag_cart_mutate` |
 | 泌乳服务 | 8 | `profile_read`、`profile_update`、`plan_read`、`plan_mutate`、`schedule_timeline_read`、`schedule_timeline_mutate`、`milk_analysis_manage`、`ibclc_consult_card_create` |
-| 设备服务 | 3 | `devices_guidance_manage`、`pump_models_read`、`support_ticket_create` |
+| 设备服务 | 3 | `devices_guidance_manage`、`pump_models_read`、`support_ticket_draft_create` |
 
 多场景请求中的每次专业模型调用仍分别应用自己的 Allowlist；最终汇总调用不提供任何 Tool。
 
@@ -57,7 +73,8 @@
 
 其中 `plan_read` 统一读取已持久化的计划列表或计划详情；`plan_mutate` 统一创建、更新和删除计划，
 通过 `plan_type` 选择创建计划的领域构建器。当前创建支持 `milk_management` 和 `pregnancy`；
-更新和删除先按当前用户读取目标计划，再以后端持久化的真实类型执行，模型传入的类型只作一致性校验。
+更新和删除只传可信 `plan_id`，先按当前用户读取目标计划，再以后端持久化的真实类型执行，不让模型重复传
+`plan_type`。
 
 `schedule_timeline_read` / `schedule_timeline_mutate` 统一处理泌乳、孕期、产后恢复和通用日程，
 并通过 `entry_type=schedule|execution` 区分计划日程与实际记录；完成 feeding/pumping 泌乳任务时必须同时提交
@@ -78,7 +95,10 @@ App/API 层的网络请求幂等仍由请求头或应用请求参数负责。
 
 ### Devices and support
 
-`devices_guidance_manage`、`pump_models_read`、`support_ticket_create`
+`devices_guidance_manage`、`pump_models_read`、`support_ticket_draft_create`
+
+`support_ticket_draft_create` 只整理供用户核对的售后工单草稿，不直接提交正式工单；模型只传用户明确提供的
+问题事实，用户本轮是否已经同意由 Runtime 从可信当前消息判断。
 
 ### Conversation assets
 

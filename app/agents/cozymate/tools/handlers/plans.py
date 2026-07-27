@@ -53,7 +53,7 @@ class PlanReadToolHandler(_StandardToolHandler):
         plans = await self.plans_service.list_plans(
             owner_user_id=context.actor.user_id,
             plan_type=_text(context.args, "plan_type"),
-            status=_text(context.args, "status") or "active",
+            status="active",
             limit=limit,
         )
         return {
@@ -139,13 +139,6 @@ class PlanMutateToolHandler(_StandardToolHandler):
             plan_id=plan_id,
         )
         plan_type = str(plan.plan_type or "").strip()
-        type_hint = _text(context.args, "plan_type")
-        if type_hint and type_hint != plan_type:
-            raise ApiError(
-                code="plan_type_mismatch",
-                message="plan_type does not match the owner-scoped plan.",
-                status=409,
-            )
         if operation == "delete":
             result = await self.delete_handler.execute(context)
         else:
@@ -259,15 +252,20 @@ def _plan_mutate_result(
     plan_id: UUID | None,
 ) -> dict[str, Any] | ToolResult:
     if isinstance(result, ToolResult):
-        audit_output = dict(result.audit_output or {})
-        audit_output.update(
+        canonical_output = dict(result.canonical_output)
+        canonical_output.update(
             {
                 "operation": operation,
                 "plan_type": plan_type,
                 "plan_id": str(plan_id) if plan_id is not None else None,
             }
         )
-        return ToolResult(output=result.output, audit_output=audit_output)
+        return ToolResult(
+            canonical_output=canonical_output,
+            supplemental_content=result.supplemental_content,
+            serialization=result.serialization,
+            deferred_events=result.deferred_events,
+        )
     output = {
         **result,
         "operation": operation,

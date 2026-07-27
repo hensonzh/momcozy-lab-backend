@@ -435,7 +435,7 @@ def hospital_bag_cart_update_result(
     preserve_item_ids = _string_list(args.get("preserve_item_ids"))
     current_groups = _cart_groups_from_args(args)
 
-    if action in {"replace_pump_model", "add_pump_model"}:
+    if action == "set_pump_model":
         product = find_pump_product(available_pump_products, _text(args.get("product_sku_id")))
         if product is None:
             message = assistant_message or "你想换成哪一款 Momcozy 吸奶器？请告诉我具体型号。"
@@ -462,7 +462,7 @@ def hospital_bag_cart_update_result(
             restored_item_names=[product["name"]] if changed["mode"] == "added" else [],
         )
 
-    if action in {"optimize_budget", "apply_budget_plan"}:
+    if action == "optimize_budget":
         budget_result = _optimize_hospital_bag_cart_budget(
             current_groups,
             target_budget=_target_budget(args.get("target_budget")),
@@ -559,9 +559,6 @@ def hospital_bag_cart_update_result(
         totals = _cart_totals(next_groups)
         message = assistant_message or f"已经帮你把待产包购物车恢复到默认清单了，现在预计合计 {_cart_totals_label(totals)}。"
         return _hospital_bag_cart_update_envelope("reset_cart", next_groups, totals, message)
-
-    if action == "clarify":
-        return _cart_needs_clarification(assistant_message or "你想怎么调整购物车？比如删掉某件、换便宜一点，或者恢复默认清单。")
 
     return _cart_needs_clarification(assistant_message or "你想怎么调整待产包购物车？")
 
@@ -904,8 +901,11 @@ def _optimize_hospital_bag_cart_budget(
     next_groups = _clone_hospital_bag_cart_groups(groups)
     protected_ids = set(HOSPITAL_BAG_CART_PROTECTED_ITEM_IDS)
     protected_ids.update(preserve_item_ids)
-    if not allow_remove_pump:
-        protected_ids.update(_pump_item_ids_in_groups(groups))
+    pump_item_ids = _pump_item_ids_in_groups(groups)
+    if allow_remove_pump:
+        protected_ids.difference_update(pump_item_ids)
+    else:
+        protected_ids.update(pump_item_ids)
 
     replaced_items: list[dict[str, Any]] = []
     if preference != "comfort":
@@ -981,6 +981,14 @@ def _hospital_bag_budget_message(budget_result: dict[str, Any]) -> str:
     target_budget = budget_result.get("target_budget")
     budget_met = bool(budget_result.get("budget_met"))
     removed_names = budget_result.get("removed_item_names") or []
+    removed_item_ids = {
+        _text(item_id)
+        for item_id in budget_result.get("removed_item_ids") or []
+    }
+    pump_removed = any(
+        item_id == HOSPITAL_BAG_CART_PUMP_ITEM_ID or item_id.startswith("pump-")
+        for item_id in removed_item_ids
+    )
     replaced_items = budget_result.get("replaced_items") or []
     changed_parts: list[str] = []
     if replaced_items:
@@ -991,13 +999,15 @@ def _hospital_bag_budget_message(budget_result: dict[str, Any]) -> str:
     if target_budget is not None and budget_met:
         prefix = f"好，我按 {target_budget:.0f} 元以内帮你压了一版。"
     elif target_budget is not None:
-        prefix = f"我先尽量按 {target_budget:.0f} 元以内帮你压了一版，但为了保留吸奶器和基础必需品，目前还会超一点。"
+        retained = "基础必需品" if pump_removed else "吸奶器和基础必需品"
+        prefix = f"我先尽量按 {target_budget:.0f} 元以内帮你压了一版，但为了保留{retained}，目前还会超一点。"
     else:
         prefix = "好，我先帮你切到更省钱的一版。"
 
+    pump_note = "吸奶器也已按你的明确允许移除" if pump_removed else "吸奶器我先保留"
     if changed_parts:
-        return f"{prefix}{'，'.join(changed_parts)}；吸奶器我先保留。现在预计合计约 {_cart_totals_label(totals)}，共 {totals['itemCount']} 件。"
-    return f"{prefix}当前购物车已经比较接近这个要求，吸奶器我先保留。现在预计合计约 {_cart_totals_label(totals)}，共 {totals['itemCount']} 件。"
+        return f"{prefix}{'，'.join(changed_parts)}；{pump_note}。现在预计合计约 {_cart_totals_label(totals)}，共 {totals['itemCount']} 件。"
+    return f"{prefix}当前购物车已经比较接近这个要求，{pump_note}。现在预计合计约 {_cart_totals_label(totals)}，共 {totals['itemCount']} 件。"
 
 
 def _target_budget(value: Any) -> float | None:

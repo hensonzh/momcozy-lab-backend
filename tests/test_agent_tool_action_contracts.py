@@ -45,8 +45,8 @@ def test_cozymate_registry_exposes_effect_scopes_and_no_legacy_tool_aliases() ->
     assert "records.feeding_record.update" in registry.get("schedule_timeline_mutate").action_types
     assert "records.pumping_record.update" in registry.get("schedule_timeline_mutate").action_types
     assert "records.growth_record.update" in registry.get("schedule_timeline_mutate").action_types
-    assert registry.get("support_ticket_create").effect_scope == "agent_internal"
-    assert registry.get("support_ticket_create").action_types == ()
+    assert registry.get("support_ticket_draft_create").effect_scope == "agent_internal"
+    assert registry.get("support_ticket_draft_create").action_types == ()
 
 
 def test_every_action_backed_tool_is_registered_in_action_policy() -> None:
@@ -85,6 +85,7 @@ def _contract(*, effect_scope: str, action_types: tuple[str, ...] = (), name: st
         name=name,
         domain="test",
         input_schema={"type": "object", "additionalProperties": False, "properties": {}},
+        output_schema={"type": "object"},
         effect_scope=effect_scope,
         action_types=action_types,
         blocking_policy="must_wait",

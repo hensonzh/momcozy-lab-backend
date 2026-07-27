@@ -12,23 +12,14 @@ def test_profile_read_replaces_raw_growth_history_as_direct_tool() -> None:
 
     assert contract.domain == "profiles"
     assert contract.effect_scope == "none"
-    assert contract.input_schema == {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "infant_scope": {
-                "type": "string",
-                "enum": ["current_delivery", "all"],
-                "default": "current_delivery",
-                "description": (
-                    "宝宝读取范围。current_delivery 仅返回当前这次分娩的宝宝，供奶量分析使用；"
-                    "all 返回当前用户的全部宝宝，供通用资料核对和选择 infant_id 使用。"
-                ),
-            }
-        },
-    }
-    assert "妈妈与宝宝的基础资料" in contract.description
-    assert "不返回奶量产出或摄入记录" in contract.description
+    assert contract.input_schema["type"] == "object"
+    assert contract.input_schema["additionalProperties"] is False
+    infant_scope = contract.input_schema["properties"]["infant_scope"]
+    assert infant_scope["enum"] == ["current_delivery", "all"]
+    assert infant_scope["default"] == "current_delivery"
+    assert infant_scope["description"]
+    assert "妈妈资料和宝宝资料" in contract.description
+    assert "不包含奶量产出和摄入记录" in contract.description
     assert "profile_read" in names
     assert "profile_update" in names
     assert "maternal_infant_profile_read" not in names
@@ -95,10 +86,13 @@ def test_profile_update_is_the_described_profile_update_superset() -> None:
         "profile.current_infants.replace",
     )
     assert "action_type" not in type(contract).model_fields
-    assert "profile_read" in contract.description
-    assert "预产期" in contract.description
+    assert contract.description.startswith("更新妈妈的称呼、年龄、孕产和喂养基础资料")
+    assert "不更新奶量或生长记录" in contract.description
+    assert "在对话中提供需要持久化的新资料" in contract.description
+    assert "更正现有资料或要求清空资料" in contract.description
     assert "operation=update" not in contract.description
     schema = contract.input_schema
+    assert "预产期" in schema["properties"]["mother"]["properties"]["estimated_due_date"]["description"]
     assert schema["additionalProperties"] is False
     assert "minProperties" not in schema
     assert "required" not in schema

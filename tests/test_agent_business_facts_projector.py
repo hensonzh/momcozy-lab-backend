@@ -57,10 +57,13 @@ def test_business_facts_projector_projects_maternal_infant_profile_source() -> N
             {"key": "lactation_context", "tool_name": "profile_read"},
             {"key": "milk_status", "tool_name": "milk_analysis_manage"},
         ],
-        "lactation_context": {"mother": {"age": 31}},
+        "lactation_context": {
+            "mother": {"age": 31},
+            "assistant_hint": "do not project",
+        },
         "milk_status": {"totals": {"trend_pumped_volume_ml": 420}},
     }
-    assert "assistant_hint" not in facts["lactation_context"]
+    assert facts["lactation_context"]["assistant_hint"] == "do not project"
 
 
 def test_business_facts_projector_reads_sources_without_parallel_shared_session_access() -> None:

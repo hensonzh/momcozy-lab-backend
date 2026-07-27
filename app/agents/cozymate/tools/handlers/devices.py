@@ -8,7 +8,7 @@ from app.core.errors import ApiError
 from app.infrastructure.object_storage.base import ObjectStorage
 from app.agent_runtime.runs.models import AgentWorkflowState
 from app.agent_runtime.runs.service import AgentRuntimeService
-from app.agent_runtime.tools.result import ToolImageOutput, ToolResult, ToolTextOutput
+from app.agent_runtime.tools.result import ToolImageOutput, ToolResult
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.modules.assets.service import ProductAssetService
 from app.agents.cozymate.device_guidance import AIR1_UNBOXING_STEPS, DeviceGuidanceReferenceService
@@ -309,10 +309,14 @@ def _filter_assets_by_resource_kind(assets: list[Any], *, resource_kind: str) ->
 
 
 def _validate_device_guidance_args(*, args: dict[str, Any], operation: str, model: str) -> None:
-    if not model:
-        raise ApiError(code="validation_failed", message="Device guidance requires a model.", status=422)
     if operation not in {"read", "start_or_resume", "complete_current", "cancel"}:
         raise ApiError(code="validation_failed", message="Unsupported device guidance operation.", status=422)
+    if operation in {"read", "start_or_resume"} and not model:
+        raise ApiError(
+            code="validation_failed",
+            message="Starting or reading device guidance requires a model.",
+            status=422,
+        )
 
     topic = _text(args, "topic")
     step = _text(args, "step")
@@ -380,24 +384,24 @@ class ConversationHistoryImageLoadToolHandler(_StandardToolHandler):
             asset_id = asset.id
             content_type = asset.content_type
 
-        safe_output = {
+        canonical_output = {
             "status": "image_context_ready",
             "image_url": image_url,
             "detail": detail,
+            "agent_instruction": (
+                "这是当前对话历史中由智能体此前展示的目标图片。"
+                "请结合当前用户问题，只依据图片中可见内容回答。"
+            ),
         }
         if asset_id:
-            safe_output["asset_id"] = asset_id
-            safe_output["content_type"] = content_type
-        return ToolResult(
-            output=(
-                *ToolResult.json(safe_output).output,
-                ToolTextOutput(
-                    text="这是当前对话历史中由智能体此前展示的目标图片。请结合当前用户问题，只依据图片中可见内容回答。"
-                ),
+            canonical_output["asset_id"] = asset_id
+            canonical_output["content_type"] = content_type
+        return ToolResult.json(
+            canonical_output,
+            supplemental_content=(
                 ToolImageOutput(
                     image_url=model_image_url,
                     detail=cast(Any, detail),
                 ),
             ),
-            audit_output=safe_output,
         )

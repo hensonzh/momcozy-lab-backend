@@ -30,10 +30,16 @@ def test_generic_diary_tools_do_not_partition_entries_by_type() -> None:
     read_contract = registry.get("diary_read")
     mutate_contract = registry.get("diary_mutate")
 
-    assert read_contract.input_schema.get("required", []) == []
-    assert mutate_contract.input_schema["required"] == ["operation"]
+    assert read_contract.input_schema["anyOf"][1].get("required", []) == []
+    assert all(
+        "operation" in variant["required"]
+        for variant in mutate_contract.input_schema["anyOf"]
+    )
     for contract in (read_contract, mutate_contract):
-        assert "diary_type" not in contract.input_schema["properties"]
+        assert all(
+            "diary_type" not in variant["properties"]
+            for variant in contract.input_schema["anyOf"]
+        )
         assert "diary_type" not in contract.output_schema["properties"]
         assert "diary_type" not in contract.output_schema.get("required", [])
 

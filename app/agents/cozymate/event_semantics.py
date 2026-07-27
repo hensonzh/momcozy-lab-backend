@@ -14,7 +14,7 @@ def tool_event_semantic(
     tool_call_id: str = "",
     label: str = "",
     safe_args: dict[str, Any] | None = None,
-    safe_output: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
     effect_scope: str = "none",
 ) -> dict[str, Any]:
     normalized_event_type = str(event_type or "").strip()
@@ -35,7 +35,7 @@ def tool_event_semantic(
             tool_name=normalized_tool_name,
             label=label,
             safe_args=safe_args or {},
-            safe_output=safe_output or {},
+            output=output or {},
             effect_scope=effect_scope,
         )
         priority = 70
@@ -64,7 +64,7 @@ def with_tool_event_semantic(
     *,
     event_type: str,
     tool_name: str,
-    safe_output: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
     effect_scope: str = "none",
 ) -> dict[str, Any]:
     enriched = dict(payload)
@@ -74,7 +74,7 @@ def with_tool_event_semantic(
         tool_call_id=str(payload.get("tool_call_id") or payload.get("call_id") or ""),
         label=str(payload.get("label") or ""),
         safe_args=payload.get("safe_args") if isinstance(payload.get("safe_args"), dict) else None,
-        safe_output=safe_output,
+        output=output,
         effect_scope=effect_scope,
     )
     return enriched
@@ -118,14 +118,14 @@ def _completed_tool_semantic(
     tool_name: str,
     label: str,
     safe_args: dict[str, Any],
-    safe_output: dict[str, Any],
+    output: dict[str, Any],
     effect_scope: str,
 ) -> tuple[str, str]:
-    output_status = str(safe_output.get("status") or "").strip()
+    output_status = str(output.get("status") or "").strip()
     dynamic_label = _dynamic_tool_completed_label(
         tool_name=tool_name,
         safe_args=safe_args,
-        safe_output=safe_output,
+        output=output,
     )
     if dynamic_label:
         return _tool_phase(tool_copy=tool_copy, effect_scope=effect_scope), dynamic_label
@@ -137,7 +137,7 @@ def _completed_tool_semantic(
         return "planning", "这一天还没有可更新的记录"
     if output_status == "entry_unchanged":
         return "reading", "这一天的记录没有变化"
-    if safe_output.get("requires_confirmation") is True:
+    if output.get("requires_confirmation") is True:
         return "planning", "我已经准备好预览，等你确认～"
     if tool_copy is not None and tool_copy.get("completed"):
         return tool_copy.get("completed_phase", tool_copy.get("phase", "planning")), tool_copy["completed"]
@@ -201,9 +201,9 @@ def _dynamic_tool_completed_label(
     *,
     tool_name: str,
     safe_args: dict[str, Any],
-    safe_output: dict[str, Any],
+    output: dict[str, Any],
 ) -> str:
-    status = str(safe_output.get("status") or "").strip()
+    status = str(output.get("status") or "").strip()
     if tool_name in {"diary_read", "diary_mutate"}:
         return {
             "action_failed": "日记这一步暂时没处理好",
@@ -223,17 +223,17 @@ def _dynamic_tool_completed_label(
             "entry_deleted": "我已经删除这条日记啦",
         }.get(status, "日记这一步处理好了")
     if tool_name == "plan_mutate":
-        if safe_output.get("requires_confirmation") is True:
+        if output.get("requires_confirmation") is True:
             return ""
-        operation = str(safe_output.get("operation") or safe_args.get("operation") or "").strip()
-        plan_type = str(safe_output.get("plan_type") or safe_args.get("plan_type") or "").strip()
+        operation = str(output.get("operation") or safe_args.get("operation") or "").strip()
+        plan_type = str(output.get("plan_type") or safe_args.get("plan_type") or "").strip()
         if status == "action_failed":
             return "这次计划没有处理成功"
         if status == "milk_plan_calendar_strategy_required":
             return "奶量计划还需要确认日程写入方式"
         if status == "urgent_care_required":
             return "我先帮你处理需要立即确认的情况"
-        if safe_output.get("write_succeeded") is True:
+        if output.get("write_succeeded") is True:
             if operation == "delete":
                 return "这份计划已经删除"
             if operation == "update":
@@ -304,4 +304,4 @@ _TOOL_COPY: dict[str, dict[str, str]] = {'profile_read': {'phase': 'reading', 's
  'hospital_bag_manage': {'phase': 'planning', 'started': '我先帮你核对待产包信息～', 'completed': '我整理好待产包这一步啦'},
  'hospital_bag_cart_mutate': {'phase': 'saving', 'started': '我先帮你调整待产包购物车～', 'completed': '我已经调整好待产包购物车啦'},
  'ibclc_consult_card_create': {'phase': 'planning', 'started': '我先帮你准备 IBCLC 咨询入口～', 'completed': '我已经准备好 IBCLC 咨询入口啦'},
- 'support_ticket_create': {'phase': 'planning', 'started': '我先帮你准备售后信息表～', 'completed': '请确认售后信息'}}
+ 'support_ticket_draft_create': {'phase': 'planning', 'started': '我先帮你准备售后信息表～', 'completed': '请确认售后信息'}}

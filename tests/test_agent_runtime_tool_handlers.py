@@ -331,21 +331,21 @@ def test_profile_update_standard_handler_does_not_inject_hidden_operation_field(
         )
     )
 
-    assert result.audit_output is not None
-    assert "operation" not in result.audit_output
-    model_output = json.loads(result.to_function_call_output())
-    assert "action_id" not in model_output
-    assert "action_type" not in model_output
-    assert "preview_payload" not in model_output
-    assert model_output["write_succeeded"] is True
-    assert model_output["profile"] == result.audit_output["profile"]
+    assert result.canonical_output is not None
+    assert "operation" not in result.canonical_output
+    provider_output = json.loads(result.to_function_call_output())
+    assert provider_output == result.canonical_output
+    assert provider_output["action_id"] == str(result.canonical_output["action_id"])
+    assert provider_output["action_type"] == "profile.update"
+    assert provider_output["preview_payload"] == result.canonical_output["preview_payload"]
+    assert provider_output["write_succeeded"] is True
     validate_tool_output(
         schema=default_tool_registry().get("profile_update").output_schema,
-        value=result.audit_output,
+        value=result.canonical_output,
     )
 
 
-def test_support_ticket_create_tool_handler_creates_editable_draft_artifact() -> None:
+def test_support_ticket_draft_create_tool_handler_creates_editable_draft_artifact() -> None:
     actor = _user()
     runtime_service = FakeAgentRuntimeService()
     handler = SupportTicketProposeToolHandler(runtime_service=runtime_service)
@@ -357,7 +357,6 @@ def test_support_ticket_create_tool_handler_creates_editable_draft_artifact() ->
             "product_model": "M9",
             "user_contact": "mai@example.com",
             "urgency": "high",
-            "user_confirmed": True,
             "trusted_current_user_text": "Yes, please create the support ticket now.",
             "locale": "en-US",
         },
@@ -380,7 +379,7 @@ def test_support_ticket_create_tool_handler_creates_editable_draft_artifact() ->
     assert not any("action_type" in call for call in runtime_service.calls)
 
 
-def test_support_ticket_create_tool_handler_asks_in_chat_before_creating_draft() -> None:
+def test_support_ticket_draft_create_tool_handler_asks_in_chat_before_creating_draft() -> None:
     runtime_service = FakeAgentRuntimeService()
     result = asyncio.run(
         SupportTicketProposeToolHandler(runtime_service=runtime_service).execute(
@@ -388,8 +387,6 @@ def test_support_ticket_create_tool_handler_asks_in_chat_before_creating_draft()
                 args={
                     "issue_type": "defect",
                     "issue_summary": "The new pump is cracked.",
-                    "user_confirmed": False,
-                    "user_emotion": "upset",
                     "trusted_current_user_text": "The new pump is cracked and I am very upset.",
                 }
             )
@@ -491,7 +488,7 @@ def test_registered_hospital_bag_cart_handler_reads_shared_pump_models_object_fo
             _context(
                 actor=actor,
                 args={
-                    "operation": "replace_pump_model",
+                    "operation": "set_pump_model",
                     "product_sku_id": "pump-m9",
                 },
             )
@@ -507,18 +504,6 @@ def test_registered_hospital_bag_cart_handler_reads_shared_pump_models_object_fo
         if item["id"] == "pump-m9"
     ]
     assert pump_items[0]["official_price_usd"] == 159.99
-
-
-def test_registered_hospital_bag_cart_handler_does_not_create_action_for_clarification() -> None:
-    actor = _user()
-    runtime_service = FakeAgentRuntimeService()
-    handler = HospitalBagCartUpdateProposeToolHandler(runtime_service=runtime_service)
-
-    result = asyncio.run(handler.execute(_context(actor=actor, args={"operation": "clarify"})))
-
-    assert result["status"] == "needs_clarification"
-    assert "action_id" not in result
-    assert not [action for action in runtime_service.actions if action.action_type == "hospital_bag.cart.update"]
 
 
 def test_hospital_bag_form_and_card_use_one_durable_workflow_state() -> None:
@@ -706,7 +691,7 @@ def test_hospital_bag_manage_generates_directly_from_complete_verified_facts() -
         HospitalBagWorkflowToolHandler(runtime_service=runtime_service).execute(
             _context(
                 args={
-                    "generation_mode": "quick",
+                    "generation_mode": "standard",
                     "runtime_verified_form_data": verified_values,
                     "runtime_workflow_context": {},
                 }
@@ -720,10 +705,10 @@ def test_hospital_bag_manage_generates_directly_from_complete_verified_facts() -
     assert runtime_service.artifact.artifact_type == "hospital_bag_card"
     assert runtime_service.workflow_state.status == "completed"
     assert runtime_service.workflow_state.state["data_source"] == "verified_facts"
-    assert runtime_service.workflow_state.state["generation_mode"] == "quick"
+    assert runtime_service.workflow_state.state["generation_mode"] == "standard"
 
 
-def test_hospital_bag_manage_keeps_form_and_card_json_out_of_model_output() -> None:
+def test_hospital_bag_manage_preserves_complete_form_and_card_in_canonical_output() -> None:
     form_result = asyncio.run(
         HospitalBagWorkflowToolHandler(
             runtime_service=FakeAgentRuntimeService()
@@ -734,13 +719,13 @@ def test_hospital_bag_manage_keeps_form_and_card_json_out_of_model_output() -> N
             )
         )
     )
-    form_model_output = json.loads(
+    form_provider_output = json.loads(
         form_result.to_function_call_output()
     )
-    assert form_model_output["status"] == "form_created"
-    assert form_model_output["tool_name"] == "hospital_bag_manage"
-    assert form_model_output["form_id"] == "hospital_bag_intake"
-    assert "form" not in form_model_output
+    assert form_provider_output == form_result.canonical_output
+    assert form_provider_output["status"] == "form_created"
+    assert form_provider_output["tool_name"] == "hospital_bag_manage"
+    assert form_provider_output["form"]["id"] == "hospital_bag_intake"
 
     runtime_service = FakeAgentRuntimeService()
     result = asyncio.run(
@@ -755,13 +740,12 @@ def test_hospital_bag_manage_keeps_form_and_card_json_out_of_model_output() -> N
         )
     )
 
-    model_output = json.loads(result.to_function_call_output())
-    assert model_output["status"] == "card_created"
-    assert model_output["workflow_context"]["information_complete"] is True
-    assert "card" not in model_output
-    assert "form" not in model_output
-    assert model_output["assistant_followup"]["kind"] == "hospital_bag_cart"
-    assert result.audit_output["card"]["card_json"]["title"] == "待产包"
+    provider_output = json.loads(result.to_function_call_output())
+    assert provider_output == result.canonical_output
+    assert provider_output["status"] == "card_created"
+    assert provider_output["workflow_context"]["information_complete"] is True
+    assert provider_output["card"]["card_json"]["title"] == "待产包"
+    assert provider_output["assistant_followup"]["kind"] == "hospital_bag_cart"
 
 
 def test_hospital_bag_manage_resumes_active_form_instead_of_using_older_verified_facts() -> None:
@@ -1141,7 +1125,7 @@ def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
             tool_name="hospital_bag_cart_mutate",
             pump_models_service=_pump_models_service(),
         ).execute(
-            _context(actor=actor, args={"operation": "replace_pump_model", "product_sku_id": "pump-m9"})
+            _context(actor=actor, args={"operation": "set_pump_model", "product_sku_id": "pump-m9"})
         )
     )
     pump_items = [item for group in replace_result["cart_update"]["groups"] for item in group["items"] if item["id"] == "pump-m9"]
@@ -1152,7 +1136,7 @@ def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
 
     budget_result = asyncio.run(
         BirthPreparationArtifactToolHandler(runtime_service=runtime_service, tool_name="hospital_bag_cart_mutate").execute(
-            _context(actor=actor, args={"operation": "optimize_budget", "target_budget": 1000, "budget_mode": "under"})
+            _context(actor=actor, args={"operation": "optimize_budget", "target_budget": 1000})
         )
     )
     assert budget_result["cart_update"]["action"] == "optimize_budget"
@@ -1160,6 +1144,41 @@ def test_birth_preparation_artifact_handler_matches_cart_actions() -> None:
     assert "before_totals" in budget_result["cart_update"]
     assert budget_result["cart_update"]["removed_item_ids"]
     assert budget_result["cart_update"]["totals"]["itemCount"] < budget_result["cart_update"]["before_totals"]["itemCount"]
+
+
+def test_hospital_bag_budget_removes_the_default_pump_only_with_explicit_permission() -> None:
+    actor = _user()
+    runtime_service = FakeAgentRuntimeService()
+    handler = BirthPreparationArtifactToolHandler(
+        runtime_service=runtime_service,
+        tool_name="hospital_bag_cart_mutate",
+    )
+
+    protected = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={"operation": "optimize_budget", "target_budget": 1},
+            )
+        )
+    )
+    removable = asyncio.run(
+        handler.execute(
+            _context(
+                actor=actor,
+                args={
+                    "operation": "optimize_budget",
+                    "target_budget": 1,
+                    "allow_remove_pump": True,
+                },
+            )
+        )
+    )
+
+    assert "milk-pump" not in protected["cart_update"]["removed_item_ids"]
+    assert "milk-pump" in removable["cart_update"]["removed_item_ids"]
+    assert "吸奶器我先保留" in protected["summary"]
+    assert "吸奶器也已按你的明确允许移除" in removable["summary"]
 
 
 def test_milk_status_read_tool_handler_returns_deterministic_status_snapshot() -> None:
@@ -1805,7 +1824,7 @@ def test_device_guidance_tool_completes_current_step_and_returns_next_step() -> 
             _context(
                 actor=actor,
                 thread_id=thread_id,
-                args={"model": "Air1", "operation": "complete_current"},
+                args={"operation": "complete_current"},
             )
         )
     )
@@ -1910,19 +1929,16 @@ def test_conversation_history_image_read_handler_returns_image_in_tool_result() 
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["status"] == "image_context_ready"
-    assert result.audit_output["image_url"] == image_url
-    assert result.audit_output["asset_id"] == "asset-image"
-    assert result.audit_output["detail"] == "high"
+    assert result.canonical_output is not None
+    assert result.canonical_output["status"] == "image_context_ready"
+    assert result.canonical_output["image_url"] == image_url
+    assert result.canonical_output["asset_id"] == "asset-image"
+    assert result.canonical_output["detail"] == "high"
+    assert "只依据图片中可见内容回答" in result.canonical_output["agent_instruction"]
     assert storage.keys == ["product-assets/device-guidance/assets/air1/images/guide.png"]
     function_output = result.to_function_call_output()
     assert isinstance(function_output, list)
-    assert function_output[-2:] == [
-        {
-            "type": "input_text",
-            "text": "这是当前对话历史中由智能体此前展示的目标图片。请结合当前用户问题，只依据图片中可见内容回答。",
-        },
+    assert function_output[-1:] == [
         {
             "type": "input_image",
             "image_url": "data:image/png;base64,aW1hZ2U=",
@@ -2782,11 +2798,11 @@ def test_failed_pregnancy_plan_apply_does_not_create_card_or_consume_workflow() 
     result = asyncio.run(PregnancyPlanProposeToolHandler(runtime_service=runtime_service).execute(context))
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["status"] == "action_failed"
-    assert result.audit_output["action_status"] == "failed"
-    assert result.audit_output["write_succeeded"] is False
-    assert result.audit_output["error_code"] == "plan_create_failed"
+    assert result.canonical_output is not None
+    assert result.canonical_output["status"] == "action_failed"
+    assert result.canonical_output["action_status"] == "failed"
+    assert result.canonical_output["write_succeeded"] is False
+    assert result.canonical_output["error_code"] == "plan_create_failed"
     assert len(runtime_service.artifacts) == artifact_count
     assert "no plan was created" in str(result.to_function_call_output())
     assert runtime_service.workflow_state is None
@@ -3091,7 +3107,7 @@ def test_pregnancy_plan_intake_analyze_returns_verified_form_in_tool_result() ->
 
     assert isinstance(result, ToolResult)
     assert {
-        key: result.audit_output[key]
+        key: result.canonical_output[key]
         for key in (
             "status",
             "workflow_phase",
@@ -3112,8 +3128,15 @@ def test_pregnancy_plan_intake_analyze_returns_verified_form_in_tool_result() ->
         "followup_round": 1,
         "followup_max_rounds": 3,
     }
-    assert result.audit_output["workflow_context"]["current_step"]["id"].startswith("followup:")
-    assert "甲状腺" not in str(result.audit_output)
+    assert result.canonical_output["workflow_context"]["current_step"]["id"].startswith("followup:")
+    assert (
+        result.canonical_output["trusted_pregnancy_plan_intake"]["facts"]["medical_notes"]
+        == "甲状腺用药"
+    )
+    assert (
+        result.canonical_output["trusted_pregnancy_plan_intake"]["facts"]["doctor_notes"]
+        == "医生提醒复查胎儿生长"
+    )
     trusted = str(result.to_function_call_output())
     assert "甲状腺用药" in trusted
     assert "医生提醒复查胎儿生长" in trusted
@@ -3161,8 +3184,8 @@ def test_pregnancy_plan_initial_analysis_bridges_to_checkup_upload_before_asking
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["workflow_phase"] == "checkup_records_upload"
+    assert result.canonical_output is not None
+    assert result.canonical_output["workflow_phase"] == "checkup_records_upload"
     trusted = str(result.to_function_call_output())
     assert "Briefly acknowledge the submitted information in plain, supportive language" in trusted
     assert "without listing risk factors or repeating fields" in trusted
@@ -3290,11 +3313,11 @@ def test_pregnancy_plan_intake_analyze_reuses_the_same_submission_snapshot() -> 
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["status"] == "intake_in_progress"
-    assert result.audit_output["workflow_phase"] == "checkup_records_upload"
-    assert result.audit_output["focus_count"] == 1
-    assert result.audit_output["personalized"] is False
+    assert result.canonical_output is not None
+    assert result.canonical_output["status"] == "intake_in_progress"
+    assert result.canonical_output["workflow_phase"] == "checkup_records_upload"
+    assert result.canonical_output["focus_count"] == 1
+    assert result.canonical_output["personalized"] is False
     assert len(runtime_service.artifacts) == 1
 
 
@@ -3335,8 +3358,8 @@ def test_pregnancy_plan_intake_advance_exposes_one_followup_with_full_reasoning_
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["workflow_phase"] == "checkup_records_upload"
+    assert result.canonical_output is not None
+    assert result.canonical_output["workflow_phase"] == "checkup_records_upload"
     function_output = str(result.to_function_call_output())
     assert "你 36 岁" in function_output
     assert "高龄孕产妇属于产科管理分层" in function_output
@@ -3419,7 +3442,7 @@ def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_
 
     assert isinstance(unverified, ToolResult)
     assert {
-        key: unverified.audit_output[key]
+        key: unverified.canonical_output[key]
         for key in ("status", "workflow_phase", "next_step", "requires_user_reply")
     } == {
         "status": "checkup_attachment_required",
@@ -3427,7 +3450,7 @@ def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_
         "next_step": "checkup_records_upload",
         "requires_user_reply": True,
     }
-    assert unverified.audit_output["workflow_context"]["current_step"]["id"] == "checkup_records"
+    assert unverified.canonical_output["workflow_context"]["current_step"]["id"] == "checkup_records"
     assert runtime_service.workflow_state is None
 
     verified = asyncio.run(
@@ -3442,8 +3465,8 @@ def test_pregnancy_plan_intake_upload_cannot_be_forged_without_runtime_verified_
         )
     )
     assert isinstance(verified, ToolResult)
-    assert verified.audit_output is not None
-    assert verified.audit_output["workflow_phase"] == "final_plan_confirmation"
+    assert verified.canonical_output is not None
+    assert verified.canonical_output["workflow_phase"] == "final_plan_confirmation"
     assert runtime_service.workflow_state.state["plan_context"]["checkup_records_uploaded"] == "是"
 
 
@@ -3476,11 +3499,13 @@ def test_pregnancy_plan_intake_analyze_stops_for_urgent_signals_without_advancin
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["status"] == "urgent_care_required"
-    assert result.audit_output["signal_ids"] == ["reduced_fetal_movement"]
-    assert result.audit_output["blocks_plan_flow"] is True
-    assert "孕期计划啦" not in result.audit_output["required_response"]
+    assert result.canonical_output is not None
+    assert result.canonical_output["status"] == "urgent_care_required"
+    assert result.canonical_output["signal_ids"] == ["reduced_fetal_movement"]
+    assert result.canonical_output["blocks_plan_flow"] is True
+    assert "pregnancy_plan_safety" not in result.canonical_output
+    assert "Do not diagnose." in result.canonical_output["agent_instruction"]
+    assert "孕期计划啦" not in result.canonical_output["required_response"]
     assert runtime_service.workflow_state.status == "paused"
     assert runtime_service.workflow_state.active_step == "workflow_paused"
     assert runtime_service.workflow_state.state["interrupted_by_safety_signal"] is True
@@ -3552,9 +3577,9 @@ def test_pregnancy_plan_propose_stops_for_urgent_supplemental_information() -> N
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["status"] == "urgent_care_required"
-    assert result.audit_output["signal_ids"] == ["rupture_of_membranes"]
+    assert result.canonical_output is not None
+    assert result.canonical_output["status"] == "urgent_care_required"
+    assert result.canonical_output["signal_ids"] == ["rupture_of_membranes"]
     assert runtime_service.calls == []
 
 
@@ -3577,9 +3602,9 @@ def test_pregnancy_plan_propose_uses_trusted_current_message_for_urgent_guard_wh
     )
 
     assert isinstance(result, ToolResult)
-    assert result.audit_output is not None
-    assert result.audit_output["status"] == "urgent_care_required"
-    assert result.audit_output["signal_ids"] == ["heavy_bleeding"]
+    assert result.canonical_output is not None
+    assert result.canonical_output["status"] == "urgent_care_required"
+    assert result.canonical_output["signal_ids"] == ["heavy_bleeding"]
     assert runtime_service.calls == []
 
 
@@ -3700,7 +3725,7 @@ def test_diary_mutate_update_replaces_with_complete_content() -> None:
     assert runtime_service.calls[0]["apply_payload"]["content"] == ("Earlier facts and the new fact rewritten as one complete entry.")
 
 
-def test_support_ticket_create_tool_handler_requires_summary() -> None:
+def test_support_ticket_draft_create_tool_handler_requires_summary() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService()).execute(_context(args={})))
 
@@ -3891,7 +3916,7 @@ def test_diary_delete_uses_runtime_owned_stable_idempotency() -> None:
     assert "diary-delete-retry" not in diary_actions[0].idempotency_key
 
 
-def test_support_ticket_create_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
+def test_support_ticket_draft_create_tool_handler_rejects_legacy_nested_ticket_shape() -> None:
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
             SupportTicketProposeToolHandler(runtime_service=FakeAgentRuntimeService()).execute(
@@ -3931,7 +3956,7 @@ def test_build_default_tool_handlers_wires_registered_tool_names() -> None:
         "plan_read",
         "plan_mutate",
         "pregnancy_intake_manage",
-        "support_ticket_create",
+        "support_ticket_draft_create",
     }
     assert all(callable(handler) for handler in handlers.values())
 

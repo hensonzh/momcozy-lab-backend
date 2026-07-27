@@ -107,7 +107,7 @@ def tool_event_semantic(
     tool_call_id: str = "",
     label: str = "",
     safe_args: dict[str, Any] | None = None,
-    safe_output: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
     effect_scope: str = "none",
 ) -> dict[str, Any]:
     del safe_args
@@ -116,7 +116,7 @@ def tool_event_semantic(
     subject = str(label or "").strip() or "相关信息"
     if lifecycle == "failed":
         phase, display_label, priority = "error", f"{subject}暂时没处理好", 90
-    elif lifecycle == "completed" and bool((safe_output or {}).get("requires_confirmation")):
+    elif lifecycle == "completed" and bool((output or {}).get("requires_confirmation")):
         phase, display_label, priority = "planning", "我已经准备好预览，等你确认～", 70
     elif lifecycle == "completed" and effect_scope == "none":
         phase, display_label, priority = "reading", f"我把{subject}整理好啦", 70
@@ -145,7 +145,7 @@ def with_tool_event_semantic(
     *,
     event_type: str,
     tool_name: str,
-    safe_output: dict[str, Any] | None = None,
+    output: dict[str, Any] | None = None,
     effect_scope: str = "none",
 ) -> dict[str, Any]:
     enriched = dict(payload)
@@ -155,7 +155,7 @@ def with_tool_event_semantic(
         tool_call_id=str(payload.get("tool_call_id") or payload.get("call_id") or ""),
         label=str(payload.get("label") or ""),
         safe_args=payload.get("safe_args") if isinstance(payload.get("safe_args"), dict) else None,
-        safe_output=safe_output,
+        output=output,
         effect_scope=effect_scope,
     )
     return enriched

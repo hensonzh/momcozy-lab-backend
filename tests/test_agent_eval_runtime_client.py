@@ -48,7 +48,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
             AgentToolCall(
                 id=uuid4(),
                 run_id=run.id,
-                tool_name="support_ticket_create",
+                tool_name="support_ticket_draft_create",
                 call_id="call-support",
                 status="completed",
                 safe_args={},
@@ -61,7 +61,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     case = {
         "suite": "runtime_trace_collection",
         "name": "support draft tool trace",
-        "expected_tool_calls": [{"contract": "support_ticket_create"}],
+        "expected_tool_calls": [{"contract": "support_ticket_draft_create"}],
         "forbidden_tool_calls": [],
         "expected_behavior": {
             "service_skill_id": "cozymate_service_agent",
@@ -81,7 +81,7 @@ def test_agent_eval_runtime_client_executes_run_and_evaluates_seed_case() -> Non
     assert result.execution_result.status == "completed"
     assert result.eval_result.passed is True
     assert result.trace.service_skill_id == COZYMATE_AGENT_ID
-    assert result.trace.tool_calls[0]["tool_name"] == "support_ticket_create"
+    assert result.trace.tool_calls[0]["tool_name"] == "support_ticket_draft_create"
     assert result.trace.actions == []
 
 

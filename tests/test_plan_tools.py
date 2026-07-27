@@ -36,18 +36,25 @@ def test_plan_tool_contracts_unify_persisted_plan_operations() -> None:
         PLAN_UPDATE_ACTION,
         PLAN_DELETE_ACTION,
     )
-    assert mutate_contract.input_schema["required"] == ["operation"]
-    assert mutate_contract.input_schema["properties"]["operation"]["enum"] == [
+    variants = mutate_contract.input_schema["anyOf"]
+    assert all("operation" in variant["required"] for variant in variants)
+    assert [
+        variant["properties"]["operation"]["enum"][0]
+        for variant in variants
+    ] == [
+        "create",
         "create",
         "update",
         "delete",
     ]
-    plan_type_schema = mutate_contract.input_schema["properties"]["plan_type"]
-    assert "enum" not in plan_type_schema
-    assert plan_type_schema["examples"] == ["milk_management", "pregnancy"]
+    assert variants[0]["properties"]["plan_type"]["enum"] == ["milk_management"]
+    assert variants[1]["properties"]["plan_type"]["enum"] == ["pregnancy"]
+    assert "plan_type" not in variants[2]["properties"]
+    assert "plan_type" not in variants[3]["properties"]
     for schema in (read_contract.input_schema, mutate_contract.input_schema):
-        for field_name, field_schema in schema["properties"].items():
-            assert field_schema.get("description"), f"{field_name} lacks a description"
+        for variant in schema["anyOf"]:
+            for field_name, field_schema in variant["properties"].items():
+                assert field_schema.get("description"), f"{field_name} lacks a description"
 
 
 def test_plan_read_lists_owner_scoped_plans_with_safe_type_specific_content() -> None:
@@ -266,32 +273,6 @@ def test_plan_mutate_delete_uses_runtime_owned_stable_idempotency() -> None:
     assert "plan-delete-retry" not in keys[0]
     assert len(runtime.propose_once_calls) == 2
     assert all(call["reuse_existing"] is True for call in runtime.propose_once_calls)
-
-
-def test_plan_mutate_rejects_a_mismatched_type_hint_for_existing_plan() -> None:
-    owner_user_id = uuid4()
-    plan = _plan(owner_user_id=owner_user_id, plan_type="pregnancy")
-    handler = PlanMutateToolHandler(
-        runtime_service=FakeRuntimeService(),
-        plans_service=FakePlansService(plans=[plan]),
-    )
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            handler.execute(
-                _context(
-                    owner_user_id=owner_user_id,
-                    tool_name="plan_mutate",
-                    args={
-                        "operation": "delete",
-                        "plan_id": str(plan.id),
-                        "plan_type": "milk_management",
-                    },
-                )
-            )
-        )
-
-    assert exc_info.value.code == "plan_type_mismatch"
 
 
 def test_plan_mutate_update_proposes_versioned_metadata_action() -> None:

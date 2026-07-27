@@ -1067,13 +1067,13 @@ class AgentRuntimeRepository:
         self,
         *,
         tool_call_id: UUID,
-        safe_output: dict[str, Any],
-        raw_output_ref: str = "",
+        output: dict[str, Any],
+        output_ref: str = "",
     ) -> AgentToolOutput:
-        output = AgentToolOutput(tool_call_id=tool_call_id, safe_output=safe_output, raw_output_ref=raw_output_ref)
-        self.session.add(output)
+        tool_output = AgentToolOutput(tool_call_id=tool_call_id, output=output, output_ref=output_ref)
+        self.session.add(tool_output)
         await self.session.flush()
-        return output
+        return tool_output
 
     async def list_tool_outputs_for_run(self, *, run_id: UUID) -> list[tuple[AgentToolCall, AgentToolOutput]]:
         statement = (

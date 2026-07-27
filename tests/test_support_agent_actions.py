@@ -9,7 +9,7 @@ from app.modules.support.models import SupportTicket
 from app.agent_runtime.actions.errors import PermanentActionError
 
 
-def test_support_ticket_create_action_handler_creates_ticket_through_service() -> None:
+def test_support_ticket_draft_create_action_handler_creates_ticket_through_service() -> None:
     service = FakeSupportTicketsService()
     action = _action(
         apply_payload={
@@ -32,7 +32,7 @@ def test_support_ticket_create_action_handler_creates_ticket_through_service() -
     assert service.create_kwargs["payload"]["agent_action_id"] == str(action.id)
 
 
-def test_support_ticket_create_action_handler_rejects_missing_summary() -> None:
+def test_support_ticket_draft_create_action_handler_rejects_missing_summary() -> None:
     action = _action(apply_payload={})
 
     with pytest.raises(PermanentActionError) as exc_info:

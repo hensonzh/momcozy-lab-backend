@@ -34,9 +34,7 @@ def validate_tool_input(*, schema: JsonSchema, value: dict[str, Any]) -> None:
     )
 
 
-def validate_tool_output(*, schema: JsonSchema | None, value: dict[str, Any]) -> None:
-    if schema is None:
-        return
+def validate_tool_output(*, schema: JsonSchema, value: dict[str, Any]) -> None:
     _validate_value(
         context=_ValidationContext(
             root_schema=schema,
@@ -61,11 +59,11 @@ def _validate_value(
     if isinstance(reference, str):
         resolved = _resolve_local_reference(context=context, reference=reference, path=path)
         _validate_value(context=context, schema=resolved, value=value, path=path)
-        return
 
     any_of = schema.get("anyOf")
     if isinstance(any_of, list) and any_of:
         failures: list[ApiError] = []
+        matched = False
         for option in any_of:
             if not isinstance(option, dict):
                 continue
@@ -74,10 +72,12 @@ def _validate_value(
             except ApiError as exc:
                 failures.append(exc)
             else:
-                return
-        if failures:
-            raise failures[0]
-        _raise_invalid(context=context, path=path, reason="does not match any allowed schema")
+                matched = True
+                break
+        if not matched:
+            if failures:
+                raise max(failures, key=_validation_error_specificity)
+            _raise_invalid(context=context, path=path, reason="does not match any allowed schema")
 
     allowed = schema.get("enum")
     if isinstance(allowed, list) and value not in allowed:
@@ -272,6 +272,14 @@ def _validate_array(
             path=path,
             reason=f"must include at most {max_items} items",
         )
+    if schema.get("uniqueItems") is True:
+        for index, item in enumerate(value):
+            if any(item == previous for previous in value[:index]):
+                _raise_invalid(
+                    context=context,
+                    path=f"{path}[{index}]",
+                    reason="must not duplicate another item",
+                )
     item_schema = schema.get("items")
     if isinstance(item_schema, dict) and item_schema:
         for index, item in enumerate(value):
@@ -333,4 +341,20 @@ def _raise_invalid(*, context: _ValidationContext, path: str, reason: str) -> No
         message=context.message,
         status=context.status,
         details={"path": path, "reason": reason},
+    )
+
+
+def _validation_error_specificity(error: ApiError) -> tuple[int, int]:
+    details = error.details if isinstance(error.details, dict) else {}
+    path = str(details.get("path") or "$")
+    reason = str(details.get("reason") or "")
+    return (
+        path.count(".") + path.count("["),
+        (
+            0
+            if reason.startswith("missing required field:")
+            else 1
+            if reason == "field is not allowed"
+            else 2
+        ),
     )

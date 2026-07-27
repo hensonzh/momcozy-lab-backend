@@ -37,6 +37,15 @@ def test_agent_runtime_ledger_tables_are_registered() -> None:
     assert expected_tables.issubset(Base.metadata.tables)
 
 
+def test_agent_tool_outputs_store_canonical_output_without_legacy_safe_fields() -> None:
+    tool_outputs = Base.metadata.tables["agent_tool_outputs"]
+
+    assert "output_json" in tool_outputs.columns
+    assert "output_ref" in tool_outputs.columns
+    assert "safe" + "_output_json" not in tool_outputs.columns
+    assert "raw" + "_output_ref" not in tool_outputs.columns
+
+
 def test_agent_runtime_run_and_action_statuses_include_waiting_and_no_queued_action() -> None:
     assert "waiting_for_confirmation" in RUN_STATUSES
     assert "queued" in RUN_STATUSES

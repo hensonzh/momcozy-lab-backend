@@ -122,6 +122,6 @@ def build_default_tool_handlers(
             pump_models_service=pump_models_service,
         ),
         "ibclc_consult_card_create": IbclcConsultCardCreateToolHandler(runtime_service=agent_runtime_service),
-        "support_ticket_create": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
+        "support_ticket_draft_create": SupportTicketProposeToolHandler(runtime_service=agent_runtime_service),
     }
     return handlers

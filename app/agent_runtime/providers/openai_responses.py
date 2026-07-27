@@ -213,7 +213,7 @@ class OpenAIResponsesApiBackend:
                 except ApiError as exc:
                     if _fatal_tool_error(exc):
                         raise
-                    error_output = _tool_error_model_output(exc)
+                    error_output = _tool_error_output(exc)
                     error_item = {
                         "type": "function_call_output",
                         "call_id": function_call["call_id"],
@@ -227,7 +227,7 @@ class OpenAIResponsesApiBackend:
                             "status": "failed",
                             "args": _json_object_or_raw(args_json),
                             "error_code": exc.code,
-                            "safe_output": _json_object_or_raw(error_output),
+                            "output": _json_object_or_raw(error_output),
                         }
                     )
                     continue
@@ -244,7 +244,7 @@ class OpenAIResponsesApiBackend:
                         "tool_name": tool.contract_name,
                         "status": "completed",
                         "args": _json_object_or_raw(args_json),
-                        "safe_output": observed_output,
+                        "output": observed_output,
                     }
                 )
 
@@ -831,7 +831,7 @@ def _fatal_tool_error(exc: ApiError) -> bool:
     return exc.code == "tool_commit_failed" or exc.details.get("fatal") is True
 
 
-def _tool_error_model_output(exc: ApiError) -> str:
+def _tool_error_output(exc: ApiError) -> str:
     return json.dumps(
         {"error": {"code": exc.code, "message": "Tool call was rejected by application policy."}},
         sort_keys=True,

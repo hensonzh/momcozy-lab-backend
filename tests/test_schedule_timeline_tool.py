@@ -17,8 +17,8 @@ def test_schedule_timeline_read_contract_is_cross_domain_and_read_only() -> None
 
     assert contract.domain == "schedule_timeline"
     assert contract.effect_scope == "none"
-    assert "跨领域日程时间线" in contract.description
-    assert "实际业务记录" in contract.description
+    assert "跨领域计划与日程" in contract.description
+    assert "喂养、吸奶和宝宝生长实际记录" in contract.description
     assert set(contract.input_schema["properties"]) == {
         "start_date",
         "end_date",

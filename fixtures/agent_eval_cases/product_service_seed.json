@@ -257,7 +257,7 @@
           "contract": "devices_guidance_manage"
         },
         {
-          "contract": "support_ticket_create"
+          "contract": "support_ticket_draft_create"
         }
       ]
     },
@@ -1920,13 +1920,13 @@
           "contract": "ibclc_consult_card_create",
           "timing": "after_explicit_semantic_consent",
           "args_subset": {
-            "operation": "create"
+            "reason": "latch pain"
           }
         }
       ],
       "forbidden_tool_calls": [
         {
-          "contract": "support_ticket_create"
+          "contract": "support_ticket_draft_create"
         }
       ],
       "expected_events": [

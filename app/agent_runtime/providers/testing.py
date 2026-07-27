@@ -94,13 +94,13 @@ async def _invoke_scripted_tools(*, response: ScriptedSdkResponse, request: SdkN
             )
         args_json = json.dumps(invocation.args, sort_keys=True)
         invocation_result = await tool.invoke(args_json)
-        safe_output = invocation_result.to_observation()
+        output = invocation_result.to_observation()
         tool_calls.append(
             {
                 "tool_name": invocation.contract_name,
                 "status": "completed",
                 "args": invocation.args,
-                "safe_output": safe_output,
+                "output": output,
             }
         )
     return tool_calls

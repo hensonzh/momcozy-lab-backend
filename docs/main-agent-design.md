@@ -39,11 +39,19 @@ system prompt。它们不是模型可发现、可选择或可动态加载的 Ski
 ## Tool 规则
 
 - 模型可见 Tool 使用唯一的 canonical `snake_case` 名称，不保留旧名称或兼容别名。
+- Tool `description` 固定先用一句说明“是什么/能做什么”，再用一句“当……时使用”说明调用时机；参数规则
+  由 Input Schema 字段描述承载，不在 Tool description 中重复。
 - `read` 表示纯读取；`mutate` 表示同一业务资源内包含多种持久化变更；单一变更直接使用 `create`、`update` 或 `delete`；`manage` 仅表示同一能力内的多阶段流程或读写混合操作。
 - 同一资源存在多种变更时合并为一个 `mutate` Tool，并通过 `operation` 区分；只有单一变更时，工具名直接表达具体动作。
+- 多操作 Tool 的 Input Schema 按具体 `operation` / `command` 拆成封闭对象分支；每个分支只接受当前动作
+  所需字段，所有模型输入字段必须描述含义、单位、枚举映射、适用时机和省略条件。
 - `idempotency_key` 属于应用与 Runtime 控制面，不出现在任何模型可见 Tool input schema 中。Runtime 使用
   `run_id + action 语义 + 规范化 apply payload` 生成稳定键并复用同一 Action；App/API 请求仍可使用
   `Idempotency-Key` 请求头处理网络重试。
+- owner、可信本地日期、locale、timezone、source 和用户确认状态同样属于 Runtime 可信上下文，不作为模型
+  输入参数。结构化 UI 专用命令使用独立内部 Input Schema 校验，不注册到模型 SDK Tool。
+- `pregnancy_intake_manage.answer_current` 的模型输入不包含 `step_id`；结构化 UI 回复通过内部 Input Schema
+  携带并校验 `step_id`，用于拒绝过期的快捷回复，不把应用侧并发控制字段交给模型生成。
 - `profile_update` 是单一更新能力，模型只传 `mother`、`infants` 或 `current_infants`，不重复传
   `operation`，也不控制 owner、可信本地日期或幂等键。
 - 当前分娩宝宝只认数据库中的明确关系，不根据宝宝档案数量临时推断。普通资料更新同步应用；完整替换
@@ -58,6 +66,20 @@ system prompt。它们不是模型可发现、可选择或可动态加载的 Ski
 - 日记统一由 `diary_read` / `diary_mutate` 读取和变更；同一用户、同一日期最多一条。孕期、产后恢复和育儿只是
   日记内容语义，不作为资源类型或存储分区；不再提供孕期专用的模型 Tool。
 - `pregnancy_intake_manage` 只负责孕期资料采集；采集完成后通过 `plan_mutate` 创建孕期计划，不在一个工具内混合采集与业务资源写入。
+- `support_ticket_draft_create` 只创建可编辑售后草稿，不直接提交正式工单；是否获得用户当轮同意由 Runtime
+  使用可信当前消息判定，不由模型传布尔值自证。
+
+## 工具输出契约
+
+- 每个工具只返回一份经过 Output Schema 校验的 `canonical_output`；全部注册工具都必须声明 Output Schema。
+- `canonical_output` 是模型、运行时判断和工具输出持久化共同使用的业务事实来源。模型默认无损接收完整
+  canonical JSON，不再经过模型专用或审计专用的二次投影。
+- 图片和文件作为 canonical JSON 之外的结构化媒体块追加，不得替换或删减 canonical JSON。
+- 延迟事件等运行时控制信息通过 `ToolResult.deferred_events` 单独传递，不得混入 canonical JSON。
+- `agent_tool_outputs.output_json` 保存行内结果；超出行内上限时，完整结果写入对象存储并通过 `output_ref`
+  引用。
+- `tool.completed` 事件只携带用于界面展示的 `output_summary`，不能作为另一份业务结果；日志脱敏只能发生
+  在日志边界，不得改写 canonical output。
 
 ## Tool 归属（17）
 
@@ -75,7 +97,7 @@ system prompt。它们不是模型可发现、可选择或可动态加载的 Ski
 
 ### 设备服务智能体（3）
 
-`devices_guidance_manage`、`pump_models_read`、`support_ticket_create`
+`devices_guidance_manage`、`pump_models_read`、`support_ticket_draft_create`
 
 ## 实施约束
 

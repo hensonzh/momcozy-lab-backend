@@ -2,7 +2,7 @@ import asyncio
 import pytest
 from app.core.errors import ApiError
 from app.core.settings import Settings
-from app.agent_runtime.tools.result import ToolResult, ToolTextOutput
+from app.agent_runtime.tools.result import ToolResult
 from app.agent_runtime.providers import (
     OpenAIResponsesRunner,
     SdkNodeRequest,
@@ -56,19 +56,20 @@ def test_scripted_sdk_backend_invokes_application_tool_contracts() -> None:
             "tool_name": "schedule_timeline_read",
             "status": "completed",
             "args": {"limit": 1},
-            "safe_output": {"profile": {"preferred_name": "Mai"}},
+            "output": {"profile": {"preferred_name": "Mai"}},
         }
     ]
     assert backend.requests[0].run_id == "run_1"
 
 
-def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace() -> None:
+def test_scripted_sdk_backend_observes_the_same_canonical_output() -> None:
     async def invoke_json(_args_json: str) -> ToolResult:
-        return ToolResult(
-            output=(
-                ToolTextOutput(text='{"entry":{"content":"private diary content"},"status":"entry_read"}'),
-            ),
-            audit_output={"entry_date": "2026-07-12", "status": "entry_read"},
+        return ToolResult.json(
+            {
+                "entry": {"content": "private diary content"},
+                "entry_date": "2026-07-12",
+                "status": "entry_read",
+            }
         )
 
     backend = ScriptedSdkBackend(
@@ -99,7 +100,8 @@ def test_scripted_sdk_backend_keeps_private_model_output_out_of_observed_trace()
 
     result = asyncio.run(OpenAIResponsesRunner(backend=backend).run_reasoning(request))
 
-    assert result.tool_calls[0]["safe_output"] == {
+    assert result.tool_calls[0]["output"] == {
+        "entry": {"content": "private diary content"},
         "entry_date": "2026-07-12",
         "status": "entry_read",
     }

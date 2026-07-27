@@ -7,7 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from app.modules.auth import CurrentUser
-from app.agent_runtime.tools import ToolHandler, ToolHandlerContext, ToolResult, strip_instructional_tool_output_keys
+from app.agent_runtime.tools import ToolHandler, ToolHandlerContext, ToolResult
 
 from ..service_skills import ServiceSkillId
 
@@ -74,7 +74,7 @@ class BusinessFactsProjector:
                     },
                 )
             source, payload = await self._project_source(actor=actor, run_id=run_id, source=source)
-            facts[source.context_key] = strip_instructional_tool_output_keys(payload)
+            facts[source.context_key] = payload
             facts["sources"].append({"key": source.context_key, "tool_name": source.tool_name})
 
         if not facts["sources"]:

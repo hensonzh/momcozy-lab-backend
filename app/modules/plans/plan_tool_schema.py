@@ -55,6 +55,7 @@ class PlanMutateOutput(BaseModel):
     write_succeeded: bool | None = Field(default=None, description="计划写入是否已经成功提交。")
     preview_payload: dict[str, Any] | None = Field(default=None, description="安全的计划变更预览摘要。")
     error_code: str | None = Field(default=None, description="Action 失败时的稳定错误码。")
+    failure_message: str | None = Field(default=None, description="计划变更失败时供模型和用户理解结果的事实说明。")
     artifact_id: UUID | None = Field(default=None, description="计划预览卡片 UUID。")
     artifact_type: str | None = Field(default=None, description="计划预览卡片类型。")
     title: str | None = Field(default=None, description="生成的计划标题。")
@@ -75,3 +76,7 @@ class PlanMutateOutput(BaseModel):
     signal_ids: list[str] | None = Field(default=None, description="阻断计划创建的孕期安全信号标识。")
     blocks_plan_flow: bool | None = Field(default=None, description="安全信号是否阻断本次计划创建。")
     required_response: str | None = Field(default=None, description="安全阻断时必须向用户返回的指导。")
+    agent_instruction: str | None = Field(
+        default=None,
+        description="安全阻断时供智能体执行的简洁响应约束；其他结果为 null。",
+    )

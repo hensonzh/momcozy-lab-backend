@@ -6,20 +6,28 @@ from app.agent_runtime.events.semantics import with_tool_event_semantic
 
 
 class ToolExecutionPolicy:
-    """Provider-neutral payload safety and event presentation hooks."""
+    """Provider-neutral argument safety and event presentation hooks."""
 
     def safe_args(self, *, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         del tool_name
         return cast(dict[str, Any], _safe_payload(args))
 
-    def safe_output(self, *, tool_name: str, output: dict[str, Any]) -> dict[str, Any]:
+    def event_output_summary(self, *, tool_name: str, output: dict[str, Any]) -> dict[str, Any]:
+        """Return the small presentation state needed by tool lifecycle events."""
         del tool_name
-        return cast(dict[str, Any], _safe_payload(output))
-
-    def model_output(self, *, tool_name: str, output: dict[str, Any]) -> dict[str, Any]:
-        """Project schema-validated output into the payload observed by the model."""
-        del tool_name
-        return output
+        return {
+            key: output[key]
+            for key in (
+                "status",
+                "operation",
+                "plan_type",
+                "requires_confirmation",
+                "action_status",
+                "write_succeeded",
+                "artifact_type",
+            )
+            if key in output
+        }
 
     def effective_effect_scope(self, *, tool_name: str, args: dict[str, Any], default: str) -> str:
         del tool_name, args
@@ -35,14 +43,14 @@ class ToolExecutionPolicy:
         *,
         event_type: str,
         tool_name: str,
-        safe_output: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
         effect_scope: str = "none",
     ) -> dict[str, Any]:
         return with_tool_event_semantic(
             payload,
             event_type=event_type,
             tool_name=tool_name,
-            safe_output=safe_output,
+            output=output,
             effect_scope=effect_scope,
         )
 

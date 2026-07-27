@@ -287,7 +287,7 @@ async def _pump_products_for_cart_action(
 
 def _cart_action_requires_pump_models(args: dict[str, Any]) -> bool:
     action = _text(args, "operation")
-    if action in {"replace_pump_model", "add_pump_model"}:
+    if action == "set_pump_model":
         return bool(_text(args, "product_sku_id"))
     if action != "restore_items":
         return False
@@ -719,7 +719,7 @@ def _hospital_bag_generation_mode(
     workflow: dict[str, Any],
 ) -> str:
     mode = _text(args, "generation_mode") or _text(workflow, "generation_mode")
-    return mode if mode in {"standard", "quick", "immediate"} else "standard"
+    return "immediate" if mode == "immediate" else "standard"
 
 
 def _hospital_bag_context_with_args(

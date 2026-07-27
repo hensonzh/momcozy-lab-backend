@@ -150,6 +150,7 @@ class _RunTurnState:
     current_user_text: str = ""
     local_date: str = ""
     timezone: str = "UTC"
+    locale: str = "zh-CN"
     previous_assistant_text: str = ""
     trusted_form_submissions: dict[str, dict[str, Any]] = field(default_factory=dict)
     checkup_attachment_count: int = 0
@@ -259,6 +260,7 @@ class CozymateAgentExecutor:
             )
             turn_state.local_date = _user_context_local_date(prepared_turn.user_context)
             turn_state.timezone = _text(prepared_turn.user_context, "timezone") or "UTC"
+            turn_state.locale = _text(prepared_turn.user_context, "locale") or "zh-CN"
             result = await self._run_model_turn(
                 run=run,
                 turn_context=turn_context,
@@ -479,7 +481,7 @@ class CozymateAgentExecutor:
         }
         tool_calls: list[dict[str, Any]] = []
         tool_name, tool_args = _structured_pregnancy_plan_tool_call(args)
-        safe_output = await self._execute_structured_pregnancy_plan_tool(
+        output = await self._execute_structured_pregnancy_plan_tool(
             run=run,
             tool_name=tool_name,
             args=tool_args,
@@ -489,11 +491,11 @@ class CozymateAgentExecutor:
                 "tool_name": tool_name,
                 "status": "completed",
                 "args": tool_args,
-                "safe_output": safe_output,
+                "output": output,
             }
         )
 
-        next_context = _dict(safe_output, "workflow_context")
+        next_context = _dict(output, "workflow_context")
         next_step = _dict(next_context, "current_step")
         if (
             command == "answer_current"
@@ -510,7 +512,7 @@ class CozymateAgentExecutor:
                 "plan_type": "pregnancy",
                 **({"scope": args["scope"]} if "scope" in args else {}),
             }
-            safe_output = await self._execute_structured_pregnancy_plan_tool(
+            output = await self._execute_structured_pregnancy_plan_tool(
                 run=run,
                 tool_name="plan_mutate",
                 args=generation_args,
@@ -520,11 +522,11 @@ class CozymateAgentExecutor:
                     "tool_name": "plan_mutate",
                     "status": "completed",
                     "args": generation_args,
-                    "safe_output": safe_output,
+                    "output": output,
                 }
             )
 
-        final_text = _pregnancy_workflow_command_final_text(safe_output)
+        final_text = _pregnancy_workflow_command_final_text(output)
         self._turn_state(run.id).authoritative_final_text = final_text
         return SdkNodeResult(final_text=final_text, tool_calls=tool_calls)
 
@@ -554,13 +556,17 @@ class CozymateAgentExecutor:
             call_id=f"ui-pregnancy-plan-{uuid4().hex}",
             args=args,
             trusted_args=trusted_args,
+            use_internal_input_schema=(
+                tool_name == "pregnancy_intake_manage"
+                and _text(args, "command") in {"submit_form", "answer_current"}
+            ),
         )
-        safe_output = dict(execution.safe_output or {})
-        if _text(safe_output, "status") == "urgent_care_required":
-            required_response = _text(safe_output, "required_response")
+        output = dict(execution.canonical_output)
+        if _text(output, "status") == "urgent_care_required":
+            required_response = _text(output, "required_response")
             if required_response:
                 self._turn_state(run.id).authoritative_final_text = required_response
-        return safe_output
+        return output
 
     async def _run_verified_hospital_bag_submission(
         self,
@@ -599,7 +605,7 @@ class CozymateAgentExecutor:
 
         args: dict[str, Any] = {}
         generation_mode = _text(workflow_state, "generation_mode")
-        if generation_mode in {"standard", "quick", "immediate"}:
+        if generation_mode in {"standard", "immediate"}:
             args["generation_mode"] = generation_mode
         trusted_args = await self._trusted_tool_args(
             run=run,
@@ -614,9 +620,9 @@ class CozymateAgentExecutor:
             args=args,
             trusted_args=trusted_args,
         )
-        safe_output = dict(execution.safe_output or {})
+        output = dict(execution.canonical_output)
         resolved_output = _hospital_bag_tool_output(
-            {"safe_output": safe_output}
+            {"output": output}
         )
         status = _text(resolved_output, "status")
         required_response = _text(resolved_output, "required_response")
@@ -642,7 +648,7 @@ class CozymateAgentExecutor:
                     "tool_name": HOSPITAL_BAG_MANAGE_TOOL_NAME,
                     "status": "completed",
                     "args": args,
-                    "safe_output": safe_output,
+                    "output": output,
                 }
             ],
         )
@@ -1362,8 +1368,8 @@ class CozymateAgentExecutor:
         if trusted_args:
             execute_kwargs["trusted_args"] = trusted_args
         result = await self.tool_executor.execute(**execute_kwargs)
-        if _text(result.safe_output, "status") == "urgent_care_required":
-            required_response = _text(result.safe_output, "required_response")
+        if _text(result.canonical_output, "status") == "urgent_care_required":
+            required_response = _text(result.canonical_output, "required_response")
             if required_response:
                 self._turn_state(run.id).authoritative_final_text = required_response
         await self._append_progress(run=run, phase="model_followup", label="我接着处理下一步")
@@ -1441,8 +1447,11 @@ class CozymateAgentExecutor:
                     }
                 )
             return plan_trusted_args
-        if contract_name == "support_ticket_create":
-            return {"trusted_current_user_text": self._turn_state(run.id).current_user_text}
+        if contract_name == "support_ticket_draft_create":
+            return {
+                "trusted_current_user_text": self._turn_state(run.id).current_user_text,
+                "locale": self._turn_state(run.id).locale,
+            }
         if contract_name == "pregnancy_intake_manage":
             workflow = await self._latest_pregnancy_plan_workflow(run=run)
             trusted_args: dict[str, Any] = {
@@ -1542,6 +1551,8 @@ class CozymateAgentExecutor:
             return {
                 "trusted_current_user_text": self._turn_state(run.id).current_user_text,
                 "trusted_previous_assistant_text": self._turn_state(run.id).previous_assistant_text,
+                "locale": self._turn_state(run.id).locale,
+                "timezone": self._turn_state(run.id).timezone,
             }
         if contract_name == CONVERSATION_HISTORY_IMAGE_READ_TOOL_NAME:
             return {"visible_image_urls": list(self._turn_state(run.id).visible_image_urls)}
@@ -2025,7 +2036,7 @@ def _has_completed_pregnancy_plan_analysis(tool_calls: list[dict[str, Any]]) -> 
     return any(
         _text(tool_call, "tool_name") == "pregnancy_intake_manage"
         and _text(_dict(tool_call, "safe_args"), "command") == "submit_form"
-        and _text(_dict(tool_call, "safe_output"), "status") in {"intake_analyzed", "intake_in_progress"}
+        and _text(_dict(tool_call, "output"), "status") in {"intake_analyzed", "intake_in_progress"}
         for tool_call in tool_calls
     )
 
@@ -2044,10 +2055,10 @@ def _completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> dict[str, 
     for tool_call in reversed(tool_calls):
         if _text(tool_call, "tool_name") != HOSPITAL_BAG_MANAGE_TOOL_NAME:
             continue
-        safe_output = _hospital_bag_tool_output(tool_call)
-        if _text(safe_output, "status") not in completed_statuses:
+        output = _hospital_bag_tool_output(tool_call)
+        if _text(output, "status") not in completed_statuses:
             continue
-        card = _dict(safe_output, "card")
+        card = _dict(output, "card")
         card_json = card.get("card_json") or card.get("cardJson")
         if isinstance(card_json, dict):
             return dict(card_json)
@@ -2055,9 +2066,7 @@ def _completed_hospital_bag_card(tool_calls: list[dict[str, Any]]) -> dict[str, 
 
 
 def _hospital_bag_tool_output(tool_call: dict[str, Any]) -> dict[str, Any]:
-    safe_output = _dict(tool_call, "safe_output")
-    payload_summary = _dict(safe_output, "payload_summary")
-    return payload_summary or safe_output
+    return _dict(tool_call, "output")
 
 
 def _timings_with_total(timings_ms: dict[str, float], run_started_at: float) -> dict[str, float]:
@@ -2212,12 +2221,12 @@ def _runtime_checkup_attachment_count(message: AgentMessage) -> int:
     return count
 
 
-def _pregnancy_workflow_command_final_text(safe_output: dict[str, Any]) -> str:
-    required_response = _text(safe_output, "required_response")
+def _pregnancy_workflow_command_final_text(output: dict[str, Any]) -> str:
+    required_response = _text(output, "required_response")
     if required_response:
         return required_response
-    status = _text(safe_output, "status")
-    if safe_output.get("write_succeeded") is True:
+    status = _text(output, "status")
+    if output.get("write_succeeded") is True:
         return "孕期计划已生成，并同步到「宝宝和我」。"
     if status == "action_failed":
         return "这次孕期计划没有生成或同步成功，你可以稍后重试。"
@@ -2225,7 +2234,7 @@ def _pregnancy_workflow_command_final_text(safe_output: dict[str, Any]) -> str:
         return "请先填写下方的孕期基础信息表。提交后，我会按当前状态继续下一步。"
     if status == "pregnancy_plan_intake_abandoned":
         return "已结束这次孕期计划采集。以后需要时可以重新开始。"
-    workflow_context = _dict(safe_output, "workflow_context")
+    workflow_context = _dict(output, "workflow_context")
     current_step = _dict(workflow_context, "current_step")
     question = _text(current_step, "question")
     if question:

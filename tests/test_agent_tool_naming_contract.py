@@ -27,7 +27,7 @@ EXPECTED_MODEL_TOOL_NAMES = {
     "pump_models_read",
     "schedule_timeline_read",
     "schedule_timeline_mutate",
-    "support_ticket_create",
+    "support_ticket_draft_create",
 }
 
 MULTI_OPERATION_MUTATION_TOOLS = {
@@ -38,9 +38,23 @@ MULTI_OPERATION_MUTATION_TOOLS = {
 }
 
 SINGLE_OPERATION_TOOLS = {
-    "ibclc_consult_card_create": "create",
-    "support_ticket_create": "create",
+    "ibclc_consult_card_create",
+    "support_ticket_draft_create",
 }
+
+
+def _operation_variants(schema: dict) -> list[dict]:
+    variants = schema.get("anyOf")
+    return [variant for variant in variants if isinstance(variant, dict)] if isinstance(variants, list) else [schema]
+
+
+def _operation_values(schema: dict) -> set[str]:
+    values: set[str] = set()
+    for variant in _operation_variants(schema):
+        operation = (variant.get("properties") or {}).get("operation")
+        if isinstance(operation, dict):
+            values.update(value for value in operation.get("enum", []) if isinstance(value, str))
+    return values
 
 
 def test_model_tools_use_the_canonical_capability_suffixes() -> None:
@@ -59,17 +73,19 @@ def test_every_mutate_tool_requires_an_explicit_operation() -> None:
 
     for name in MULTI_OPERATION_MUTATION_TOOLS:
         schema = registry.get(name).input_schema
-        assert "operation" in schema["required"], name
-        assert schema["properties"]["operation"]["type"] == "string", name
+        variants = _operation_variants(schema)
+        assert variants, name
+        assert all("operation" in variant["required"] for variant in variants), name
+        assert all(variant["properties"]["operation"]["type"] == "string" for variant in variants), name
 
 
-def test_single_operation_tool_names_match_their_operation() -> None:
+def test_single_operation_tool_names_do_not_repeat_their_operation() -> None:
     registry = default_tool_registry()
 
-    for name, operation in SINGLE_OPERATION_TOOLS.items():
+    for name in SINGLE_OPERATION_TOOLS:
         schema = registry.get(name).input_schema
-        assert "operation" in schema["required"], name
-        assert schema["properties"]["operation"]["enum"] == [operation], name
+        assert "operation" not in schema.get("properties", {}), name
+        assert "operation" not in schema.get("required", []), name
 
 
 def test_single_purpose_profile_update_does_not_repeat_operation_in_arguments() -> None:
@@ -82,23 +98,15 @@ def test_single_purpose_profile_update_does_not_repeat_operation_in_arguments() 
 def test_consolidated_resource_mutations_expose_only_supported_operations() -> None:
     registry = default_tool_registry()
 
-    assert registry.get("diary_mutate").input_schema["properties"]["operation"]["enum"] == [
-        "create",
-        "update",
-        "delete",
-    ]
-    assert registry.get("schedule_timeline_mutate").input_schema["properties"]["operation"]["enum"] == [
+    assert _operation_values(registry.get("diary_mutate").input_schema) == {"create", "update", "delete"}
+    assert _operation_values(registry.get("schedule_timeline_mutate").input_schema) == {
         "create",
         "update",
         "delete",
         "set_status",
         "reschedule",
-    ]
-    assert registry.get("plan_mutate").input_schema["properties"]["operation"]["enum"] == [
-        "create",
-        "update",
-        "delete",
-    ]
+    }
+    assert _operation_values(registry.get("plan_mutate").input_schema) == {"create", "update", "delete"}
 
 
 def test_consolidated_mutation_handlers_keep_precise_internal_operation_boundaries() -> None:

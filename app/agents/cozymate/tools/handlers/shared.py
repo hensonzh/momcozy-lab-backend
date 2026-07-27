@@ -13,7 +13,7 @@ from app.core.errors import ApiError
 from app.infrastructure.object_storage.base import ObjectStorage
 from app.agent_runtime.runs.models import AgentWorkflowState
 from app.agent_runtime.runs.service import AgentRuntimeService
-from app.agent_runtime.tools.result import ToolResult, ToolTextOutput
+from app.agent_runtime.tools.result import ToolResult
 from app.agent_runtime.tools.executor import ToolHandlerContext
 from app.modules.assets.models import ProductAsset
 from app.modules.assets.service import ProductAssetService
@@ -289,16 +289,12 @@ def _support_ticket_draft(context: ToolHandlerContext) -> dict[str, Any]:
         "user_contact": _text(args, "user_contact"),
         "troubleshooting_done": _string_list(args.get("troubleshooting_done")),
         "urgency": _text(args, "urgency") or "normal",
-        "user_emotion": _text(args, "user_emotion"),
-        "attachments_note": _text(args, "attachments_note"),
         "preferred_language": _text(args, "locale") or "en-US",
     }
     return {key: value for key, value in ticket.items() if value not in ("", None, [])}
 
 
 def _support_ticket_creation_confirmed(args: dict[str, Any]) -> bool:
-    if args.get("user_confirmed") is not True:
-        return False
     message = re.sub(r"\s+", "", _text(args, "trusted_current_user_text").lower())
     if not message:
         return False
@@ -341,8 +337,7 @@ def _support_ticket_creation_confirmed(args: dict[str, Any]) -> bool:
 
 def _support_ticket_confirmation_message(args: dict[str, Any]) -> str:
     needs_empathy = not _string_list(args.get("troubleshooting_done")) and (
-        bool(_text(args, "user_emotion"))
-        or _text(args, "issue_type") in {"missing_parts", "defect", "safety_concern", "return_or_refund", "warranty"}
+        _text(args, "issue_type") in {"missing_parts", "defect", "safety_concern", "return_or_refund", "warranty"}
     )
     if needs_empathy:
         return "这件事确实很影响使用体验，我可以帮你创建一个售后工单，我们客服团队会在 24 小时之内联系到你。你看，需要我现在帮你创建吗？"
@@ -415,9 +410,6 @@ def _ibclc_consult_card_payload(args: dict[str, Any]) -> dict[str, Any]:
             "note": "启动咨询后，会自动将你的问题同步给顾问",
         },
     }
-    extra_payload = args.get("payload")
-    if isinstance(extra_payload, dict):
-        payload["payload"] = extra_payload
     metadata = _metadata_payload(args)
     if metadata:
         payload["metadata"] = metadata
@@ -974,20 +966,18 @@ def _pregnancy_plan_workflow_result(
     )
     model_facts = dict(plan_context)
     model_facts.pop("personalized_followup_records", None)
-    model_payload = {
-        "trusted_pregnancy_plan_intake": {
-            "source": "verified_form_submission",
-            "workflow_phase": phase,
-            "facts": model_facts,
-            "analysis": analysis_for_model,
-            "asked_followups": asked_followups,
-            "completed_followup": completed_followup or {},
-            "current_followup": current_followup or {},
-            "visible_question": visible_question,
-            "instruction": instruction,
-        }
+    output["trusted_pregnancy_plan_intake"] = {
+        "source": "verified_form_submission",
+        "workflow_phase": phase,
+        "facts": model_facts,
+        "analysis": analysis_for_model,
+        "asked_followups": asked_followups,
+        "completed_followup": completed_followup or {},
+        "current_followup": current_followup or {},
+        "visible_question": visible_question,
+        "instruction": instruction,
     }
-    return _tool_result_with_model_payload(output=output, model_payload=model_payload)
+    return ToolResult.json(output)
 
 
 def _require_pregnancy_plan_thread_id(context: ToolHandlerContext) -> UUID:
@@ -1162,18 +1152,13 @@ def _pregnancy_plan_urgent_result(signal_ids: list[str]) -> ToolResult:
         "signal_ids": list(dict.fromkeys(signal_ids)),
         "blocks_plan_flow": True,
         "required_response": PREGNANCY_PLAN_URGENT_RESPONSE,
+        "agent_instruction": (
+            "Stop the pregnancy-plan workflow. Give required_response immediately and concisely. Do not ask the plan "
+            "supplemental-information question and do not call plan_mutate to create a pregnancy plan. "
+            "Do not diagnose."
+        ),
     }
-    model_payload = {
-            "pregnancy_plan_safety": {
-            **output,
-            "instruction": (
-                "Stop the pregnancy-plan workflow. Give required_response immediately and concisely. Do not ask the plan "
-                "supplemental-information question and do not call plan_mutate to create a pregnancy plan. "
-                "Do not diagnose."
-            ),
-        }
-    }
-    return _tool_result_with_model_payload(output=output, model_payload=model_payload)
+    return ToolResult.json(output)
 
 
 def _pregnancy_plan_preview_payload(apply_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1360,30 +1345,10 @@ def _proposal_result(*, action: Any, preview_payload: dict[str, Any]) -> dict[st
 
 def _failed_action_result(*, action: Any, preview_payload: dict[str, Any]) -> ToolResult:
     output = _proposal_result(action=action, preview_payload=preview_payload)
-    model_payload = {
-        "agent_action_failure": {
-            "action_id": output["action_id"],
-            "action_type": output["action_type"],
-            "error_code": output["error_code"],
-            "instruction": (
-                "The write failed and no plan was created. State that the operation did not succeed, never claim it was "
-                "saved or synced, and offer a retry. Do not describe a preview as an applied plan."
-            ),
-        }
-    }
-    return _tool_result_with_model_payload(output=output, model_payload=model_payload)
-
-
-def _tool_result_with_model_payload(*, output: dict[str, Any], model_payload: dict[str, Any]) -> ToolResult:
-    return ToolResult(
-        output=(
-            *ToolResult.json(output).output,
-            ToolTextOutput(
-                text=json.dumps(model_payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-            ),
-        ),
-        audit_output=output,
+    output["failure_message"] = (
+        "The write failed and no plan was created. The operation was not saved or synced and may be retried."
     )
+    return ToolResult.json(output)
 
 
 def _action_requires_confirmation(action: Any) -> bool:
@@ -1471,9 +1436,6 @@ def _optional_date_arg(payload: dict[str, Any], key: str) -> date | None:
 def _milk_schedule_target_dates(payload: dict[str, Any]) -> list[date]:
     values = payload.get("target_dates")
     raw_dates = list(values) if isinstance(values, list) else []
-    target_date = _text(payload, "target_date")
-    if target_date:
-        raw_dates.append(target_date)
     for key in ("busy_windows", "calendar_events"):
         rows = payload.get(key)
         if not isinstance(rows, list):
@@ -1740,6 +1702,12 @@ def _grounded_milk_analysis_answers(
         normalized_evidence = re.sub(r"\s+", "", evidence)
         if field not in allowed_fields or not normalized_evidence:
             raise ApiError(code="validation_failed", message="Each observed answer requires a valid field and evidence.", status=422)
+        if field in grounded:
+            raise ApiError(
+                code="validation_failed",
+                message="Each milk-analysis observation field may be answered once per tool call.",
+                status=422,
+            )
         if not trusted or normalized_evidence not in trusted:
             raise ApiError(
                 code="milk_analysis_answer_not_grounded",
