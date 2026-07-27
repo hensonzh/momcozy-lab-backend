@@ -70,6 +70,30 @@ def test_profile_service_preserves_explicit_nulls_and_rejects_unknown_fields() -
     assert exc_info.value.code == "validation_failed"
 
 
+def test_profile_service_does_not_reintroduce_due_date_after_actual_delivery() -> None:
+    user_id = uuid4()
+    profile = UserProfile(id=uuid4(), user_id=user_id)
+    repository = FakeProfileRepository(
+        profile=profile,
+        maternal_profile=MaternalProfile(
+            owner_user_id=user_id,
+            latest_delivery_date=date(2026, 5, 10),
+        ),
+    )
+    service = ProfileService(repository=repository)
+
+    updated = asyncio.run(
+        service.update_user_profile(
+            user_id=user_id,
+            values={"estimated_due_date": date(2026, 5, 17)},
+        )
+    )
+
+    assert updated.estimated_due_date is None
+    assert repository.estimated_due_date_reconciliations == 1
+    assert repository.profile_owner_locks == 1
+
+
 def test_profile_service_updates_user_and_owned_infant_as_one_profile_change() -> None:
     user_id = uuid4()
     profile = UserProfile(id=uuid4(), user_id=user_id)
@@ -169,6 +193,45 @@ def test_profile_service_rejects_current_infant_birth_date_mismatch() -> None:
     assert exc_info.value.code == "validation_failed"
 
 
+def test_profile_service_uses_trusted_reference_date_for_infant_birth_date() -> None:
+    user_id = uuid4()
+    infant = _infant(
+        owner_user_id=user_id,
+        birth_date=None,
+    )
+    repository = FakeProfileRepository(
+        profile=UserProfile(
+            id=uuid4(),
+            user_id=user_id,
+            estimated_due_date=date(2099, 1, 8),
+        ),
+        infant=infant,
+        maternal_profile=MaternalProfile(
+            owner_user_id=user_id,
+            latest_delivery_date=date(2099, 1, 1),
+        ),
+        current_lactation_infant_ids={infant.id},
+    )
+    service = ProfileService(repository=repository)
+
+    _, updated_infants = asyncio.run(
+        service.update_profile(
+            user_id=user_id,
+            infant_updates=[
+                {
+                    "infant_id": infant.id,
+                    "values": {"birth_date": date(2099, 1, 1)},
+                }
+            ],
+            reference_date=date(2099, 1, 1),
+        )
+    )
+
+    assert updated_infants[0].birth_date == date(2099, 1, 1)
+    assert repository.profile is not None
+    assert repository.profile.estimated_due_date is None
+
+
 def test_profile_service_creates_infant_with_idempotency_and_audit() -> None:
     owner_user_id = uuid4()
     repository = FakeProfileRepository()
@@ -233,6 +296,11 @@ class FakeProfileRepository:
         self.current_lactation_infant_ids = current_lactation_infant_ids or set()
         self.created_infant_kwargs = {}
         self.upsert_user_profile_kwargs = {}
+        self.estimated_due_date_reconciliations = 0
+        self.profile_owner_locks = 0
+
+    async def lock_profile_owner(self, *, owner_user_id: UUID):
+        self.profile_owner_locks += 1
 
     async def get_user_profile(self, *, user_id: UUID):
         return self.profile
@@ -278,6 +346,20 @@ class FakeProfileRepository:
         for field, value in values.items():
             setattr(infant, field, value)
         return infant
+
+    async def clear_estimated_due_date_if_postpartum(self, *, owner_user_id: UUID):
+        self.estimated_due_date_reconciliations += 1
+        has_delivery_date = (
+            self.maternal_profile is not None
+            and self.maternal_profile.latest_delivery_date is not None
+        )
+        has_current_birth_date = (
+            self.infant is not None
+            and self.infant.id in self.current_lactation_infant_ids
+            and self.infant.birth_date is not None
+        )
+        if self.profile is not None and (has_delivery_date or has_current_birth_date):
+            self.profile.estimated_due_date = None
 
 
 class FakeIdempotencyService:

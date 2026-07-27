@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from ...core.errors import ApiError
 from ..audit import request_hash
 from .agent_contracts import (
-    AgentMilkPlanCreatePayload,
     AgentMilkScheduleReschedulePayload,
     AgentPlanDeletePayload,
+    AgentPlanUpdatePayload,
     AgentPlansActionRequest,
     AgentPlanTaskCompletePayload,
     AgentPlanTaskCreatePayload,
@@ -21,14 +21,11 @@ from .agent_contracts import (
     AgentPlanTaskUpdatePayload,
     AgentPregnancyPlanCreatePayload,
 )
-from .milk_plan_schedule import (
-    MilkPlanScheduleValidationError,
-    normalize_milk_plan_payload,
-)
 from .milk_schedule_calendar import (
     MilkScheduleCalendarEventError,
     normalize_milk_schedule_calendar_events,
 )
+from .pregnancy_plan_tasks import pregnancy_plan_task_drafts
 
 
 AGENT_PLANS_IDEMPOTENCY_SCOPE = "internal.agent.plans.apply"
@@ -55,8 +52,8 @@ class _ActionReceipt:
     start_date: str = ""
     days: int = 0
     status: str = ""
+    version: int = 0
     task_count: int = 0
-    replaced_task_count: int = 0
     calendar_event_count: int = 0
 
 
@@ -96,17 +93,6 @@ class AgentPlansActionService:
                 message="Service actor is required.",
                 status=422,
             )
-        if (
-            command.action_type == "plans.milk_plan.create"
-            and command.expires_at is not None
-            and _is_expired(command.expires_at)
-        ):
-            raise ApiError(
-                code="milk_analysis_expired_before_plan",
-                message="The milk analysis expired before the plan could be applied.",
-                status=409,
-            )
-
         decision = await self.idempotency_service.reserve(
             actor_user_id=command.actor_user_id,
             scope=AGENT_PLANS_IDEMPOTENCY_SCOPE,
@@ -121,11 +107,6 @@ class AgentPlansActionService:
                     "action_id": str(command.action_id),
                     "run_id": str(command.run_id),
                     "action_type": command.action_type,
-                    "expires_at": (
-                        command.expires_at.isoformat()
-                        if command.expires_at is not None
-                        else None
-                    ),
                     "payload": command.payload.model_dump(
                         mode="json",
                         exclude_unset=True,
@@ -174,12 +155,12 @@ class AgentPlansActionService:
             return await self._update_task(command)
         if command.action_type == "plans.task.delete":
             return await self._delete_task(command)
+        if command.action_type == "plans.plan.update":
+            return await self._update_plan(command)
         if command.action_type == "plans.plan.delete":
             return await self._delete_plan(command)
         if command.action_type == "pregnancy.plan.create":
             return await self._create_pregnancy_plan(command)
-        if command.action_type == "plans.milk_plan.create":
-            return await self._create_milk_plan(command)
         if command.action_type == "plans.milk_schedule.reschedule":
             return await self._reschedule_milk_plan(command)
         raise ApiError(
@@ -291,6 +272,25 @@ class AgentPlansActionService:
         )
         return receipt
 
+    async def _update_plan(
+        self,
+        command: AgentPlansActionRequest,
+    ) -> _ActionReceipt:
+        payload = _payload(command, AgentPlanUpdatePayload)
+        updates = payload.model_dump(
+            mode="python",
+            include={"title", "summary"},
+            exclude_unset=True,
+        )
+        plan = await self.plans_service.update_plan_metadata(
+            owner_user_id=command.actor_user_id,
+            plan_id=payload.plan_id,
+            expected_version=payload.expected_version,
+            updates=updates,
+            request_id=f"agent-action:{command.action_id}",
+        )
+        return _plan_receipt(plan)
+
     async def _create_pregnancy_plan(
         self,
         command: AgentPlansActionRequest,
@@ -308,86 +308,28 @@ class AgentPlansActionService:
                 "agent_run_id": str(command.run_id),
             },
             request_id=f"agent-action:{command.action_id}",
+            idempotency_key=f"agent-action:{command.action_id}",
         )
-        return _plan_receipt(plan)
-
-    async def _create_milk_plan(
-        self,
-        command: AgentPlansActionRequest,
-    ) -> _ActionReceipt:
-        payload = _payload(command, AgentMilkPlanCreatePayload)
-        try:
-            normalized_payload, scheduled_tasks = normalize_milk_plan_payload(
-                payload.payload.model_dump(
-                    mode="json",
-                    exclude_none=True,
-                    exclude_defaults=True,
-                )
-            )
-        except MilkPlanScheduleValidationError as exc:
-            raise ApiError(
-                code="invalid_milk_plan_schedule",
-                message="Milk plan schedule is invalid.",
-                status=422,
-            ) from exc
-        replaced_tasks: list[Any] = []
-        if payload.calendar_write_strategy == "replace_future_plan_tasks":
-            start_date = date.fromisoformat(str(normalized_payload["start_date"]))
-            end_date = start_date + timedelta(
-                days=int(normalized_payload["days"]) - 1
-            )
-            replaced_tasks = (
-                await self.plans_service.replace_future_milk_plan_tasks(
-                    owner_user_id=command.actor_user_id,
-                    start_date=start_date,
-                    end_date=end_date,
-                    expected_task_ids=payload.expected_replaced_task_ids,
-                    request_id=f"agent-action:{command.action_id}",
-                )
-            )
-        plan = await self.plans_service.create_plan(
-            owner_user_id=command.actor_user_id,
-            plan_type="milk_management",
-            title=payload.title,
-            summary=payload.summary,
-            source="agent_action",
-            payload={
-                **normalized_payload,
-                "agent_action_id": str(command.action_id),
-                "agent_run_id": str(command.run_id),
-            },
-            request_id=f"agent-action:{command.action_id}",
-        )
-        for scheduled in scheduled_tasks:
+        task_drafts = pregnancy_plan_task_drafts(plan.payload)
+        for index, draft in enumerate(task_drafts):
             await self.plans_service.create_task(
                 owner_user_id=command.actor_user_id,
                 plan_id=plan.id,
-                task_date=scheduled.task_date,
-                task_time=scheduled.task_time,
-                title=scheduled.title,
-                description=scheduled.description,
+                task_date=draft.task_date,
+                task_time="",
+                title=draft.title,
+                description=draft.description,
                 payload={
-                    "task_type": scheduled.task_type,
-                    "source": "agent_action",
+                    **draft.payload,
                     "agent_action_id": str(command.action_id),
                     "agent_run_id": str(command.run_id),
-                    **(
-                        {"duration_minutes": scheduled.duration_minutes}
-                        if scheduled.duration_minutes is not None
-                        else {}
-                    ),
                 },
                 request_id=f"agent-action:{command.action_id}",
+                idempotency_key=(
+                    f"agent-action:{command.action_id}:pregnancy-task:{index}"
+                ),
             )
-        return _ActionReceipt(
-            resource_type="plan",
-            resource_id=str(plan.id),
-            plan_type="milk_management",
-            start_date=str(normalized_payload["start_date"]),
-            days=int(normalized_payload["days"]),
-            task_count=len(scheduled_tasks),
-            replaced_task_count=len(replaced_tasks),
-        )
+        return _plan_receipt(plan, task_count=len(task_drafts))
 
     async def _reschedule_milk_plan(
         self,
@@ -502,23 +444,39 @@ def _task_receipt(*, task: Any, plan_type: str) -> _ActionReceipt:
     )
 
 
-def _plan_receipt(plan: Any) -> _ActionReceipt:
+def _plan_receipt(
+    plan: Any,
+    *,
+    task_count: int = 0,
+) -> _ActionReceipt:
     payload = (
         dict(plan.payload)
         if isinstance(getattr(plan, "payload", None), dict)
         else {}
     )
-    start_date = str(payload.get("start_date") or "")
-    try:
-        days = max(1, min(int(payload.get("days") or 1), 30))
-    except (TypeError, ValueError):
-        days = 0
+    starts_on = getattr(plan, "starts_on", None)
+    ends_on = getattr(plan, "ends_on", None)
+    start_date = (
+        starts_on.isoformat()
+        if isinstance(starts_on, date)
+        else str(payload.get("start_date") or "")
+    )
+    if isinstance(starts_on, date) and isinstance(ends_on, date):
+        days = max(1, (ends_on - starts_on).days + 1)
+    else:
+        try:
+            days = max(1, min(int(payload.get("days") or 1), 31))
+        except (TypeError, ValueError):
+            days = 0
     return _ActionReceipt(
         resource_type="plan",
         resource_id=str(plan.id),
         plan_type=str(getattr(plan, "plan_type", "") or ""),
         start_date=start_date,
         days=days,
+        status=str(getattr(plan, "status", "") or ""),
+        version=int(getattr(plan, "version", 0) or 0),
+        task_count=task_count,
     )
 
 
@@ -568,52 +526,36 @@ def _result_from_receipt(
         )
     elif command.action_type == "plans.plan.delete":
         events = _plan_delete_events(receipt)
+    elif command.action_type == "plans.plan.update":
+        plan_update_payload = _payload(command, AgentPlanUpdatePayload)
+        fields = sorted(
+            plan_update_payload.model_fields_set
+            - {"plan_id", "expected_version"}
+        )
+        details = {
+            "plan_type": receipt.plan_type,
+            "status": receipt.status,
+            "version": receipt.version,
+            "fields": fields,
+        }
+        events = _plan_update_events(receipt)
     elif command.action_type == "pregnancy.plan.create":
-        details = {"plan_type": "pregnancy"}
+        details = {
+            "plan_type": "pregnancy",
+            "status": receipt.status,
+            "version": receipt.version,
+            "task_count": receipt.task_count,
+        }
         events = (
             {
                 "type": PREGNANCY_PLAN_CHANGED_EVENT,
                 "payload": {
                     "operation": "created",
+                    "reason": "plan_created",
                     "plan_id": receipt.resource_id,
                     "plan_type": "pregnancy",
                     "source": "agent_action",
-                },
-            },
-        )
-    elif command.action_type == "plans.milk_plan.create":
-        milk_plan_payload = _payload(command, AgentMilkPlanCreatePayload)
-        details = {
-            "plan_type": "milk_management",
-            "task_count": receipt.task_count,
-            "replaced_task_count": receipt.replaced_task_count,
-            "calendar_write_strategy": (
-                milk_plan_payload.calendar_write_strategy
-            ),
-        }
-        _, scheduled_tasks = normalize_milk_plan_payload(
-            milk_plan_payload.payload.model_dump(
-                mode="json",
-                exclude_none=True,
-                exclude_defaults=True,
-            )
-        )
-        events = (
-            {
-                "type": MILK_PLAN_CHANGED_EVENT,
-                "payload": {
-                    "operation": "created",
-                    "reason": "created",
-                    "plan_id": receipt.resource_id,
-                    "plan_type": "milk_management",
-                    "source": "agent_action",
-                    "affected_dates": sorted(
-                        {
-                            task.task_date.isoformat()
-                            for task in scheduled_tasks
-                        }
-                    ),
-                    "replaced_task_count": receipt.replaced_task_count,
+                    "task_count": receipt.task_count,
                 },
             },
         )
@@ -740,6 +682,30 @@ def _plan_delete_events(
     )
 
 
+def _plan_update_events(
+    receipt: _ActionReceipt,
+) -> tuple[dict[str, Any], ...]:
+    event_type = {
+        "pregnancy": PREGNANCY_PLAN_CHANGED_EVENT,
+        "milk_management": MILK_PLAN_CHANGED_EVENT,
+    }.get(receipt.plan_type)
+    if event_type is None:
+        return ()
+    return (
+        {
+            "type": event_type,
+            "payload": {
+                "operation": "updated",
+                "reason": "plan_updated",
+                "plan_id": receipt.resource_id,
+                "plan_type": receipt.plan_type,
+                "source": "agent_action",
+                "version": receipt.version,
+            },
+        },
+    )
+
+
 def _encode_receipt(receipt: _ActionReceipt) -> str:
     response_ref = json.dumps(
         {
@@ -753,8 +719,8 @@ def _encode_receipt(receipt: _ActionReceipt) -> str:
                 "start_date": receipt.start_date,
                 "days": receipt.days,
                 "status": receipt.status,
+                "version": receipt.version,
                 "task_count": receipt.task_count,
-                "replaced_task_count": receipt.replaced_task_count,
                 "calendar_event_count": receipt.calendar_event_count,
             }.items()
             if value not in ("", 0)
@@ -797,10 +763,8 @@ def _decode_receipt(response_ref: str) -> _ActionReceipt:
             start_date=str(payload.get("start_date") or ""),
             days=int(payload.get("days") or 0),
             status=str(payload.get("status") or ""),
+            version=int(payload.get("version") or 0),
             task_count=int(payload.get("task_count") or 0),
-            replaced_task_count=int(
-                payload.get("replaced_task_count") or 0
-            ),
             calendar_event_count=int(
                 payload.get("calendar_event_count") or 0
             ),
@@ -811,10 +775,3 @@ def _decode_receipt(response_ref: str) -> _ActionReceipt:
             message="Plan action replay identity is invalid.",
             status=409,
         ) from exc
-
-
-def _is_expired(expires_at: datetime) -> bool:
-    comparable = expires_at
-    if comparable.tzinfo is None:
-        comparable = comparable.replace(tzinfo=timezone.utc)
-    return comparable <= datetime.now(timezone.utc)

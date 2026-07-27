@@ -96,6 +96,9 @@ class InMemoryProfileRepository:
         self.profiles: dict[UUID, UserProfile] = {}
         self.infants: list[InfantProfile] = []
 
+    async def lock_profile_owner(self, *, owner_user_id: UUID):
+        return None
+
     async def get_user_profile(self, *, user_id: UUID):
         return self.profiles.get(user_id)
 
@@ -105,6 +108,13 @@ class InMemoryProfileRepository:
             setattr(profile, field, value)
         self.profiles[user_id] = profile
         return profile
+
+    async def clear_estimated_due_date_if_postpartum(
+        self,
+        *,
+        owner_user_id: UUID,
+    ):
+        return False
 
     async def list_infants(self, *, owner_user_id: UUID):
         return [

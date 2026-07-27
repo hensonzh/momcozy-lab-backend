@@ -103,6 +103,7 @@ async def apply_agent_profile_update(
         )
     result = await service.apply_idempotent(
         owner_user_id=payload.actor_user_id,
+        action_type=payload.action_type,
         payload=payload.payload.model_dump(mode="json", exclude_unset=True),
         idempotency_key=idempotency_key,
         action_id=payload.action_id,

@@ -30,7 +30,7 @@ def test_agent_diary_read_uses_runtime_identity_and_explicit_actor_scope() -> No
     app.dependency_overrides[get_agent_diary_read_service] = lambda: service
 
     response = TestClient(app).get(
-        "/v1/internal/agent/pregnancy-diary",
+        "/v1/internal/agent/diary",
         headers={"X-Service-Key": SERVICE_KEY},
         params={
             "actor_user_id": str(actor_user_id),
@@ -48,7 +48,7 @@ def test_agent_diary_read_uses_runtime_identity_and_explicit_actor_scope() -> No
 
 def test_agent_diary_routes_reject_missing_service_identity() -> None:
     response = TestClient(_app()).get(
-        "/v1/internal/agent/pregnancy-diary",
+        "/v1/internal/agent/diary",
         params={"actor_user_id": str(uuid4())},
     )
 
@@ -65,12 +65,12 @@ def test_agent_diary_apply_requires_action_bound_idempotency_key() -> None:
     )
 
     missing = TestClient(app).post(
-        "/v1/internal/agent/actions/pregnancy-diary.entry/apply",
+        "/v1/internal/agent/actions/diary.entry/apply",
         headers={"X-Service-Key": SERVICE_KEY},
         json=_apply_command(actor_user_id=actor_user_id, action_id=action_id),
     )
     wrong = TestClient(app).post(
-        "/v1/internal/agent/actions/pregnancy-diary.entry/apply",
+        "/v1/internal/agent/actions/diary.entry/apply",
         headers={
             "X-Service-Key": SERVICE_KEY,
             "Idempotency-Key": f"agent-action:{uuid4()}",
@@ -91,7 +91,7 @@ def test_agent_diary_apply_forwards_action_identity() -> None:
     app.dependency_overrides[get_agent_diary_write_service] = lambda: service
 
     response = TestClient(app).post(
-        "/v1/internal/agent/actions/pregnancy-diary.entry/apply",
+        "/v1/internal/agent/actions/diary.entry/apply",
         headers={
             "X-Service-Key": SERVICE_KEY,
             "Idempotency-Key": f"agent-action:{action_id}",
@@ -112,7 +112,7 @@ def test_agent_diary_apply_forwards_action_identity() -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "applied"
     assert response.json()["application_events"][0]["type"] == (
-        "pregnancy_diary.changed"
+        "diary.changed"
     )
     assert service.kwargs["owner_user_id"] == actor_user_id
     assert service.kwargs["action_id"] == action_id
@@ -200,12 +200,12 @@ class FakeDiaryWriteService:
     async def apply_idempotent(self, **kwargs: object) -> object:
         self.kwargs = kwargs
         return SimpleNamespace(
-            resource_type="pregnancy_diary_entry",
+            resource_type="diary_entry",
             resource_id=str(uuid4()),
             details={"operation": "created", "changed": True},
             application_events=(
                 {
-                    "type": "pregnancy_diary.changed",
+                    "type": "diary.changed",
                     "payload": {
                         "operation": "created",
                         "entry_date": "2026-07-26",
@@ -302,14 +302,7 @@ def _entry(
         id=uuid4(),
         owner_user_id=owner_user_id,
         entry_date=entry_date,
-        gestational_week="",
-        mood="",
-        energy_level="",
-        sleep_summary="",
-        fetal_movement="",
-        symptom_tags=[],
-        appointment_note="",
-        nutrition_note="",
+        attributes={},
         content=content,
         attachments=[],
         status="active",

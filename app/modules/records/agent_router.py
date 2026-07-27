@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from uuid import UUID
 
 from fastapi import Depends, Query, Request
@@ -16,8 +16,6 @@ from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import ServiceClient
-from ..plans.repository import PlansRepository
-from ..plans.service import PlansService
 from ..profiles.repository import ProfileRepository
 from ..profiles.service import ProfileService
 from .agent_contracts import (
@@ -29,8 +27,6 @@ from .agent_service import (
     AgentLactationReadService,
     AgentLactationRecordWriteService,
 )
-from .lactation_timeline import LactationTimelineService
-from .lactation_timeline_schema import LactationTimelineReadOutput
 from .repository import RecordsRepository
 from .service import RecordsService
 
@@ -51,12 +47,6 @@ def get_agent_lactation_read_service(
 ) -> AgentLactationReadService:
     records_service = RecordsService(repository=RecordsRepository(session))
     return AgentLactationReadService(
-        timeline_service=LactationTimelineService(
-            records_service=records_service,
-            plans_service=PlansService(
-                repository=PlansRepository(session),
-            ),
-        ),
         records_service=records_service,
         profile_service=ProfileService(
             repository=ProfileRepository(session),
@@ -77,34 +67,6 @@ def get_agent_lactation_write_service(
         ),
         audit_service=AuditService(repository=audit_repository),
     )
-
-
-@router.get(
-    "/lactation/timeline",
-    response_model=LactationTimelineReadOutput,
-)
-async def read_agent_lactation_timeline(
-    actor_user_id: UUID,
-    as_of_date: date | None = None,
-    start_date: date | None = None,
-    end_date: date | None = None,
-    timezone_name: str = Query(default="UTC", min_length=1, max_length=64),
-    limit: int = Query(default=50, ge=1, le=50),
-    _service_client: ServiceClient = Depends(require_agent_runtime_client),
-    service: AgentLactationReadService = Depends(
-        get_agent_lactation_read_service
-    ),
-) -> LactationTimelineReadOutput:
-    effective_as_of_date = as_of_date or date.today()
-    result = await service.read_timeline(
-        owner_user_id=actor_user_id,
-        as_of_date=effective_as_of_date,
-        start_date=start_date or effective_as_of_date - timedelta(days=7),
-        end_date=end_date or effective_as_of_date + timedelta(days=7),
-        timezone_name=timezone_name,
-        limit=limit,
-    )
-    return LactationTimelineReadOutput.model_validate(result)
 
 
 @router.get(

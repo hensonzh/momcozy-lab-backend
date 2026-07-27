@@ -136,7 +136,7 @@ class MilkAnalysisInterpretation(BaseModel):
     pumping_trend: str = Field(description="用于生成分析路径的妈妈侧吸奶产出趋势。")
     has_recent_growth: bool = Field(description="当前快照是否包含至少一条近期宝宝生长记录。")
     missing_inputs: list[str] = Field(description="当前分析仍缺失或需要留意的输入信号代码。")
-    recommended_next_step: str = Field(description="基于当前快照建议的下一步采集、判断或计划动作。")
+    recommended_next_step: str = Field(description="基于当前快照建议的下一步采集、判断或安全支持动作。")
 
 
 class MilkAnalysisReview(BaseModel):
@@ -201,12 +201,10 @@ class MilkAnalysisEvaluation(BaseModel):
     workflow_state_id: UUID = Field(description="本次评估对应的持久化奶量分析工作流状态 UUID。")
     artifact_id: UUID = Field(description="生成或复用的奶量分析卡片 UUID。")
     artifact_type: str = Field(description="生成的分析产物类型，当前为 milk_analysis_card。")
-    can_start_plan: bool = Field(description="当前评估是否允许进入奶量计划制定。")
-    recommended_direction: str | None = Field(
-        default=None,
-        description="评估建议的追奶、稳奶或减奶方向；尚不能进入计划时为 null。",
-    )
-    reason: str | None = Field(default=None, description="计划准入或暂缓准入的确定性原因。")
+    maternal_red_flags: bool = Field(description="当前回答是否包含需要优先处理的妈妈乳房或全身危险信号。")
+    infant_intake_risk: bool = Field(description="当前回答是否包含需要优先确认的宝宝摄入或生长风险信号。")
+    data_coverage: str = Field(description="本次综合评估使用的近期记录覆盖情况。")
+    pumping_trend: str = Field(description="本次综合评估识别出的妈妈侧吸奶产出趋势。")
     replayed: bool = Field(description="本次结果是否复用了当前工作流已经生成的评估卡片。")
 
 
@@ -225,5 +223,5 @@ class MilkAnalysisOutput(BaseModel):
     )
     evaluation: MilkAnalysisEvaluation | None = Field(
         default=None,
-        description="operation=evaluate 时返回的分析卡片和计划准入结论；其他操作为 null 或不返回。",
+        description="operation=evaluate 时返回的分析卡片和风险、趋势结论；其他操作为 null 或不返回。",
     )

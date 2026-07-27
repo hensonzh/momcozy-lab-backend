@@ -92,6 +92,10 @@ class MaternalProfile(Base):
             "latest_delivery_method IS NULL OR latest_delivery_method IN ('vaginal', 'cesarean', 'assisted_vaginal', 'other', 'unknown')",
             name="ck_maternal_profiles_delivery_method",
         ),
+        CheckConstraint(
+            "latest_delivery_method <> 'cesarean' OR has_cesarean_history IS TRUE",
+            name="cesarean_history",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)

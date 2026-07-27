@@ -9,14 +9,14 @@ from uuid import UUID
 from ...core.errors import ApiError
 from ..audit import request_hash
 from .agent_contracts import AgentDiaryApplyPayload
-from .events import PREGNANCY_DIARY_CHANGED_EVENT, pregnancy_diary_changed_payload
+from .events import DIARY_CHANGED_EVENT, diary_changed_payload
 
 
-AGENT_DIARY_IDEMPOTENCY_SCOPE = "internal.agent.pregnancy_diary.entry"
+AGENT_DIARY_IDEMPOTENCY_SCOPE = "internal.agent.diary.entry"
 AGENT_DIARY_ACTION_TYPES = {
-    "create": "pregnancy_diary.entry.save",
-    "update": "pregnancy_diary.entry.save",
-    "delete": "pregnancy_diary.entry.delete",
+    "create": "diary.entry.save",
+    "update": "diary.entry.save",
+    "delete": "diary.entry.delete",
 }
 APPLIED_OPERATIONS = {
     "create": "created",
@@ -34,7 +34,7 @@ class AgentDiaryWriteResult:
 
 
 class AgentDiaryWriteService:
-    """Product-owned, action-bound pregnancy diary mutation boundary."""
+    """Product-owned, action-bound diary mutation boundary."""
 
     def __init__(
         self,
@@ -125,7 +125,7 @@ class AgentDiaryWriteService:
                 actor_type="service",
                 actor_service=normalized_actor_service,
                 action=action_type,
-                resource_type="pregnancy_diary_entry",
+                resource_type="diary_entry",
                 resource_id=str(entry.id),
                 request_id=request_id,
                 details={
@@ -143,7 +143,7 @@ class AgentDiaryWriteService:
             ),
         )
         return AgentDiaryWriteResult(
-            resource_type="pregnancy_diary_entry",
+            resource_type="diary_entry",
             resource_id=str(entry.id),
             details=details,
             application_events=events,
@@ -190,8 +190,8 @@ def _application_events(
         return ()
     return (
         {
-            "type": PREGNANCY_DIARY_CHANGED_EVENT,
-            "payload": pregnancy_diary_changed_payload(
+            "type": DIARY_CHANGED_EVENT,
+            "payload": diary_changed_payload(
                 entry=entry,
                 operation=operation,
                 source="agent_action",
@@ -232,12 +232,12 @@ def _replay_result(
         ) from exc
     operation = APPLIED_OPERATIONS[command.operation]
     return AgentDiaryWriteResult(
-        resource_type="pregnancy_diary_entry",
+        resource_type="diary_entry",
         resource_id=resource_id,
         details={"operation": operation, "changed": True},
         application_events=(
             {
-                "type": PREGNANCY_DIARY_CHANGED_EVENT,
+                "type": DIARY_CHANGED_EVENT,
                 "payload": {
                     "operation": operation,
                     "entry_id": resource_id,

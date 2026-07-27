@@ -26,37 +26,6 @@ from app.modules.records.agent_service import (
 SERVICE_KEY = "agent-runtime-service-key-with-32-bytes"
 
 
-def test_agent_lactation_timeline_read_uses_service_identity_and_actor_scope() -> None:
-    actor_user_id = uuid4()
-    service = FakeAgentLactationReadService()
-    app = _app()
-    app.dependency_overrides[get_agent_lactation_read_service] = lambda: service
-
-    response = TestClient(app).get(
-        "/v1/internal/agent/lactation/timeline",
-        headers={"X-Service-Key": SERVICE_KEY},
-        params={
-            "actor_user_id": str(actor_user_id),
-            "as_of_date": "2026-07-26",
-            "start_date": "2026-07-20",
-            "end_date": "2026-07-26",
-            "timezone_name": "Asia/Shanghai",
-            "limit": 20,
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["timezone"] == "Asia/Shanghai"
-    assert service.timeline_kwargs == {
-        "owner_user_id": actor_user_id,
-        "as_of_date": date(2026, 7, 26),
-        "start_date": date(2026, 7, 20),
-        "end_date": date(2026, 7, 26),
-        "timezone_name": "Asia/Shanghai",
-        "limit": 20,
-    }
-
-
 def test_agent_milk_analysis_snapshot_uses_explicit_actor_and_runtime_clock() -> None:
     actor_user_id = uuid4()
     service = FakeAgentLactationReadService()
@@ -88,7 +57,7 @@ def test_agent_milk_analysis_snapshot_uses_explicit_actor_and_runtime_clock() ->
 
 def test_agent_lactation_routes_reject_missing_service_identity() -> None:
     response = TestClient(_app()).get(
-        "/v1/internal/agent/lactation/timeline",
+        "/v1/internal/agent/lactation/milk-analysis-snapshot",
         params={"actor_user_id": str(uuid4())},
     )
 
@@ -280,7 +249,6 @@ def test_agent_milk_analysis_snapshot_aggregates_all_owned_infant_records() -> N
     records_service = AnalysisRecordsService(owner_user_id=actor_user_id)
     profile_service = AnalysisProfileService(owner_user_id=actor_user_id)
     service = AgentLactationReadService(
-        timeline_service=SimpleNamespace(),
         records_service=records_service,
         profile_service=profile_service,
     )
@@ -312,25 +280,7 @@ def test_agent_milk_analysis_snapshot_aggregates_all_owned_infant_records() -> N
 
 class FakeAgentLactationReadService:
     def __init__(self) -> None:
-        self.timeline_kwargs: dict[str, object] = {}
         self.analysis_kwargs: dict[str, object] = {}
-
-    async def read_timeline(self, **kwargs: object) -> dict[str, object]:
-        self.timeline_kwargs = kwargs
-        return {
-            "as_of_date": kwargs["as_of_date"],
-            "timezone": kwargs["timezone_name"],
-            "start_date": kwargs["start_date"],
-            "end_date": kwargs["end_date"],
-            "items": [],
-            "counts": {
-                "pending": 0,
-                "completed": 0,
-                "skipped": 0,
-                "recorded": 0,
-            },
-            "truncated": False,
-        }
 
     async def read_milk_analysis_snapshot(
         self, **kwargs: object

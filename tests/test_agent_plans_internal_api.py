@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
@@ -16,6 +16,7 @@ from app.modules.plans.agent_contracts import AgentPlansActionRequest
 from app.modules.plans.agent_router import (
     get_agent_plans_action_service,
     get_agent_plans_read_service,
+    get_agent_schedule_timeline_service,
 )
 from app.modules.plans.agent_service import AgentPlansActionService
 
@@ -32,18 +33,24 @@ def test_agent_plans_current_read_uses_service_identity_and_explicit_actor_scope
     response = TestClient(app).get(
         "/v1/internal/agent/plans/current",
         headers={"X-Service-Key": SERVICE_KEY},
-        params={"actor_user_id": str(actor_user_id), "limit": 4},
+        params={
+            "actor_user_id": str(actor_user_id),
+            "plan_type": "pregnancy",
+            "limit": 4,
+        },
     )
 
     assert response.status_code == 200
     assert response.json()["counts"] == {"plans": 1, "tasks": 1}
     assert service.list_plans_kwargs == {
         "owner_user_id": actor_user_id,
+        "plan_type": "pregnancy",
         "status": "active",
         "limit": 4,
     }
     assert service.list_tasks_kwargs == {
         "owner_user_id": actor_user_id,
+        "plan_type": "pregnancy",
         "limit": 4,
     }
 
@@ -76,6 +83,69 @@ def test_agent_plans_calendar_read_forwards_owner_scoped_filters() -> None:
         "task_date": date(2026, 7, 28),
         "status": "pending",
         "limit": 12,
+    }
+
+
+def test_agent_plan_detail_returns_payload_and_lifecycle_fields() -> None:
+    actor_user_id = uuid4()
+    service = RecordingPlansReadService()
+    app = _app()
+    app.dependency_overrides[get_agent_plans_read_service] = lambda: service
+
+    response = TestClient(app).get(
+        f"/v1/internal/agent/plans/{service.plan.id}",
+        headers={"X-Service-Key": SERVICE_KEY},
+        params={"actor_user_id": str(actor_user_id)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["payload"] == service.plan.payload
+    assert response.json()["starts_on"] == "2026-07-28"
+    assert response.json()["ends_on"] == "2026-07-29"
+    assert response.json()["version"] == 1
+    assert service.get_plan_kwargs == {
+        "owner_user_id": actor_user_id,
+        "plan_id": service.plan.id,
+    }
+
+
+def test_agent_schedule_timeline_forwards_scope_and_filters() -> None:
+    actor_user_id = uuid4()
+    service = RecordingScheduleTimelineService()
+    app = _app()
+    app.dependency_overrides[get_agent_schedule_timeline_service] = (
+        lambda: service
+    )
+
+    response = TestClient(app).get(
+        "/v1/internal/agent/schedule-timeline",
+        headers={"X-Service-Key": SERVICE_KEY},
+        params=[
+            ("actor_user_id", str(actor_user_id)),
+            ("as_of_date", "2026-07-26"),
+            ("start_date", "2026-07-20"),
+            ("end_date", "2026-07-27"),
+            ("timezone_name", "Asia/Shanghai"),
+            ("domains", "lactation"),
+            ("domains", "pregnancy"),
+            ("states", "pending"),
+            ("limit", "1000"),
+            ("include_executions", "false"),
+        ],
+    )
+
+    assert response.status_code == 200
+    assert response.json()["timezone"] == "Asia/Shanghai"
+    assert service.kwargs == {
+        "owner_user_id": actor_user_id,
+        "as_of_date": date(2026, 7, 26),
+        "start_date": date(2026, 7, 20),
+        "end_date": date(2026, 7, 27),
+        "timezone_name": "Asia/Shanghai",
+        "limit": 1000,
+        "domains": ("lactation", "pregnancy"),
+        "states": ("pending",),
+        "include_executions": False,
     }
 
 
@@ -161,9 +231,9 @@ def test_agent_plans_apply_forwards_runtime_action_identity() -> None:
         ("task_complete", "set_task_completed", "plan_task"),
         ("task_update", "update_task", "plan_task"),
         ("task_delete", "delete_task", "plan_task"),
+        ("plan_update", "update_plan_metadata", "plan"),
         ("plan_delete", "delete_plan", "plan"),
         ("pregnancy_create", "create_plan", "plan"),
-        ("milk_create", "create_plan", "plan"),
         ("milk_reschedule", "reschedule_milk_tasks", "plan"),
     ],
 )
@@ -209,7 +279,7 @@ def test_agent_plans_action_replay_does_not_repeat_business_write_or_audit() -> 
         idempotency_service=idempotency_service,
         audit_service=audit_service,
     )
-    raw_command = _action_command("milk_create")
+    raw_command = _action_command("plan_update")
     command = AgentPlansActionRequest.model_validate(raw_command)
     kwargs = {
         "command": command,
@@ -222,8 +292,7 @@ def test_agent_plans_action_replay_does_not_repeat_business_write_or_audit() -> 
     replay = asyncio.run(service.apply_idempotent(**kwargs))
 
     assert first == replay
-    assert plans_service.calls.count("create_plan") == 1
-    assert plans_service.calls.count("create_task") == 2
+    assert plans_service.calls.count("update_plan_metadata") == 1
     assert len(audit_service.calls) == 1
 
 
@@ -236,15 +305,15 @@ def test_agent_plans_action_factory_audits_only_at_service_boundary() -> None:
     assert service.idempotency_service is not None
 
 
-def test_agent_milk_plan_result_emits_bounded_event_without_private_content() -> None:
+def test_agent_plan_update_emits_bounded_event_without_private_content() -> None:
     plans_service = RecordingPlansDomainService()
     service = AgentPlansActionService(
         plans_service=plans_service,
         idempotency_service=InMemoryIdempotencyService(),
     )
-    raw_command = _action_command("milk_create")
+    raw_command = _action_command("plan_update")
     raw_command["payload"]["title"] = "private plan title"
-    raw_command["payload"]["summary"] = "private supply and health context"
+    raw_command["payload"]["summary"] = "private plan context"
     command = AgentPlansActionRequest.model_validate(raw_command)
 
     result = asyncio.run(
@@ -258,10 +327,8 @@ def test_agent_milk_plan_result_emits_bounded_event_without_private_content() ->
 
     event = result.application_events[0]
     assert event["type"] == "milk_plan.changed"
-    assert event["payload"]["affected_dates"] == [
-        "2026-07-28",
-        "2026-07-29",
-    ]
+    assert event["payload"]["operation"] == "updated"
+    assert event["payload"]["version"] == 2
     assert "private" not in str(event)
 
 
@@ -322,65 +389,11 @@ def test_agent_plans_action_rejects_same_action_bound_to_another_run() -> None:
     assert exc_info.value.code == "idempotency_conflict"
 
 
-def test_agent_milk_plan_apply_rejects_expired_analysis_before_business_write() -> None:
-    plans_service = RecordingPlansDomainService()
-    service = AgentPlansActionService(
-        plans_service=plans_service,
-        idempotency_service=InMemoryIdempotencyService(),
-    )
-    raw_command = _action_command("milk_create")
-    raw_command["expires_at"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=1)
-    ).isoformat()
-    command = AgentPlansActionRequest.model_validate(raw_command)
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            service.apply_idempotent(
-                command=command,
-                idempotency_key=f"agent-action:{command.action_id}",
-                actor_service="agent-runtime",
-                request_id="",
-            )
-        )
-
-    assert exc_info.value.code == "milk_analysis_expired_before_plan"
-    assert plans_service.calls == []
-
-
-def test_agent_milk_plan_apply_maps_schedule_validation_to_contract_error() -> None:
-    plans_service = RecordingPlansDomainService()
-    service = AgentPlansActionService(
-        plans_service=plans_service,
-        idempotency_service=InMemoryIdempotencyService(),
-    )
-    raw_command = _action_command("milk_create")
-    raw_command["payload"]["payload"]["tasks"][0].update(
-        {
-            "date": "2026-07-30",
-            "day": 1,
-        }
-    )
-    command = AgentPlansActionRequest.model_validate(raw_command)
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            service.apply_idempotent(
-                command=command,
-                idempotency_key=f"agent-action:{command.action_id}",
-                actor_service="agent-runtime",
-                request_id="",
-            )
-        )
-
-    assert exc_info.value.code == "invalid_milk_plan_schedule"
-    assert plans_service.calls == []
-
-
 class RecordingPlansReadService:
     def __init__(self) -> None:
         self.list_plans_kwargs: dict[str, object] = {}
         self.list_tasks_kwargs: dict[str, object] = {}
+        self.get_plan_kwargs: dict[str, object] = {}
         self.plan = _plan()
         self.task = _task(plan_id=self.plan.id)
 
@@ -391,6 +404,34 @@ class RecordingPlansReadService:
     async def list_tasks(self, **kwargs: object) -> list[object]:
         self.list_tasks_kwargs = kwargs
         return [self.task]
+
+    async def get_plan(self, **kwargs: object) -> object:
+        self.get_plan_kwargs = kwargs
+        return self.plan
+
+
+class RecordingScheduleTimelineService:
+    def __init__(self) -> None:
+        self.kwargs: dict[str, object] = {}
+
+    async def read(self, **kwargs: object) -> dict[str, object]:
+        self.kwargs = kwargs
+        return {
+            "as_of_date": kwargs["as_of_date"],
+            "timezone": kwargs["timezone_name"],
+            "start_date": kwargs["start_date"],
+            "end_date": kwargs["end_date"],
+            "domains": list(kwargs["domains"]),  # type: ignore[arg-type]
+            "plans": [],
+            "items": [],
+            "counts": {
+                "pending": 0,
+                "completed": 0,
+                "skipped": 0,
+                "recorded": 0,
+            },
+            "truncated": False,
+        }
 
 
 class RecordingAgentPlansActionService:
@@ -479,18 +520,20 @@ class RecordingPlansDomainService:
             setattr(self.task, field, value)
         return self.task
 
+    async def update_plan_metadata(self, **kwargs: Any) -> object:
+        self.calls.append("update_plan_metadata")
+        self.plan.id = kwargs["plan_id"]
+        self.plan.owner_user_id = kwargs["owner_user_id"]
+        for field, value in kwargs["updates"].items():
+            setattr(self.plan, field, value)
+        self.plan.version = kwargs["expected_version"] + 1
+        return self.plan
+
     async def delete_task(self, **_kwargs: Any) -> None:
         self.calls.append("delete_task")
 
     async def delete_plan(self, **_kwargs: Any) -> None:
         self.calls.append("delete_plan")
-
-    async def replace_future_milk_plan_tasks(self, **kwargs: Any) -> list[object]:
-        self.calls.append("replace_future_milk_plan_tasks")
-        return [
-            _task(owner_user_id=kwargs["owner_user_id"], task_id=task_id)
-            for task_id in kwargs["expected_task_ids"]
-        ]
 
     async def reschedule_milk_tasks(self, **kwargs: Any) -> list[object]:
         self.calls.append("reschedule_milk_tasks")
@@ -565,6 +608,8 @@ def _plan(
         status="active",
         source="agent_action",
         payload={"start_date": "2026-07-28", "days": 2},
+        starts_on=date(2026, 7, 28),
+        ends_on=date(2026, 7, 29),
         version=1,
         created_at=now,
         updated_at=now,
@@ -664,6 +709,16 @@ def _action_command(kind: str) -> dict[str, Any]:
             "action_type": "plans.plan.delete",
             "payload": {"plan_id": str(plan_id), "reason": "用户明确要求删除"},
         },
+        "plan_update": {
+            **common,
+            "action_type": "plans.plan.update",
+            "payload": {
+                "plan_id": str(plan_id),
+                "expected_version": 1,
+                "title": "调整后的计划",
+                "summary": "调整后的计划摘要",
+            },
+        },
         "pregnancy_create": {
             **common,
             "action_type": "pregnancy.plan.create",
@@ -673,33 +728,6 @@ def _action_command(kind: str) -> dict[str, Any]:
                 "payload": {
                     "plan_context": {"current_week": "28周"},
                     "card": {"card_json": {"title": "孕期计划"}},
-                },
-            },
-        },
-        "milk_create": {
-            **common,
-            "action_type": "plans.milk_plan.create",
-            "expires_at": (
-                datetime.now(timezone.utc) + timedelta(hours=1)
-            ).isoformat(),
-            "payload": {
-                "title": "2 天稳奶计划",
-                "summary": "沿用近期可执行节奏。",
-                "calendar_write_strategy": "append",
-                "expected_replaced_task_ids": [],
-                "payload": {
-                    "direction": "maintain",
-                    "analysis_context_fingerprint": "fingerprint",
-                    "analysis_workflow_state_id": str(uuid4()),
-                    "start_date": "2026-07-28",
-                    "days": 2,
-                    "tasks": [
-                        {
-                            "title": "稳奶吸奶",
-                            "time": "08:00",
-                            "task_type": "pumping",
-                        }
-                    ],
                 },
             },
         },

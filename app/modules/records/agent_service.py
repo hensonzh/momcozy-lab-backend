@@ -13,7 +13,6 @@ from .agent_contracts import (
     AgentLactationRecordApplyPayload,
     AgentMilkAnalysisSnapshot,
 )
-from .lactation_timeline import LactationTimelineService
 from .milk_analysis_schema import (
     MilkAnalysisCounts,
     MilkAnalysisFeedingRecord,
@@ -52,32 +51,11 @@ class AgentLactationReadService:
     def __init__(
         self,
         *,
-        timeline_service: LactationTimelineService,
         records_service: Any,
         profile_service: Any,
     ) -> None:
-        self.timeline_service = timeline_service
         self.records_service = records_service
         self.profile_service = profile_service
-
-    async def read_timeline(
-        self,
-        *,
-        owner_user_id: UUID,
-        as_of_date: date,
-        start_date: date,
-        end_date: date,
-        timezone_name: str,
-        limit: int,
-    ) -> Any:
-        return await self.timeline_service.read(
-            owner_user_id=owner_user_id,
-            as_of_date=as_of_date,
-            start_date=start_date,
-            end_date=end_date,
-            timezone_name=timezone_name,
-            limit=limit,
-        )
 
     async def read_milk_analysis_snapshot(
         self,

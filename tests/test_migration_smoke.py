@@ -8,6 +8,7 @@ from alembic.script import ScriptDirectory
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOYED_PRODUCT_REVISION = "20260723_0047"
 EXTRACTION_REVISION = "20260727_0048"
+PRODUCT_HEAD_REVISION = "20260727_0049"
 EXTRACTION_MIGRATION = (
     ROOT
     / "migrations"
@@ -22,12 +23,15 @@ def test_alembic_preserves_deployed_product_revision_chain() -> None:
     )
 
     deployed_revision = script.get_revision(DEPLOYED_PRODUCT_REVISION)
-    head_revision = script.get_revision(EXTRACTION_REVISION)
+    extraction_revision = script.get_revision(EXTRACTION_REVISION)
+    head_revision = script.get_revision(PRODUCT_HEAD_REVISION)
 
     assert deployed_revision is not None
+    assert extraction_revision is not None
     assert head_revision is not None
-    assert head_revision.down_revision == DEPLOYED_PRODUCT_REVISION
-    assert script.get_current_head() == EXTRACTION_REVISION
+    assert extraction_revision.down_revision == DEPLOYED_PRODUCT_REVISION
+    assert head_revision.down_revision == EXTRACTION_REVISION
+    assert script.get_current_head() == PRODUCT_HEAD_REVISION
     assert not (
         ROOT
         / "migrations"

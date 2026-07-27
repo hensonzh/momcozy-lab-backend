@@ -151,14 +151,15 @@ The independent Runtime calls only the Product internal API:
 
 - `GET /v1/internal/agent/profile`
 - `POST /v1/internal/agent/actions/profile.update/apply`
-- `GET /v1/internal/agent/lactation/timeline`
 - `GET /v1/internal/agent/lactation/milk-analysis-snapshot`
 - `POST /v1/internal/agent/actions/lactation.record/apply`
 - `GET /v1/internal/agent/plans/current`
 - `GET /v1/internal/agent/plans/calendar`
+- `GET /v1/internal/agent/plans/{plan_id}`
+- `GET /v1/internal/agent/schedule-timeline`
 - `POST /v1/internal/agent/actions/plans/apply`
-- `GET /v1/internal/agent/pregnancy-diary`
-- `POST /v1/internal/agent/actions/pregnancy-diary.entry/apply`
+- `GET /v1/internal/agent/diary`
+- `POST /v1/internal/agent/actions/diary.entry/apply`
 - `POST /v1/internal/agent/files/resolve`
 - `POST /v1/internal/agent/actions/notifications.milk_reminder/apply`
 - `POST /v1/internal/agent/actions/support.ticket/apply`

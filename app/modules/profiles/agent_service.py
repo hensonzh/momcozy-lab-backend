@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from ...core.errors import ApiError
@@ -12,7 +12,14 @@ from .service import ProfileService
 
 
 AGENT_PROFILE_UPDATE_ACTION_TYPE = "profile.update"
+AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE = (
+    "profile.current_infants.replace"
+)
 AGENT_PROFILE_UPDATE_IDEMPOTENCY_SCOPE = "internal.agent.profile.update"
+AgentProfileActionType = Literal[
+    "profile.update",
+    "profile.current_infants.replace",
+]
 
 _PROFILE_UPDATE_FIELDS = {
     "age",
@@ -49,6 +56,8 @@ class _PreparedProfileUpdate:
     infant_updates: list[dict[str, Any]]
     current_infants_supplied: bool
     current_infants: list[dict[str, Any]]
+    expected_current_infants: list[dict[str, Any]] | None
+    reference_date: date
 
     def details(self) -> dict[str, Any]:
         details: dict[str, Any] = {}
@@ -87,10 +96,14 @@ class AgentProfileUpdateService:
         self,
         *,
         owner_user_id: UUID,
+        action_type: AgentProfileActionType,
         payload: dict[str, Any],
         request_id: str,
     ) -> AgentProfileUpdateResult:
-        prepared = _prepare_profile_update(payload)
+        prepared = _prepare_profile_update(
+            payload,
+            action_type=action_type,
+        )
         return await self._apply_prepared(
             owner_user_id=owner_user_id,
             prepared=prepared,
@@ -101,6 +114,7 @@ class AgentProfileUpdateService:
         self,
         *,
         owner_user_id: UUID,
+        action_type: AgentProfileActionType,
         payload: dict[str, Any],
         idempotency_key: str,
         action_id: UUID,
@@ -127,7 +141,10 @@ class AgentProfileUpdateService:
                 message="Service actor is required.",
                 status=422,
             )
-        prepared = _prepare_profile_update(payload)
+        prepared = _prepare_profile_update(
+            payload,
+            action_type=action_type,
+        )
         decision = await self.idempotency_service.reserve(
             actor_user_id=owner_user_id,
             scope=AGENT_PROFILE_UPDATE_IDEMPOTENCY_SCOPE,
@@ -141,7 +158,7 @@ class AgentProfileUpdateService:
                     },
                     "action_id": str(action_id),
                     "run_id": str(run_id),
-                    "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+                    "action_type": action_type,
                     "payload": payload,
                 }
             ),
@@ -176,7 +193,12 @@ class AgentProfileUpdateService:
                 actor_user_id=None,
                 actor_type="service",
                 actor_service=normalized_actor_service,
-                action="profiles.update",
+                action=(
+                    "profiles.current_infants.replace"
+                    if action_type
+                    == AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE
+                    else "profiles.update"
+                ),
                 resource_type=result.resource_type,
                 resource_id=result.resource_id,
                 request_id=request_id,
@@ -185,7 +207,7 @@ class AgentProfileUpdateService:
                     "owner_user_id": str(owner_user_id),
                     "action_id": str(action_id),
                     "run_id": str(run_id),
-                    "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+                    "action_type": action_type,
                 },
             )
         await self.idempotency_service.mark_completed(
@@ -214,6 +236,8 @@ class AgentProfileUpdateService:
                 owner_user_id=owner_user_id,
                 values=lactation_values,
                 anticipated_infant_birth_dates=anticipated_birth_dates,
+                expected_current_infants=prepared.expected_current_infants,
+                reference_date=prepared.reference_date,
                 request_id=request_id,
             )
         if prepared.user_values or prepared.infant_updates:
@@ -221,6 +245,7 @@ class AgentProfileUpdateService:
                 user_id=owner_user_id,
                 user_values=prepared.user_values,
                 infant_updates=prepared.infant_updates,
+                reference_date=prepared.reference_date,
                 request_id=request_id,
             )
         return AgentProfileUpdateResult(
@@ -230,9 +255,20 @@ class AgentProfileUpdateService:
         )
 
 
-def _prepare_profile_update(payload: dict[str, Any]) -> _PreparedProfileUpdate:
-    if set(payload) - {"mother", "infants", "current_infants"}:
+def _prepare_profile_update(
+    payload: dict[str, Any],
+    *,
+    action_type: AgentProfileActionType,
+) -> _PreparedProfileUpdate:
+    if set(payload) - {
+        "mother",
+        "infants",
+        "current_infants",
+        "expected_current_infants",
+        "reference_date",
+    }:
         raise _invalid("unsupported_profile_updates")
+    reference_date = _reference_date(payload.get("reference_date"))
 
     raw_mother_values = payload.get("mother")
     if raw_mother_values is not None and not isinstance(raw_mother_values, dict):
@@ -262,6 +298,27 @@ def _prepare_profile_update(payload: dict[str, Any]) -> _PreparedProfileUpdate:
     infant_updates = _infant_updates(payload.get("infants"))
     current_infants_supplied = "current_infants" in payload
     current_infants = _current_infant_links(payload["current_infants"]) if current_infants_supplied else []
+    expected_current_infants_supplied = (
+        "expected_current_infants" in payload
+    )
+    expected_current_infants = (
+        _current_infant_links(payload["expected_current_infants"])
+        if expected_current_infants_supplied
+        else None
+    )
+    if action_type == AGENT_PROFILE_UPDATE_ACTION_TYPE:
+        if current_infants_supplied or expected_current_infants_supplied:
+            raise _invalid("unexpected_current_infant_relationships")
+    elif (
+        action_type
+        == AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE
+    ):
+        if user_values or maternal_values or infant_updates:
+            raise _invalid("unexpected_profile_fields")
+        if not current_infants_supplied or not expected_current_infants_supplied:
+            raise _invalid("missing_current_infant_precondition")
+    else:
+        raise _invalid("unsupported_profile_action")
     if not user_values and not maternal_values and not infant_updates and not current_infants_supplied:
         raise _invalid("missing_profile_updates")
     return _PreparedProfileUpdate(
@@ -270,6 +327,8 @@ def _prepare_profile_update(payload: dict[str, Any]) -> _PreparedProfileUpdate:
         infant_updates=infant_updates,
         current_infants_supplied=current_infants_supplied,
         current_infants=current_infants,
+        expected_current_infants=expected_current_infants,
+        reference_date=reference_date,
     )
 
 
@@ -343,6 +402,17 @@ def _date_value(*, field: str, value: Any, date_field: str) -> Any:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise _invalid(f"invalid_{date_field}") from exc
+
+
+def _reference_date(value: Any) -> date:
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        raise _invalid("invalid_reference_date")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise _invalid("invalid_reference_date") from exc
 
 
 def _invalid(code: str) -> ApiError:

@@ -8,7 +8,10 @@ def test_plans_are_owner_scoped_and_json_backed() -> None:
 
     assert "owner_user_id" in table.columns
     assert "payload_json" in table.columns
+    assert "starts_on" in table.columns
+    assert "ends_on" in table.columns
     assert "ix_plans_owner_status_updated" in index_names
+    assert "uq_plans_owner_active_pregnancy" in index_names
 
 
 def test_plan_tasks_are_owner_and_date_scoped() -> None:

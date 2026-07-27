@@ -102,11 +102,12 @@ Product tables. It calls the following Product-owned internal endpoints:
 ### Read
 
 - `GET /v1/internal/agent/profile`
-- `GET /v1/internal/agent/lactation/timeline`
 - `GET /v1/internal/agent/lactation/milk-analysis-snapshot`
 - `GET /v1/internal/agent/plans/current`
 - `GET /v1/internal/agent/plans/calendar`
-- `GET /v1/internal/agent/pregnancy-diary`
+- `GET /v1/internal/agent/plans/{plan_id}`
+- `GET /v1/internal/agent/schedule-timeline`
+- `GET /v1/internal/agent/diary`
 
 Read calls require `X-Service-Key: <runtime-service-key>` and an explicit
 `actor_user_id`. Product applies owner scope before returning a bounded domain
@@ -126,7 +127,7 @@ as a cache key.
 - `POST /v1/internal/agent/actions/profile.update/apply`
 - `POST /v1/internal/agent/actions/lactation.record/apply`
 - `POST /v1/internal/agent/actions/plans/apply`
-- `POST /v1/internal/agent/actions/pregnancy-diary.entry/apply`
+- `POST /v1/internal/agent/actions/diary.entry/apply`
 - `POST /v1/internal/agent/actions/notifications.milk_reminder/apply`
 - `POST /v1/internal/agent/actions/support.ticket/apply`
 

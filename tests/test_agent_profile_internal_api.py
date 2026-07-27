@@ -17,6 +17,7 @@ from app.modules.profiles.agent_router import (
     get_agent_profile_update_service,
 )
 from app.modules.profiles.agent_service import (
+    AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE,
     AGENT_PROFILE_UPDATE_ACTION_TYPE,
     AgentProfileUpdateService,
 )
@@ -113,7 +114,11 @@ def test_agent_profile_update_forwards_action_identity_and_returns_stable_result
             "actor_user_id": str(actor_user_id),
             "action_id": str(action_id),
             "run_id": str(run_id),
-            "payload": {"mother": {"preferred_name": "Mai"}},
+            "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+            "payload": {
+                "mother": {"preferred_name": "Mai"},
+                "reference_date": "2026-07-27",
+            },
         },
     )
 
@@ -132,7 +137,11 @@ def test_agent_profile_update_forwards_action_identity_and_returns_stable_result
     }
     assert service.kwargs == {
         "owner_user_id": actor_user_id,
-        "payload": {"mother": {"preferred_name": "Mai"}},
+        "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+        "payload": {
+            "mother": {"preferred_name": "Mai"},
+            "reference_date": "2026-07-27",
+        },
         "idempotency_key": f"agent-action:{action_id}",
         "action_id": action_id,
         "run_id": run_id,
@@ -155,11 +164,15 @@ def test_agent_profile_update_service_replays_without_reapplying_business_write(
         idempotency_service=idempotency_service,
         audit_service=audit_service,
     )
-    payload = {"mother": {"preferred_name": "Mai"}}
+    payload = {
+        "mother": {"preferred_name": "Mai"},
+        "reference_date": "2026-07-27",
+    }
 
     first = asyncio.run(
         service.apply_idempotent(
             owner_user_id=actor_user_id,
+            action_type=AGENT_PROFILE_UPDATE_ACTION_TYPE,
             payload=payload,
             idempotency_key=f"agent-action:{action_id}",
             action_id=action_id,
@@ -171,6 +184,7 @@ def test_agent_profile_update_service_replays_without_reapplying_business_write(
     replay = asyncio.run(
         service.apply_idempotent(
             owner_user_id=actor_user_id,
+            action_type=AGENT_PROFILE_UPDATE_ACTION_TYPE,
             payload=payload,
             idempotency_key=f"agent-action:{action_id}",
             action_id=action_id,
@@ -215,6 +229,113 @@ def test_agent_profile_update_service_replays_without_reapplying_business_write(
     }
 
 
+def test_agent_profile_current_infants_replace_forwards_trusted_cas_precondition() -> None:
+    actor_user_id = uuid4()
+    action_id = uuid4()
+    run_id = uuid4()
+    previous_infant_id = uuid4()
+    next_infant_id = uuid4()
+    profile_service = RecordingProfileService()
+    lactation_service = RecordingLactationContextService()
+    audit_service = RecordingAuditService()
+    service = AgentProfileUpdateService(
+        profile_service=profile_service,
+        lactation_context_service=lactation_service,
+        idempotency_service=InMemoryIdempotencyService(),
+        audit_service=audit_service,
+    )
+
+    result = asyncio.run(
+        service.apply_idempotent(
+            owner_user_id=actor_user_id,
+            action_type=(
+                AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE
+            ),
+            payload={
+                "current_infants": [
+                    {
+                        "infant_id": str(next_infant_id),
+                        "birth_order": 1,
+                    }
+                ],
+                "expected_current_infants": [
+                    {
+                        "infant_id": str(previous_infant_id),
+                        "birth_order": 1,
+                    }
+                ],
+                "reference_date": "2026-07-27",
+            },
+            idempotency_key=f"agent-action:{action_id}",
+            action_id=action_id,
+            run_id=run_id,
+            actor_service="agent-runtime",
+            request_id="req-replace",
+        )
+    )
+
+    assert result.details == {"current_infants_updated": True}
+    assert profile_service.calls == 0
+    assert lactation_service.calls == 1
+    assert lactation_service.last_kwargs == {
+        "owner_user_id": actor_user_id,
+        "values": {
+            "current_infants": [
+                {
+                    "infant_id": next_infant_id,
+                    "birth_order": 1,
+                }
+            ]
+        },
+        "anticipated_infant_birth_dates": {},
+        "expected_current_infants": [
+            {
+                "infant_id": previous_infant_id,
+                "birth_order": 1,
+            }
+        ],
+        "reference_date": date(2026, 7, 27),
+        "request_id": "req-replace",
+    }
+    assert audit_service.calls[0]["action"] == (
+        "profiles.current_infants.replace"
+    )
+    assert audit_service.calls[0]["details"]["action_type"] == (
+        AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE
+    )
+
+
+def test_agent_profile_relationship_replace_requires_expected_snapshot() -> None:
+    actor_user_id = uuid4()
+    action_id = uuid4()
+    app = _app()
+    app.dependency_overrides[get_agent_profile_update_service] = (
+        lambda: FakeAgentProfileUpdateService()
+    )
+
+    response = TestClient(app).post(
+        "/v1/internal/agent/actions/profile.update/apply",
+        headers={
+            "X-Service-Key": SERVICE_KEY,
+            "Idempotency-Key": f"agent-action:{action_id}",
+        },
+        json={
+            "actor_user_id": str(actor_user_id),
+            "action_id": str(action_id),
+            "run_id": str(uuid4()),
+            "action_type": (
+                AGENT_PROFILE_CURRENT_INFANTS_REPLACE_ACTION_TYPE
+            ),
+            "payload": {
+                "current_infants": [],
+                "reference_date": "2026-07-27",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_agent_profile_update_service_rejects_same_action_from_different_run() -> None:
     actor_user_id = uuid4()
     action_id = uuid4()
@@ -225,7 +346,11 @@ def test_agent_profile_update_service_rejects_same_action_from_different_run() -
     )
     kwargs = {
         "owner_user_id": actor_user_id,
-        "payload": {"mother": {"preferred_name": "Mai"}},
+        "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+        "payload": {
+            "mother": {"preferred_name": "Mai"},
+            "reference_date": "2026-07-27",
+        },
         "idempotency_key": f"agent-action:{action_id}",
         "action_id": action_id,
         "actor_service": "agent-runtime",
@@ -251,7 +376,11 @@ def test_agent_profile_update_service_rejects_key_for_different_action() -> None
         asyncio.run(
             service.apply_idempotent(
                 owner_user_id=uuid4(),
-                payload={"mother": {"preferred_name": "Mai"}},
+                action_type=AGENT_PROFILE_UPDATE_ACTION_TYPE,
+                payload={
+                    "mother": {"preferred_name": "Mai"},
+                    "reference_date": "2026-07-27",
+                },
                 idempotency_key=f"agent-action:{uuid4()}",
                 action_id=uuid4(),
                 run_id=uuid4(),
@@ -274,7 +403,11 @@ def test_agent_profile_update_service_rejects_replay_bound_to_other_action() -> 
     )
     kwargs = {
         "owner_user_id": actor_user_id,
-        "payload": {"mother": {"preferred_name": "Mai"}},
+        "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+        "payload": {
+            "mother": {"preferred_name": "Mai"},
+            "reference_date": "2026-07-27",
+        },
         "idempotency_key": f"agent-action:{action_id}",
         "action_id": action_id,
         "run_id": uuid4(),
@@ -313,7 +446,11 @@ def _update_command(*, actor_user_id: UUID, action_id: UUID | None = None) -> di
         "actor_user_id": str(actor_user_id),
         "action_id": str(action_id or uuid4()),
         "run_id": str(uuid4()),
-        "payload": {"mother": {"preferred_name": "Mai"}},
+        "action_type": AGENT_PROFILE_UPDATE_ACTION_TYPE,
+        "payload": {
+            "mother": {"preferred_name": "Mai"},
+            "reference_date": "2026-07-27",
+        },
     }
 
 
@@ -368,9 +505,11 @@ class RecordingProfileService:
 class RecordingLactationContextService:
     def __init__(self) -> None:
         self.calls = 0
+        self.last_kwargs: dict = {}
 
-    async def update_maternal_profile(self, **_kwargs):
+    async def update_maternal_profile(self, **kwargs):
         self.calls += 1
+        self.last_kwargs = kwargs
         return None, []
 
 

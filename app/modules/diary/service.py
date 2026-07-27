@@ -8,8 +8,11 @@ from sqlalchemy.exc import IntegrityError
 
 from ...core.errors import ApiError
 from ..audit import AuditService
-from .models import PregnancyDiaryEntry
+from .models import DiaryEntry
 from .repository import DiaryEntryMutation, DiaryRepository
+
+
+_ENTRY_VALUE_FIELDS = frozenset({"content", "attributes", "attachments"})
 
 
 class DiaryService:
@@ -17,8 +20,16 @@ class DiaryService:
         self.repository = repository
         self.audit_service = audit_service
 
-    async def get_entry(self, *, owner_user_id: UUID, entry_date: date) -> PregnancyDiaryEntry:
-        entry = await self.repository.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date)
+    async def get_entry(
+        self,
+        *,
+        owner_user_id: UUID,
+        entry_date: date,
+    ) -> DiaryEntry:
+        entry = await self.repository.get_entry_by_date(
+            owner_user_id=owner_user_id,
+            entry_date=entry_date,
+        )
         if entry is None:
             raise ApiError(code="not_found", message="Diary entry not found.", status=404)
         return entry
@@ -30,7 +41,7 @@ class DiaryService:
         start_date: date | None = None,
         end_date: date | None = None,
         limit: int = 30,
-    ) -> list[PregnancyDiaryEntry]:
+    ) -> list[DiaryEntry]:
         if limit < 1 or limit > 100:
             raise ApiError(code="validation_failed", message="limit must be between 1 and 100.", status=422)
         return await self.repository.list_entries(
@@ -47,17 +58,29 @@ class DiaryService:
         entry_date: date,
         values: dict[str, Any],
         request_id: str = "",
-    ) -> PregnancyDiaryEntry:
+    ) -> DiaryEntry:
         _require_values(values)
         try:
-            entry = await self.repository.create_entry(owner_user_id=owner_user_id, entry_date=entry_date, values=values)
+            entry = await self.repository.create_entry(
+                owner_user_id=owner_user_id,
+                entry_date=entry_date,
+                values=values,
+            )
         except IntegrityError as exc:
-            raise ApiError(code="conflict", message="Diary entry already exists for this date.", status=409) from exc
+            raise ApiError(
+                code="conflict",
+                message="Diary entry already exists for this date.",
+                status=409,
+            ) from exc
         if entry is None:
-            raise ApiError(code="conflict", message="Diary entry already exists for this date.", status=409)
+            raise ApiError(
+                code="conflict",
+                message="Diary entry already exists for this date.",
+                status=409,
+            )
         await self._audit(
             owner_user_id=owner_user_id,
-            action="pregnancy_diary.entry.create",
+            action="diary.entry.create",
             resource_id=str(entry.id),
             request_id=request_id,
         )
@@ -70,7 +93,7 @@ class DiaryService:
         entry_date: date,
         values: dict[str, Any],
         request_id: str = "",
-    ) -> PregnancyDiaryEntry:
+    ) -> DiaryEntry:
         mutation = await self.update_entry_with_status(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
@@ -111,7 +134,7 @@ class DiaryService:
         if mutation.changed:
             await self._audit(
                 owner_user_id=owner_user_id,
-                action="pregnancy_diary.entry.update",
+                action="diary.entry.update",
                 resource_id=str(mutation.entry.id),
                 request_id=request_id,
             )
@@ -123,7 +146,7 @@ class DiaryService:
         owner_user_id: UUID,
         entry_date: date,
         request_id: str = "",
-    ) -> PregnancyDiaryEntry:
+    ) -> DiaryEntry:
         deleted = await self.repository.soft_delete_entry(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
@@ -133,7 +156,7 @@ class DiaryService:
             raise ApiError(code="not_found", message="Diary entry not found.", status=404)
         await self._audit(
             owner_user_id=owner_user_id,
-            action="pregnancy_diary.entry.delete",
+            action="diary.entry.delete",
             resource_id=str(deleted.id),
             request_id=request_id,
         )
@@ -144,7 +167,7 @@ class DiaryService:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
                 action=action,
-                resource_type="pregnancy_diary_entry",
+                resource_type="diary_entry",
                 resource_id=resource_id,
                 request_id=request_id,
             )
@@ -153,3 +176,14 @@ class DiaryService:
 def _require_values(values: dict[str, Any]) -> None:
     if not values:
         raise ApiError(code="validation_failed", message="At least one diary field is required.", status=422)
+    unsupported = set(values) - _ENTRY_VALUE_FIELDS
+    if unsupported:
+        raise ApiError(
+            code="validation_failed",
+            message=f"Unsupported diary fields: {', '.join(sorted(unsupported))}.",
+            status=422,
+        )
+    if "attributes" in values and not isinstance(values["attributes"], dict):
+        raise ApiError(code="validation_failed", message="Diary attributes must be an object.", status=422)
+    if "attachments" in values and not isinstance(values["attachments"], list):
+        raise ApiError(code="validation_failed", message="Diary attachments must be a list.", status=422)

@@ -56,6 +56,47 @@ class RecordsRepository:
         await self.session.flush()
         return True
 
+    async def restore_plan_task_if_unrecorded(
+        self,
+        *,
+        plan_task_id: UUID,
+        owner_user_id: UUID,
+    ) -> bool:
+        task_statement = select(PlanTask).where(
+            PlanTask.id == plan_task_id,
+            PlanTask.owner_user_id == owner_user_id,
+            PlanTask.deleted_at.is_(None),
+        ).with_for_update()
+        task = await self.session.scalar(task_statement)
+        if task is None or task.status != "completed":
+            return False
+        feeding_id = await self.session.scalar(
+            select(FeedingRecord.id)
+            .where(
+                FeedingRecord.plan_task_id == plan_task_id,
+                FeedingRecord.owner_user_id == owner_user_id,
+                FeedingRecord.status == "active",
+                FeedingRecord.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        pumping_id = await self.session.scalar(
+            select(PumpingRecord.id)
+            .where(
+                PumpingRecord.plan_task_id == plan_task_id,
+                PumpingRecord.owner_user_id == owner_user_id,
+                PumpingRecord.status == "active",
+                PumpingRecord.deleted_at.is_(None),
+            )
+            .limit(1)
+        )
+        if feeding_id is not None or pumping_id is not None:
+            return False
+        task.status = "pending"
+        task.completed_at = None
+        await self.session.flush()
+        return True
+
     async def create_feeding(
         self,
         *,

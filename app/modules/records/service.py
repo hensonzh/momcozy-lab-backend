@@ -196,6 +196,11 @@ class RecordsService:
         )
         if deleted is None:
             raise ApiError(code="not_found", message="Feeding record not found.", status=404)
+        await self._restore_linked_plan_task_after_record_delete(
+            plan_task_id=deleted.plan_task_id,
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+        )
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
@@ -338,6 +343,28 @@ class RecordsService:
             request_id=request_id,
         )
 
+    async def _restore_linked_plan_task_after_record_delete(
+        self,
+        *,
+        plan_task_id: UUID | None,
+        owner_user_id: UUID,
+        request_id: str,
+    ) -> None:
+        if plan_task_id is None:
+            return
+        restored = await self.repository.restore_plan_task_if_unrecorded(
+            plan_task_id=plan_task_id,
+            owner_user_id=owner_user_id,
+        )
+        if restored and self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="plans.tasks.restore_from_record_delete",
+                resource_type="plan_task",
+                resource_id=str(plan_task_id),
+                request_id=request_id,
+            )
+
     async def list_pumpings(
         self,
         *,
@@ -445,6 +472,11 @@ class RecordsService:
         )
         if deleted is None:
             raise ApiError(code="not_found", message="Pumping record not found.", status=404)
+        await self._restore_linked_plan_task_after_record_delete(
+            plan_task_id=deleted.plan_task_id,
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+        )
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,

@@ -9,26 +9,19 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import PregnancyDiaryEntry
+from .models import DiaryEntry
 
 
 _ENTRY_DEFAULTS: dict[str, Any] = {
-    "gestational_week": "",
-    "mood": "",
-    "energy_level": "",
-    "sleep_summary": "",
-    "fetal_movement": "",
-    "symptom_tags": [],
-    "appointment_note": "",
-    "nutrition_note": "",
     "content": "",
+    "attributes": {},
     "attachments": [],
 }
 
 
 @dataclass(frozen=True)
 class DiaryEntryMutation:
-    entry: PregnancyDiaryEntry
+    entry: DiaryEntry
     changed: bool
 
 
@@ -43,17 +36,17 @@ class DiaryRepository:
         entry_date: date,
         include_deleted: bool = False,
         for_update: bool = False,
-    ) -> PregnancyDiaryEntry | None:
+    ) -> DiaryEntry | None:
         conditions = [
-            PregnancyDiaryEntry.owner_user_id == owner_user_id,
-            PregnancyDiaryEntry.entry_date == entry_date,
+            DiaryEntry.owner_user_id == owner_user_id,
+            DiaryEntry.entry_date == entry_date,
         ]
         if not include_deleted:
-            conditions.append(PregnancyDiaryEntry.deleted_at.is_(None))
-        statement = select(PregnancyDiaryEntry).where(*conditions)
+            conditions.append(DiaryEntry.deleted_at.is_(None))
+        statement = select(DiaryEntry).where(*conditions)
         if for_update:
             statement = statement.with_for_update()
-        return cast(PregnancyDiaryEntry | None, await self.session.scalar(statement))
+        return cast(DiaryEntry | None, await self.session.scalar(statement))
 
     async def list_entries(
         self,
@@ -62,17 +55,17 @@ class DiaryRepository:
         start_date: date | None,
         end_date: date | None,
         limit: int,
-    ) -> list[PregnancyDiaryEntry]:
+    ) -> list[DiaryEntry]:
         conditions = [
-            PregnancyDiaryEntry.owner_user_id == owner_user_id,
-            PregnancyDiaryEntry.status == "active",
-            PregnancyDiaryEntry.deleted_at.is_(None),
+            DiaryEntry.owner_user_id == owner_user_id,
+            DiaryEntry.status == "active",
+            DiaryEntry.deleted_at.is_(None),
         ]
         if start_date is not None:
-            conditions.append(PregnancyDiaryEntry.entry_date >= start_date)
+            conditions.append(DiaryEntry.entry_date >= start_date)
         if end_date is not None:
-            conditions.append(PregnancyDiaryEntry.entry_date <= end_date)
-        statement = select(PregnancyDiaryEntry).where(*conditions).order_by(PregnancyDiaryEntry.entry_date.desc()).limit(limit)
+            conditions.append(DiaryEntry.entry_date <= end_date)
+        statement = select(DiaryEntry).where(*conditions).order_by(DiaryEntry.entry_date.desc()).limit(limit)
         result = await self.session.scalars(statement)
         return list(result.all())
 
@@ -82,7 +75,7 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict[str, Any],
-    ) -> PregnancyDiaryEntry | None:
+    ) -> DiaryEntry | None:
         try:
             async with self.session.begin_nested():
                 entry = await self.get_entry_by_date(
@@ -92,13 +85,16 @@ class DiaryRepository:
                     for_update=True,
                 )
                 if entry is None:
-                    entry = PregnancyDiaryEntry(owner_user_id=owner_user_id, entry_date=entry_date)
+                    entry = DiaryEntry(
+                        owner_user_id=owner_user_id,
+                        entry_date=entry_date,
+                    )
                     self.session.add(entry)
                 elif entry.deleted_at is None:
                     return None
                 else:
                     for field, value in _ENTRY_DEFAULTS.items():
-                        setattr(entry, field, list(value) if isinstance(value, list) else value)
+                        setattr(entry, field, _copy_default(value))
                 entry.status = "active"
                 entry.deleted_at = None
                 for field, value in values.items():
@@ -115,7 +111,7 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         values: dict[str, Any],
-    ) -> PregnancyDiaryEntry | None:
+    ) -> DiaryEntry | None:
         mutation = await self.update_entry_with_status(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
@@ -130,13 +126,18 @@ class DiaryRepository:
         entry_date: date,
         values: dict[str, Any],
     ) -> DiaryEntryMutation | None:
-        entry = await self.get_entry_by_date(owner_user_id=owner_user_id, entry_date=entry_date, for_update=True)
+        entry = await self.get_entry_by_date(
+            owner_user_id=owner_user_id,
+            entry_date=entry_date,
+            for_update=True,
+        )
         if entry is None:
             return None
-        changed = any(getattr(entry, field) != value for field, value in values.items())
+        resolved_values = _merge_attribute_updates(entry=entry, values=values)
+        changed = any(getattr(entry, field) != value for field, value in resolved_values.items())
         if not changed:
             return DiaryEntryMutation(entry=entry, changed=False)
-        for field, value in values.items():
+        for field, value in resolved_values.items():
             setattr(entry, field, value)
         await self.session.flush()
         await self.session.refresh(entry, attribute_names=["updated_at"])
@@ -148,7 +149,7 @@ class DiaryRepository:
         owner_user_id: UUID,
         entry_date: date,
         deleted_at: datetime,
-    ) -> PregnancyDiaryEntry | None:
+    ) -> DiaryEntry | None:
         entry = await self.get_entry_by_date(
             owner_user_id=owner_user_id,
             entry_date=entry_date,
@@ -161,3 +162,20 @@ class DiaryRepository:
         await self.session.flush()
         await self.session.refresh(entry, attribute_names=["updated_at"])
         return entry
+
+
+def _copy_default(value: Any) -> Any:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, list):
+        return list(value)
+    return value
+
+
+def _merge_attribute_updates(*, entry: DiaryEntry, values: dict[str, Any]) -> dict[str, Any]:
+    resolved = dict(values)
+    if "attributes" in resolved:
+        attributes = dict(entry.attributes or {})
+        attributes.update(cast(dict[str, Any], resolved["attributes"]))
+        resolved["attributes"] = attributes
+    return resolved

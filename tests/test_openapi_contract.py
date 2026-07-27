@@ -103,16 +103,17 @@ def test_openapi_contains_runtime_to_product_internal_contracts_only() -> None:
         "/v1/internal/agent/actions/lactation.record/apply",
         "/v1/internal/agent/actions/notifications.milk_reminder/apply",
         "/v1/internal/agent/actions/plans/apply",
-        "/v1/internal/agent/actions/pregnancy-diary.entry/apply",
+        "/v1/internal/agent/actions/diary.entry/apply",
         "/v1/internal/agent/actions/profile.update/apply",
         "/v1/internal/agent/actions/support.ticket/apply",
+        "/v1/internal/agent/diary",
         "/v1/internal/agent/files/resolve",
         "/v1/internal/agent/lactation/milk-analysis-snapshot",
-        "/v1/internal/agent/lactation/timeline",
         "/v1/internal/agent/plans/calendar",
         "/v1/internal/agent/plans/current",
-        "/v1/internal/agent/pregnancy-diary",
+        "/v1/internal/agent/plans/{plan_id}",
         "/v1/internal/agent/profile",
+        "/v1/internal/agent/schedule-timeline",
     }
 
     assert expected <= set(paths)
@@ -170,7 +171,7 @@ def test_retryable_writes_declare_idempotency_header() -> None:
         ("post", "/v1/internal/agent/actions/lactation.record/apply"),
         ("post", "/v1/internal/agent/actions/notifications.milk_reminder/apply"),
         ("post", "/v1/internal/agent/actions/plans/apply"),
-        ("post", "/v1/internal/agent/actions/pregnancy-diary.entry/apply"),
+        ("post", "/v1/internal/agent/actions/diary.entry/apply"),
         ("post", "/v1/internal/agent/actions/profile.update/apply"),
         ("post", "/v1/internal/agent/actions/support.ticket/apply"),
     ]:

@@ -52,7 +52,7 @@ class AgentDiaryApplyResponse(BaseModel):
 
     status: Literal["applied"]
     action_id: UUID
-    resource_type: Literal["pregnancy_diary_entry"]
+    resource_type: Literal["diary_entry"]
     resource_id: str
     details: dict[str, Any] = Field(default_factory=dict)
     application_events: list[dict[str, Any]] = Field(default_factory=list)

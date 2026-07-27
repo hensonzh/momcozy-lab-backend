@@ -17,6 +17,8 @@ class PlanRead(BaseModel):
     source: str
     payload: dict[str, Any]
     version: int
+    starts_on: date | None = None
+    ends_on: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -32,7 +32,7 @@ router = SurfaceAPIRouter(
     tags=["internal-agent"],
     api_surface_metadata=api_surface(
         "internal_service_api",
-        owner="pregnancy-diary",
+        owner="diary",
         clients=["agent-runtime"],
     ),
 )
@@ -56,7 +56,7 @@ def get_agent_diary_write_service(
 
 
 @router.get(
-    "/pregnancy-diary",
+    "/diary",
     response_model=AgentDiaryReadResponse,
 )
 async def read_agent_diary(
@@ -108,7 +108,7 @@ async def read_agent_diary(
 
 
 @router.post(
-    "/actions/pregnancy-diary.entry/apply",
+    "/actions/diary.entry/apply",
     response_model=AgentDiaryApplyResponse,
 )
 async def apply_agent_diary_action(
@@ -142,7 +142,7 @@ async def apply_agent_diary_action(
     return AgentDiaryApplyResponse(
         status="applied",
         action_id=payload.action_id,
-        resource_type="pregnancy_diary_entry",
+        resource_type="diary_entry",
         resource_id=result.resource_id,
         details=result.details,
         application_events=list(result.application_events),
@@ -150,17 +150,11 @@ async def apply_agent_diary_action(
 
 
 def _entry_payload(entry: Any, *, include_content: bool) -> dict[str, Any]:
+    attributes = dict(entry.attributes or {})
     payload: dict[str, Any] = {
         "id": str(entry.id),
         "entry_date": entry.entry_date.isoformat(),
-        "gestational_week": str(entry.gestational_week or ""),
-        "mood": str(entry.mood or ""),
-        "energy_level": str(entry.energy_level or ""),
-        "sleep_summary": str(entry.sleep_summary or ""),
-        "fetal_movement": str(entry.fetal_movement or ""),
-        "symptom_tags": list(entry.symptom_tags or []),
-        "appointment_note": str(entry.appointment_note or ""),
-        "nutrition_note": str(entry.nutrition_note or ""),
+        "attributes": attributes,
         "status": str(entry.status or ""),
         "created_at": entry.created_at.isoformat(),
         "updated_at": entry.updated_at.isoformat(),

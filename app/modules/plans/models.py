@@ -17,6 +17,14 @@ class Plan(Base):
     __table_args__ = (
         Index("ix_plans_owner_status_updated", "owner_user_id", "status", "updated_at"),
         Index("ix_plans_owner_type", "owner_user_id", "plan_type"),
+        Index(
+            "uq_plans_owner_active_pregnancy",
+            "owner_user_id",
+            unique=True,
+            postgresql_where=text(
+                "plan_type = 'pregnancy' AND status = 'active' AND deleted_at IS NULL"
+            ),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -34,6 +42,8 @@ class Plan(Base):
         nullable=False,
     )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
+    starts_on: Mapped[date | None] = mapped_column(Date, default=None)
+    ends_on: Mapped[date | None] = mapped_column(Date, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
