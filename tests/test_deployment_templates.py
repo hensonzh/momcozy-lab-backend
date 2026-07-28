@@ -160,6 +160,7 @@ def test_environment_profiles_keep_product_runtime_boundary_only() -> None:
         names = _environment_names(env)
         assert "AGENT_RUNTIME_SERVICE_API_KEY=" in env
         assert "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS=" in env
+        assert "AGENT_FILE_URL_REUSE_TTL_SECONDS=" in env
         assert "OPENAI_API_KEY=" in env
         assert "VISION_OPENAI_MODEL=gpt-5.4-mini" in env
         for retired in RETIRED_RUNTIME_ENV_NAMES:

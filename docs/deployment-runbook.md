@@ -29,6 +29,7 @@ correlation values, but they are not Product Backend execution state.
    - `AUTH_JWT_RUNTIME_AUDIENCE`
    - `AGENT_RUNTIME_SERVICE_API_KEY`
    - `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS`
+   - `AGENT_FILE_URL_REUSE_TTL_SECONDS`
    - explicit `CORS_ALLOWED_ORIGINS` and `TRUSTED_HOSTS`
    - environment-appropriate rate limits and upload limits
 2. Confirm the Product Backend is the only holder of the JWT private key.
@@ -41,7 +42,9 @@ correlation values, but they are not Product Backend execution state.
 6. Build the `migrate` and `api` images.
 7. Run tests, migration checks, backup-hook validation, and OpenAPI drift
    checks.
-8. Run:
+8. Confirm the signed URL TTL exceeds the Redis reuse TTL by at least five
+   minutes. The production template uses 3600/1800 seconds.
+9. Run:
 
    ```bash
    make backend-productization-status

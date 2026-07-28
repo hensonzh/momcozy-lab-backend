@@ -8,11 +8,13 @@ from ...api.dependencies import (
     require_agent_runtime_client,
 )
 from ...api.surface import SurfaceAPIRouter, api_surface
+from ...core.settings import AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS
 from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
 from ..auth import ServiceClient
 from .agent_contracts import AgentFileResolveRequest, AgentFileResolveResponse
 from .agent_service import AgentFileAccessService
+from .agent_url_cache import AgentFileUrlCache
 from .repository import FileRepository
 
 
@@ -32,10 +34,16 @@ def get_agent_file_service(
     session: AsyncSession = Depends(get_session),
     object_storage: ObjectStorage = Depends(get_object_storage),
 ) -> AgentFileAccessService:
+    settings = request.app.state.settings
     return AgentFileAccessService(
         repository=FileRepository(session),
         object_storage=object_storage,
-        url_ttl_seconds=request.app.state.settings.agent_image_signed_url_ttl_seconds,
+        url_ttl_seconds=settings.agent_image_signed_url_ttl_seconds,
+        url_cache=AgentFileUrlCache(
+            redis_client=getattr(request.app.state, "redis_client", None),
+            reuse_ttl_seconds=settings.agent_file_url_reuse_ttl_seconds,
+            minimum_remaining_seconds=AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS,
+        ),
     )
 
 

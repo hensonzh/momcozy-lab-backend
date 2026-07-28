@@ -14,6 +14,7 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.files.agent_router import get_agent_file_service
 from app.modules.files.agent_service import AgentFileAccessService
+from app.modules.files.agent_url_cache import AgentFileUrlCache
 
 
 SERVICE_KEY = "agent-runtime-service-key-with-32-bytes"
@@ -148,6 +149,54 @@ def test_agent_file_access_returns_bounded_https_url_and_expiry() -> None:
     ]
 
 
+def test_agent_file_access_reuses_exact_url_but_rechecks_file_authorization() -> None:
+    file_object = _file_object(content_type="image/png")
+    storage = RotatingFakeObjectStorage()
+    redis = FakeRedis()
+    service = AgentFileAccessService(
+        repository=FakeFileRepository(file_object),
+        object_storage=storage,
+        url_cache=AgentFileUrlCache(
+            redis_client=redis,
+            reuse_ttl_seconds=1800,
+            minimum_remaining_seconds=300,
+            clock=lambda: datetime(2026, 7, 26, tzinfo=timezone.utc),
+        ),
+        url_ttl_seconds=3600,
+        clock=lambda: datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+
+    first = asyncio.run(
+        service.resolve(
+            owner_user_id=file_object.owner_user_id,
+            file_id=file_object.id,
+            purpose="model_image",
+        )
+    )
+    second = asyncio.run(
+        service.resolve(
+            owner_user_id=file_object.owner_user_id,
+            file_id=file_object.id,
+            purpose="model_image",
+        )
+    )
+    file_object.status = "deleted"
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.resolve(
+                owner_user_id=file_object.owner_user_id,
+                file_id=file_object.id,
+                purpose="model_image",
+            )
+        )
+
+    assert first.model_url == second.model_url
+    assert first.expires_at == second.expires_at
+    assert len(storage.calls) == 1
+    assert exc_info.value.code == "invalid_agent_attachment"
+
+
 def test_agent_file_access_fails_closed_for_non_https_signed_url() -> None:
     file_object = _file_object(content_type="image/png")
     service = AgentFileAccessService(
@@ -204,6 +253,35 @@ class FakeObjectStorage:
     async def create_presigned_get_url(self, **kwargs: object) -> str:
         self.calls.append(kwargs)
         return self.url
+
+
+class RotatingFakeObjectStorage(FakeObjectStorage):
+    async def create_presigned_get_url(self, **kwargs: object) -> str:
+        self.calls.append(kwargs)
+        return f"https://assets.example.test/signed/checkup?generation={len(self.calls)}"
+
+
+class FakeRedis:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    async def set(self, key: str, value: str, *, ex: int, nx: bool) -> bool | None:
+        del ex
+        if nx and key in self.values:
+            return None
+        self.values[key] = value
+        return True
+
+    async def delete(self, *keys: str) -> int:
+        deleted = 0
+        for key in keys:
+            if key in self.values:
+                del self.values[key]
+                deleted += 1
+        return deleted
 
 
 def _file_object(*, content_type: str) -> SimpleNamespace:

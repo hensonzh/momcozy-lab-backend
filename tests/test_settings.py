@@ -62,6 +62,13 @@ def test_settings_use_current_vision_defaults() -> None:
     assert settings.vision_request_timeout_seconds == 20.0
 
 
+def test_settings_use_bounded_agent_file_url_defaults() -> None:
+    settings = Settings()
+
+    assert settings.agent_image_signed_url_ttl_seconds == 3600
+    assert settings.agent_file_url_reuse_ttl_seconds == 1800
+
+
 def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("APP_ENV", "staging")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://example")
@@ -105,12 +112,24 @@ def test_settings_from_env_reads_agent_runtime_service_key(monkeypatch: pytest.M
     assert settings.agent_runtime_service_api_key == AGENT_RUNTIME_SERVICE_KEY
 
 
-def test_settings_from_env_reads_agent_image_signed_url_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("AGENT_IMAGE_SIGNED_URL_TTL_SECONDS", "86400")
+def test_settings_from_env_reads_agent_file_url_ttls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_IMAGE_SIGNED_URL_TTL_SECONDS", "3600")
+    monkeypatch.setenv("AGENT_FILE_URL_REUSE_TTL_SECONDS", "1800")
 
     settings = Settings.from_env()
 
-    assert settings.agent_image_signed_url_ttl_seconds == 86400
+    assert settings.agent_image_signed_url_ttl_seconds == 3600
+    assert settings.agent_file_url_reuse_ttl_seconds == 1800
+
+
+def test_settings_reject_agent_file_url_reuse_without_fetch_safety_window() -> None:
+    settings = Settings(
+        agent_image_signed_url_ttl_seconds=1800,
+        agent_file_url_reuse_ttl_seconds=1600,
+    )
+
+    with pytest.raises(ValueError, match="AGENT_FILE_URL_REUSE_TTL_SECONDS"):
+        settings.validate_for_startup()
 
 
 def test_settings_reject_insecure_public_object_storage_endpoint() -> None:

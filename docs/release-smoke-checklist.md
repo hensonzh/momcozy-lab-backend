@@ -60,6 +60,9 @@ the Agent Runtime release.
   context only for the supplied `actor_user_id`.
 - Cross-user file resolve is rejected; owner-scoped file resolve returns a
   bounded signed URL and stable Product `file_id`.
+- Resolve the same active file twice inside
+  `AGENT_FILE_URL_REUSE_TTL_SECONDS`; `model_url` and `expires_at` are exactly
+  equal. Delete the file and verify a later resolve is rejected.
 - Each action apply endpoint rejects a missing idempotency key.
 - Each action apply endpoint requires
   `Idempotency-Key: agent-action:<action_id>`.

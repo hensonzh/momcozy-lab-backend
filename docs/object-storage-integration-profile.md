@@ -62,3 +62,9 @@ When Agent Runtime or a model provider must fetch a signed URL, configure
 `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` as a stable HTTPS origin reachable from
 that network. Never expose the MinIO administration endpoint or storage
 credentials to Runtime or mobile clients.
+
+Product validates owner/status/type on every internal file resolve and then
+reuses the exact signed URL in Redis for `AGENT_FILE_URL_REUSE_TTL_SECONDS`.
+Keep `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS` at least five minutes longer than the
+reuse window. Redis contains only reconstructable capability URLs; they must
+not be persisted in PostgreSQL, Replay, request logs, or backups.

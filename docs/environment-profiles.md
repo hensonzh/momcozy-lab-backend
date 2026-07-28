@@ -57,6 +57,7 @@ AUTH_JWT_RUNTIME_AUDIENCE=momcozy-agent-runtime
 SERVICE_API_KEY=...
 AGENT_RUNTIME_SERVICE_API_KEY=...
 AGENT_IMAGE_SIGNED_URL_TTL_SECONDS=...
+AGENT_FILE_URL_REUSE_TTL_SECONDS=...
 
 OPENAI_API_KEY=...
 VISION_PROVIDER=disabled|openai
@@ -89,6 +90,10 @@ Runtime configuration.
 - The Product Backend validates `actor_user_id`, owner scope, action payload,
   action-bound idempotency, and audit fields for every Runtime-originated
   business operation.
+- Agent file resolution revalidates file ownership, lifecycle state, and
+  purpose before reading the reconstructable Redis signed-URL cache. Cache keys
+  include actor, file, purpose, and the immutable object-key version; Redis
+  loss only reduces cache hits.
 
 ## Production Rules
 
