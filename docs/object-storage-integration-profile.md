@@ -13,8 +13,8 @@ infers permission from an object key alone.
 Agent Runtime does not receive Product object-storage credentials. For an
 attachment, it calls `POST /v1/internal/agent/files/resolve` with its service
 key, `actor_user_id`, stable Product `file_id`, and purpose. Product validates
-ownership and returns a bounded signed URL. The signed URL is transport data,
-not durable identity.
+ownership and returns an opaque Product capability URL. The URL is transport
+data, not durable identity.
 
 ## CI Profile
 
@@ -58,13 +58,14 @@ set -a; . env/compose.local.env.example; set +a
 python scripts/check_object_storage_profile.py
 ```
 
-When Agent Runtime or a model provider must fetch a signed URL, configure
-`OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` as a stable HTTPS origin reachable from
-that network. Never expose the MinIO administration endpoint or storage
-credentials to Runtime or mobile clients.
+When Agent Runtime supplies model attachments, configure
+`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` as the public HTTPS Product API origin
+reachable by the model provider. Never expose the MinIO administration
+endpoint or storage credentials to Runtime or mobile clients.
 
-Product validates owner/status/type on every internal file resolve and then
-reuses the exact signed URL in Redis for `AGENT_FILE_URL_REUSE_TTL_SECONDS`.
-Keep `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS` at least five minutes longer than the
-reuse window. Redis contains only reconstructable capability URLs; they must
-not be persisted in PostgreSQL, Replay, request logs, or backups.
+Product validates owner/status/type on every internal file resolve, issues one
+opaque Redis-backed capability, and renews its 30-minute inactivity TTL only
+on authorized resolves. The public fetch route revalidates the file and
+proxies bytes from object storage without renewing TTL. Capability URLs must
+not be persisted in PostgreSQL or Replay, and path tokens are redacted from
+application logs.

@@ -56,8 +56,8 @@ AUTH_JWT_RUNTIME_AUDIENCE=momcozy-agent-runtime
 
 SERVICE_API_KEY=...
 AGENT_RUNTIME_SERVICE_API_KEY=...
-AGENT_IMAGE_SIGNED_URL_TTL_SECONDS=...
-AGENT_FILE_URL_REUSE_TTL_SECONDS=...
+AGENT_MODEL_ASSET_PUBLIC_BASE_URL=https://api.example.com
+AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS=1800
 
 OPENAI_API_KEY=...
 VISION_PROVIDER=disabled|openai
@@ -91,9 +91,12 @@ Runtime configuration.
   action-bound idempotency, and audit fields for every Runtime-originated
   business operation.
 - Agent file resolution revalidates file ownership, lifecycle state, and
-  purpose before reading the reconstructable Redis signed-URL cache. Cache keys
-  include actor, file, purpose, and the immutable object-key version; Redis
-  loss only reduces cache hits.
+  purpose before issuing or renewing a reconstructable Redis bearer
+  capability. Keys include actor, file, purpose, and the immutable object-key
+  version. Redis loss fails model attachment resolution closed.
+- The public model-asset fetch route revalidates the authoritative file row,
+  never extends capability lifetime, remains rate limited, and redacts bearer
+  tokens from application request and exception logs.
 
 ## Production Rules
 
@@ -102,9 +105,8 @@ storage, missing managed storage credentials, missing service keys, missing RSA
 signing material, and wildcard trust settings.
 
 The production compose starts only application processes. Infrastructure URLs
-must point to managed services. `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL`, when
-configured for Runtime image access, must be HTTPS and reachable from the
-Runtime/model provider path.
+must point to managed services. `AGENT_MODEL_ASSET_PUBLIC_BASE_URL` must be the
+public HTTPS Product API origin reachable from the model provider.
 
 `VISION_PROVIDER=openai` reads owner-scoped Product file bytes and sends a
 bounded request with `store=false` and a hard timeout. Keep it disabled until

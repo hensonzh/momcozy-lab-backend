@@ -103,8 +103,8 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
         "AUTH_JWT_PRODUCT_AUDIENCE=momcozy-product-api",
         "AUTH_JWT_RUNTIME_AUDIENCE=momcozy-agent-runtime",
         "AGENT_RUNTIME_SERVICE_API_KEY=",
-        "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS=",
-        "AGENT_FILE_URL_REUSE_TTL_SECONDS=",
+        "AGENT_MODEL_ASSET_PUBLIC_BASE_URL=",
+        "AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS=",
         "OPENAI_API_KEY=",
         "VISION_OPENAI_MODEL=gpt-5.4-mini",
     ]

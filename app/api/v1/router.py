@@ -16,6 +16,7 @@ from ...modules.diary.router import router as diary_router
 from ...modules.diary.agent_router import router as agent_diary_router
 from ...modules.files.router import router as files_router
 from ...modules.files.agent_router import router as agent_files_router
+from ...modules.files.model_asset_router import router as model_assets_router
 from ...modules.invites.router import router as invites_router
 from ...modules.notifications.router import router as notifications_router
 from ...modules.plans.agent_router import router as agent_plans_router
@@ -36,6 +37,7 @@ router.include_router(auth_router)
 router.include_router(devices_router)
 router.include_router(diary_router)
 router.include_router(agent_diary_router)
+router.include_router(model_assets_router)
 router.include_router(files_router)
 router.include_router(agent_files_router)
 router.include_router(invites_router)

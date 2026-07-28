@@ -59,10 +59,12 @@ the Agent Runtime release.
 - A valid Runtime service key can read profile, lactation, plan, and diary
   context only for the supplied `actor_user_id`.
 - Cross-user file resolve is rejected; owner-scoped file resolve returns a
-  bounded signed URL and stable Product `file_id`.
-- Resolve the same active file twice inside
-  `AGENT_FILE_URL_REUSE_TTL_SECONDS`; `model_url` and `expires_at` are exactly
-  equal. Delete the file and verify a later resolve is rejected.
+  stable opaque Product capability URL and stable Product `file_id`.
+- Resolve the same active file twice with a time gap: `model_url` remains
+  identical while `expires_at` slides forward by the authorized activity.
+  Fetching the capability directly must not extend Redis TTL.
+- Delete the file and verify both a later internal resolve and the old public
+  capability fetch are rejected; application logs must not contain its token.
 - Each action apply endpoint rejects a missing idempotency key.
 - Each action apply endpoint requires
   `Idempotency-Key: agent-action:<action_id>`.
@@ -77,8 +79,9 @@ the Agent Runtime release.
 - Product metrics change after smoke traffic.
 - Postgres, Redis, and object-storage errors are visible without leaking
   credentials or health content.
-- No password, refresh token, service key, JWT private key, signed URL, request
-  body, or uploaded file body appears in logs.
+- No password, refresh token, service key, JWT private key, signed URL,
+  model-asset capability token, request body, or uploaded file body appears in
+  logs.
 
 ## Exit Criteria
 

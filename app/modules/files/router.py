@@ -9,16 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...api.dependencies import get_object_storage, optional_idempotency_key, require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
-from ...core.settings import AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS
 from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
+from .agent_asset_capability import AgentAssetCapabilityStore
 from .repository import FileRepository
 from .schemas import FileListResponse, FileRead
 from .service import FileService
-from .agent_url_cache import AgentFileUrlCache
 from .vision_providers import VisionPurpose
 from .vision_service import FileVisionService
 from .vision_streaming import encode_file_vision_sse_events
@@ -44,10 +43,11 @@ def get_file_service(
         object_storage=object_storage,
         audit_service=AuditService(repository=audit_repository),
         idempotency_service=IdempotencyService(repository=audit_repository),
-        agent_file_url_cache=AgentFileUrlCache(
+        agent_asset_capability_store=AgentAssetCapabilityStore(
             redis_client=getattr(request.app.state, "redis_client", None),
-            reuse_ttl_seconds=settings.agent_file_url_reuse_ttl_seconds,
-            minimum_remaining_seconds=AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS,
+            inactivity_ttl_seconds=(
+                settings.agent_model_asset_inactivity_ttl_seconds
+            ),
         ),
         max_upload_bytes=settings.file_upload_max_bytes,
     )

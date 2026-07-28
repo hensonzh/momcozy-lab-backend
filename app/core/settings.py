@@ -17,10 +17,8 @@ LOCAL_REDIS_URL = "redis://localhost:6379/0"
 LOCAL_OBJECT_STORAGE_ROOT = ".local/object_storage"
 LOCAL_PRODUCT_ASSET_MANIFEST_PATH = "assets/product-assets.manifest.json"
 DEFAULT_FILE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
-DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS = 60 * 60
-MAX_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS = 7 * 24 * 60 * 60
-DEFAULT_AGENT_FILE_URL_REUSE_TTL_SECONDS = 30 * 60
-AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS = 5 * 60
+DEFAULT_AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS = 30 * 60
+MAX_AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_DOUBAO_TTS_WS_URL = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
 DEFAULT_DOUBAO_TTS_RESOURCE_ID = "seed-tts-2.0"
 DEFAULT_DOUBAO_TTS_VOICE_TYPE = "saturn_zh_female_qingyingduoduo_cs_tob"
@@ -73,8 +71,10 @@ class Settings:
     agent_runtime_rate_limit_requests: int = 6_000
     agent_runtime_rate_limit_window_seconds: int = 60
     metrics_require_service_key: bool = False
-    agent_image_signed_url_ttl_seconds: int = DEFAULT_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS
-    agent_file_url_reuse_ttl_seconds: int = DEFAULT_AGENT_FILE_URL_REUSE_TTL_SECONDS
+    agent_model_asset_public_base_url: str = ""
+    agent_model_asset_inactivity_ttl_seconds: int = (
+        DEFAULT_AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS
+    )
     openai_api_key: str = ""
     voice_provider: str = "disabled"
     voice_api_key: str = ""
@@ -150,13 +150,13 @@ class Settings:
                 cls.agent_runtime_rate_limit_window_seconds,
             ),
             metrics_require_service_key=_env_bool("METRICS_REQUIRE_SERVICE_KEY", cls.metrics_require_service_key),
-            agent_image_signed_url_ttl_seconds=_env_int(
-                "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS",
-                cls.agent_image_signed_url_ttl_seconds,
+            agent_model_asset_public_base_url=_env(
+                "AGENT_MODEL_ASSET_PUBLIC_BASE_URL",
+                cls.agent_model_asset_public_base_url,
             ),
-            agent_file_url_reuse_ttl_seconds=_env_int(
-                "AGENT_FILE_URL_REUSE_TTL_SECONDS",
-                cls.agent_file_url_reuse_ttl_seconds,
+            agent_model_asset_inactivity_ttl_seconds=_env_int(
+                "AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS",
+                cls.agent_model_asset_inactivity_ttl_seconds,
             ),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
@@ -240,18 +240,32 @@ class Settings:
             errors.append("FILE_UPLOAD_MAX_BYTES must be positive")
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             errors.append("LOG_LEVEL must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL")
-        if not 60 <= self.agent_image_signed_url_ttl_seconds <= MAX_AGENT_IMAGE_SIGNED_URL_TTL_SECONDS:
-            errors.append("AGENT_IMAGE_SIGNED_URL_TTL_SECONDS must be between 60 and 604800")
-        maximum_reuse_ttl = (
-            self.agent_image_signed_url_ttl_seconds
-            - AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS
-        )
-        if not 60 <= self.agent_file_url_reuse_ttl_seconds <= maximum_reuse_ttl:
+        if not (
+            60
+            <= self.agent_model_asset_inactivity_ttl_seconds
+            <= MAX_AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS
+        ):
             errors.append(
-                "AGENT_FILE_URL_REUSE_TTL_SECONDS must be at least 60 and leave "
-                f"{AGENT_FILE_URL_MINIMUM_REMAINING_SECONDS} seconds before "
-                "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS expires"
+                "AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS must be "
+                "between 60 and 86400"
             )
+        if self.agent_model_asset_public_base_url:
+            model_asset_url = urlparse(
+                self.agent_model_asset_public_base_url
+            )
+            if (
+                model_asset_url.scheme != "https"
+                or not model_asset_url.netloc
+                or model_asset_url.username is not None
+                or model_asset_url.password is not None
+                or model_asset_url.query
+                or model_asset_url.fragment
+                or model_asset_url.path not in {"", "/"}
+            ):
+                errors.append(
+                    "AGENT_MODEL_ASSET_PUBLIC_BASE_URL must be an "
+                    "absolute HTTPS origin without path, query, or fragment"
+                )
         if self.object_storage_public_endpoint_url:
             public_storage_url = urlparse(self.object_storage_public_endpoint_url)
             if public_storage_url.scheme != "https" or not public_storage_url.netloc:
@@ -332,6 +346,11 @@ class Settings:
                 errors.append("SERVICE_API_KEY is required in production for protected operational endpoints")
             if not self.agent_runtime_service_api_key:
                 errors.append("AGENT_RUNTIME_SERVICE_API_KEY is required in production")
+            if not self.agent_model_asset_public_base_url:
+                errors.append(
+                    "AGENT_MODEL_ASSET_PUBLIC_BASE_URL is required "
+                    "in production"
+                )
             if self.voice_provider == "local_stub":
                 errors.append("VOICE_PROVIDER=local_stub cannot be used in production")
             if self.vision_provider == "local_stub":

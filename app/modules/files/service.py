@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from ...core.errors import ApiError
 from ...infrastructure.object_storage import ObjectStorage
 from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
-from .agent_url_cache import AgentFileUrlCache
+from .agent_asset_capability import AgentAssetCapabilityStore
 from .models import FileObject
 from .repository import FileRepository
 
@@ -34,14 +34,14 @@ class FileService:
         object_storage: ObjectStorage,
         audit_service: AuditService | None = None,
         idempotency_service: IdempotencyService | None = None,
-        agent_file_url_cache: AgentFileUrlCache | None = None,
+        agent_asset_capability_store: AgentAssetCapabilityStore | None = None,
         max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
     ) -> None:
         self.repository = repository
         self.object_storage = object_storage
         self.audit_service = audit_service
         self.idempotency_service = idempotency_service
-        self.agent_file_url_cache = agent_file_url_cache
+        self.agent_asset_capability_store = agent_asset_capability_store
         self.max_upload_bytes = max_upload_bytes
 
     async def upload(
@@ -163,8 +163,8 @@ class FileService:
             raise ApiError(code="not_found", message="File not found.", status=404)
 
         await self.object_storage.delete(key=deleted.object_key)
-        if self.agent_file_url_cache is not None:
-            await self.agent_file_url_cache.invalidate(
+        if self.agent_asset_capability_store is not None:
+            await self.agent_asset_capability_store.invalidate(
                 owner_user_id=owner_user_id,
                 file_id=deleted.id,
                 object_key=deleted.object_key,

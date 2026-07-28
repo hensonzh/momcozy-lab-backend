@@ -28,8 +28,8 @@ correlation values, but they are not Product Backend execution state.
    - `AUTH_JWT_PRODUCT_AUDIENCE`
    - `AUTH_JWT_RUNTIME_AUDIENCE`
    - `AGENT_RUNTIME_SERVICE_API_KEY`
-   - `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS`
-   - `AGENT_FILE_URL_REUSE_TTL_SECONDS`
+   - `AGENT_MODEL_ASSET_PUBLIC_BASE_URL`
+   - `AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS`
    - explicit `CORS_ALLOWED_ORIGINS` and `TRUSTED_HOSTS`
    - environment-appropriate rate limits and upload limits
 2. Confirm the Product Backend is the only holder of the JWT private key.
@@ -42,8 +42,9 @@ correlation values, but they are not Product Backend execution state.
 6. Build the `migrate` and `api` images.
 7. Run tests, migration checks, backup-hook validation, and OpenAPI drift
    checks.
-8. Confirm the signed URL TTL exceeds the Redis reuse TTL by at least five
-   minutes. The production template uses 3600/1800 seconds.
+8. Confirm the Product API origin is public HTTPS, capability paths are
+   redacted from application logs, and the inactivity TTL remains 1800
+   seconds unless a reviewed product requirement changes it.
 9. Run:
 
    ```bash
@@ -183,8 +184,9 @@ conversation, orchestration, and final-response state; the Product Backend owns
 only the resulting business transaction.
 
 `POST /v1/internal/agent/files/resolve` validates both `actor_user_id` and
-`file_id` ownership before returning a bounded signed URL. Runtime must retain
-the stable Product `file_id`, not persist the signed URL as identity.
+`file_id` ownership before returning an opaque Product capability URL. Runtime
+must retain the stable Product `file_id`, not persist the capability URL as
+identity.
 
 ## Nginx Edge Proxy
 
@@ -193,6 +195,11 @@ the application bound to loopback and expose it through controlled HTTPS
 ingress. The template rejects unknown hosts, forwards request IDs, preserves
 WebSocket upgrade headers for Product voice endpoints, and applies an upload
 limit above the application limit.
+
+The `/v1/model-assets/` location disables Nginx access logging because its path
+contains a bearer capability. The container also disables Uvicorn's raw access
+log; the application emits its own redacted route log and request metric.
+Preserve both controls in any replacement process manager, ingress, or CDN.
 
 Validate before switching traffic:
 
@@ -235,8 +242,8 @@ network or service gateway and must not share a public mobile route.
    credentials when implicated.
 3. Search audit logs by `actor_user_id`, `actor_service`, `action_id`, and
    `request_id`.
-4. Preserve evidence with redaction; never copy secrets, health content, or
-   signed URLs into tickets.
+4. Preserve evidence with redaction; never copy secrets, health content,
+   signed URLs, or model-asset capability URLs into tickets.
 5. Add a contract or security regression test.
 
 ## Backup And Restore Drill

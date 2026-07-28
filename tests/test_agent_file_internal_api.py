@@ -14,7 +14,7 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.files.agent_router import get_agent_file_service
 from app.modules.files.agent_service import AgentFileAccessService
-from app.modules.files.agent_url_cache import AgentFileUrlCache
+from app.modules.files.agent_asset_capability import IssuedAgentAssetCapability
 
 
 SERVICE_KEY = "agent-runtime-service-key-with-32-bytes"
@@ -59,7 +59,7 @@ def test_agent_file_resolve_uses_explicit_actor_scope_and_returns_no_object_key(
         "file_id": str(file_id),
         "content_type": "image/png",
         "original_filename": "checkup.png",
-        "model_url": "https://assets.example.test/signed/checkup.png",
+        "model_url": "https://api.example.test/v1/model-assets/opaque-capability",
         "expires_at": "2026-07-27T00:00:00Z",
     }
     assert "object_key" not in response.json()
@@ -73,8 +73,8 @@ def test_agent_file_resolve_uses_explicit_actor_scope_and_returns_no_object_key(
 def test_agent_file_access_rejects_cross_owner_or_deleted_file() -> None:
     service = AgentFileAccessService(
         repository=FakeFileRepository(None),
-        object_storage=FakeObjectStorage(),
-        url_ttl_seconds=3600,
+        capability_store=FakeCapabilityStore(),
+        public_base_url="https://api.example.test",
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -104,8 +104,8 @@ def test_agent_file_access_rejects_content_type_outside_purpose(
     file_object = _file_object(content_type=content_type)
     service = AgentFileAccessService(
         repository=FakeFileRepository(file_object),
-        object_storage=FakeObjectStorage(),
-        url_ttl_seconds=3600,
+        capability_store=FakeCapabilityStore(),
+        public_base_url="https://api.example.test",
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -120,14 +120,13 @@ def test_agent_file_access_rejects_content_type_outside_purpose(
     assert exc_info.value.code == "invalid_agent_attachment"
 
 
-def test_agent_file_access_returns_bounded_https_url_and_expiry() -> None:
+def test_agent_file_access_returns_stable_opaque_product_url_and_expiry() -> None:
     file_object = _file_object(content_type="image/webp")
-    storage = FakeObjectStorage()
+    capability_store = FakeCapabilityStore()
     service = AgentFileAccessService(
         repository=FakeFileRepository(file_object),
-        object_storage=storage,
-        url_ttl_seconds=3600,
-        clock=lambda: datetime(2026, 7, 26, tzinfo=timezone.utc),
+        capability_store=capability_store,
+        public_base_url="https://api.example.test",
     )
 
     result = asyncio.run(
@@ -139,31 +138,22 @@ def test_agent_file_access_returns_bounded_https_url_and_expiry() -> None:
     )
 
     assert result.file_id == file_object.id
-    assert result.model_url == "https://assets.example.test/signed/checkup"
-    assert result.expires_at == datetime(2026, 7, 26, 1, tzinfo=timezone.utc)
-    assert storage.calls == [
-        {
-            "key": file_object.object_key,
-            "expires_in_seconds": 3600,
-        }
-    ]
+    assert result.model_url == "https://api.example.test/v1/model-assets/opaque-capability"
+    assert result.expires_at == datetime(2026, 7, 26, 0, 30, tzinfo=timezone.utc)
+    assert capability_store.capabilities[0].owner_user_id == file_object.owner_user_id
+    assert capability_store.capabilities[0].file_id == file_object.id
+    assert capability_store.capabilities[0].object_key == file_object.object_key
+    assert capability_store.capabilities[0].purpose == "model_image"
+    assert capability_store.capabilities[0].content_type == "image/webp"
 
 
 def test_agent_file_access_reuses_exact_url_but_rechecks_file_authorization() -> None:
     file_object = _file_object(content_type="image/png")
-    storage = RotatingFakeObjectStorage()
-    redis = FakeRedis()
+    capability_store = FakeCapabilityStore()
     service = AgentFileAccessService(
         repository=FakeFileRepository(file_object),
-        object_storage=storage,
-        url_cache=AgentFileUrlCache(
-            redis_client=redis,
-            reuse_ttl_seconds=1800,
-            minimum_remaining_seconds=300,
-            clock=lambda: datetime(2026, 7, 26, tzinfo=timezone.utc),
-        ),
-        url_ttl_seconds=3600,
-        clock=lambda: datetime(2026, 7, 26, tzinfo=timezone.utc),
+        capability_store=capability_store,
+        public_base_url="https://api.example.test",
     )
 
     first = asyncio.run(
@@ -193,16 +183,16 @@ def test_agent_file_access_reuses_exact_url_but_rechecks_file_authorization() ->
 
     assert first.model_url == second.model_url
     assert first.expires_at == second.expires_at
-    assert len(storage.calls) == 1
+    assert len(capability_store.capabilities) == 2
     assert exc_info.value.code == "invalid_agent_attachment"
 
 
-def test_agent_file_access_fails_closed_for_non_https_signed_url() -> None:
+def test_agent_file_access_fails_closed_for_non_https_public_base_url() -> None:
     file_object = _file_object(content_type="image/png")
     service = AgentFileAccessService(
         repository=FakeFileRepository(file_object),
-        object_storage=FakeObjectStorage(url="http://storage.internal/checkup"),
-        url_ttl_seconds=3600,
+        capability_store=FakeCapabilityStore(),
+        public_base_url="http://api.internal",
     )
 
     with pytest.raises(ApiError) as exc_info:
@@ -214,7 +204,7 @@ def test_agent_file_access_fails_closed_for_non_https_signed_url() -> None:
             )
         )
 
-    assert exc_info.value.code == "agent_file_url_unavailable"
+    assert exc_info.value.code == "agent_model_asset_unavailable"
 
 
 class FakeAgentFileAccessService:
@@ -228,7 +218,7 @@ class FakeAgentFileAccessService:
             file_id=self.file_id,
             content_type="image/png",
             original_filename="checkup.png",
-            model_url="https://assets.example.test/signed/checkup.png",
+            model_url="https://api.example.test/v1/model-assets/opaque-capability",
             expires_at=datetime(2026, 7, 27, tzinfo=timezone.utc),
         )
 
@@ -241,47 +231,16 @@ class FakeFileRepository:
         return self.file_object
 
 
-class FakeObjectStorage:
-    def __init__(
-        self,
-        *,
-        url: str = "https://assets.example.test/signed/checkup",
-    ) -> None:
-        self.url = url
-        self.calls: list[dict[str, object]] = []
-
-    async def create_presigned_get_url(self, **kwargs: object) -> str:
-        self.calls.append(kwargs)
-        return self.url
-
-
-class RotatingFakeObjectStorage(FakeObjectStorage):
-    async def create_presigned_get_url(self, **kwargs: object) -> str:
-        self.calls.append(kwargs)
-        return f"https://assets.example.test/signed/checkup?generation={len(self.calls)}"
-
-
-class FakeRedis:
+class FakeCapabilityStore:
     def __init__(self) -> None:
-        self.values: dict[str, str] = {}
+        self.capabilities: list[object] = []
 
-    async def get(self, key: str) -> str | None:
-        return self.values.get(key)
-
-    async def set(self, key: str, value: str, *, ex: int, nx: bool) -> bool | None:
-        del ex
-        if nx and key in self.values:
-            return None
-        self.values[key] = value
-        return True
-
-    async def delete(self, *keys: str) -> int:
-        deleted = 0
-        for key in keys:
-            if key in self.values:
-                del self.values[key]
-                deleted += 1
-        return deleted
+    async def issue_or_refresh(self, capability: object) -> IssuedAgentAssetCapability:
+        self.capabilities.append(capability)
+        return IssuedAgentAssetCapability(
+            token="opaque-capability",
+            expires_at=datetime(2026, 7, 26, 0, 30, tzinfo=timezone.utc),
+        )
 
 
 def _file_object(*, content_type: str) -> SimpleNamespace:

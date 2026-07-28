@@ -116,11 +116,20 @@ projection.
 ### Files
 
 - `POST /v1/internal/agent/files/resolve`
+- `GET /v1/model-assets/{token}`
 
 The request carries `actor_user_id`, Product `file_id`, and purpose. Product
-validates ownership and returns a bounded signed URL. `file_id` remains the
-durable identity; the signed URL must not be persisted as an identity or used
-as a cache key.
+validates ownership and returns an opaque Product capability URL. Repeated
+authorized resolves reuse the URL and slide its 30-minute inactivity TTL.
+`file_id` remains the durable identity; the capability URL must not be
+persisted as an identity.
+
+The model-asset GET is intentionally unauthenticated because the high-entropy
+path token is a bearer capability. It remains rate limited, does not renew its
+own TTL, revalidates authoritative file state before proxying bytes, returns
+`Cache-Control: private, no-store`, and uses the same opaque 404 for expired,
+revoked, unknown, or drifted mappings. Product application logs redact the
+path token.
 
 ### Business Actions
 

@@ -39,6 +39,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/files/{file_id}` | files | flutter | stable | Delete File |
 | GET | `/v1/files/{file_id}` | files | flutter | stable | Get File |
 | GET | `/v1/files/{file_id}/content` | files | flutter | stable | Get File Content |
+| GET | `/v1/model-assets/{token}` | files | openai-responses | stable | Get Agent Model Asset Opaque bearer capability used only for model input fetches. |
 | GET | `/v1/notifications` | notifications | flutter | stable | List Notifications |
 | DELETE | `/v1/notifications/{notification_id}` | notifications | flutter | stable | Archive Notification |
 | PATCH | `/v1/notifications/{notification_id}/read` | notifications | flutter | stable | Set Notification Read State |

@@ -193,14 +193,14 @@ def test_file_service_delete_soft_deletes_object_and_records_audit() -> None:
     repository = FakeFileRepository(file_to_delete=file_object)
     idempotency_service = FakeIdempotencyService(status="reserved")
     audit_service = FakeAuditService()
-    url_cache = FakeAgentFileUrlCache()
+    capability_store = FakeAgentAssetCapabilityStore()
     storage = FakeObjectStorage()
     service = FileService(
         repository=repository,
         object_storage=storage,
         audit_service=audit_service,
         idempotency_service=idempotency_service,
-        agent_file_url_cache=url_cache,
+        agent_asset_capability_store=capability_store,
     )
 
     asyncio.run(
@@ -215,7 +215,7 @@ def test_file_service_delete_soft_deletes_object_and_records_audit() -> None:
     assert file_object.status == "deleted"
     assert repository.delete_kwargs["file_id"] == file_id
     assert storage.delete_calls == ["users/u/files/f/photo.png"]
-    assert url_cache.invalidate_kwargs == {
+    assert capability_store.invalidate_kwargs == {
         "owner_user_id": owner_user_id,
         "file_id": file_id,
         "object_key": "users/u/files/f/photo.png",
@@ -333,7 +333,7 @@ class FakeObjectStorage:
         self.delete_calls.append(key)
 
 
-class FakeAgentFileUrlCache:
+class FakeAgentAssetCapabilityStore:
     def __init__(self) -> None:
         self.invalidate_kwargs: dict[str, object] = {}
 

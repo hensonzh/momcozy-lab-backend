@@ -71,6 +71,7 @@ def test_dockerfile_runs_product_backend() -> None:
     assert "python:3.13-slim" in dockerfile
     assert "requirements.txt" in dockerfile
     assert "app.main:app" in dockerfile
+    assert '"--no-access-log"' in dockerfile
     assert "COPY --chown=app:app . ." in dockerfile
     assert "chown -R" not in dockerfile
 
@@ -98,6 +99,11 @@ def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> No
     assert 'proxy_set_header Connection "upgrade";' in config
     assert "proxy_buffering off;" in config
     assert "proxy_read_timeout 3600s;" in config
+    capability_location = config[
+        config.index("location ^~ /v1/model-assets/") :
+        config.index("\n    }", config.index("location ^~ /v1/model-assets/"))
+    ]
+    assert "access_log off;" in capability_location
 
 
 def test_nginx_serves_android_download_artifacts_without_api_proxying() -> None:
@@ -159,8 +165,8 @@ def test_environment_profiles_keep_product_runtime_boundary_only() -> None:
         env = env_path.read_text()
         names = _environment_names(env)
         assert "AGENT_RUNTIME_SERVICE_API_KEY=" in env
-        assert "AGENT_IMAGE_SIGNED_URL_TTL_SECONDS=" in env
-        assert "AGENT_FILE_URL_REUSE_TTL_SECONDS=" in env
+        assert "AGENT_MODEL_ASSET_PUBLIC_BASE_URL=" in env
+        assert "AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS=" in env
         assert "OPENAI_API_KEY=" in env
         assert "VISION_OPENAI_MODEL=gpt-5.4-mini" in env
         for retired in RETIRED_RUNTIME_ENV_NAMES:

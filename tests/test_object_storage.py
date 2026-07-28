@@ -126,9 +126,10 @@ def test_lifespan_starts_with_production_s3_compatible_storage() -> None:
             auth_jwt_issuer="momcozy-test",
             auth_jwt_product_audience="momcozy-product-api",
             auth_jwt_runtime_audience="momcozy-agent-runtime",
-            service_api_key=SERVICE_KEY,
-            agent_runtime_service_api_key=AGENT_RUNTIME_SERVICE_KEY,
-            trusted_hosts=("testserver",),
+                service_api_key=SERVICE_KEY,
+                agent_runtime_service_api_key=AGENT_RUNTIME_SERVICE_KEY,
+                agent_model_asset_public_base_url="https://api.example.test",
+                trusted_hosts=("testserver",),
         )
     )
 

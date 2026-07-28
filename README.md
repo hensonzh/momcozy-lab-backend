@@ -57,8 +57,8 @@ Core infrastructure is configured through `DATABASE_URL`, `REDIS_URL`, and
 - `AUTH_JWT_PRODUCT_AUDIENCE`
 - `AUTH_JWT_RUNTIME_AUDIENCE`
 - `AGENT_RUNTIME_SERVICE_API_KEY`
-- `AGENT_IMAGE_SIGNED_URL_TTL_SECONDS`
-- `AGENT_FILE_URL_REUSE_TTL_SECONDS`
+- `AGENT_MODEL_ASSET_PUBLIC_BASE_URL`
+- `AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS`
 
 `OPENAI_API_KEY` in this repository is only for Product voice transcription or
 vision when those providers are enabled. Agent model credentials and model
@@ -66,10 +66,12 @@ settings belong to Agent Runtime.
 
 Uploaded Agent images remain Product-owned assets. Runtime resolves an
 owner-scoped `asset_id` through the internal file endpoint and receives a
-short-lived HTTPS URL. Product revalidates owner/status/type on every resolve,
-then reuses the exact signed URL from Redis for the bounded reuse window.
-Configure `OBJECT_STORAGE_PUBLIC_ENDPOINT_URL` to an HTTPS origin reachable by
-Runtime and the model provider.
+stable opaque Product capability URL. Product revalidates owner/status/type on
+every authorized resolve and slides the Redis capability TTL by 30 minutes.
+The unauthenticated model fetch endpoint revalidates the file again, never
+renews TTL, returns `no-store` bytes, and is revoked by deletion. Configure
+`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to the public HTTPS Product API origin
+reachable by the model provider.
 
 ## Local Development
 

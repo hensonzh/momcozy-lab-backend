@@ -9,6 +9,7 @@ from .settings import Settings
 
 HTTP_LOGGER_NAME = "production_backend.http"
 ERROR_LOGGER_NAME = "production_backend.errors"
+MODEL_ASSET_PATH_PREFIX = "/v1/model-assets/"
 
 
 def configure_logging(settings: Settings) -> None:
@@ -34,8 +35,8 @@ def log_http_request(
                 "event": "http.request",
                 "request_id": request_id,
                 "method": method,
-                "path": path,
-                "route": route,
+                "path": redact_sensitive_path(path),
+                "route": redact_sensitive_path(route),
                 "status_code": status_code,
                 "duration_ms": round(duration_ms, 3),
             }
@@ -57,8 +58,8 @@ def log_unhandled_exception(
                 "event": "http.unhandled_exception",
                 "request_id": request_id,
                 "method": method,
-                "path": path,
-                "route": route,
+                "path": redact_sensitive_path(path),
+                "route": redact_sensitive_path(route),
                 "exception_type": exception_type,
             }
         )
@@ -67,3 +68,12 @@ def log_unhandled_exception(
 
 def _json_line(payload: dict[str, Any]) -> str:
     return json.dumps(payload, default=str, separators=(",", ":"), sort_keys=True)
+
+
+def redact_sensitive_path(path: str) -> str:
+    value = str(path or "")
+    if value.startswith(MODEL_ASSET_PATH_PREFIX):
+        suffix = value[len(MODEL_ASSET_PATH_PREFIX):]
+        if suffix and not suffix.startswith("{"):
+            return f"{MODEL_ASSET_PATH_PREFIX}<redacted>"
+    return value
