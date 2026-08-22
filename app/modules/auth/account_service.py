@@ -12,6 +12,7 @@ from ..invites.service import validate_invite_code_for_login
 from ..users.models import AuthIdentity, User
 from .jwt import issue_access_token
 from .passwords import hash_password, verify_password
+from .permissions import STANDARD_USER_PERMISSIONS
 from .repository import AuthAccountRepository
 from .service import AuthSessionService, IssuedRefreshToken
 
@@ -177,6 +178,7 @@ class AuthAccountService:
             session_id=session_id,
             settings=self.settings,
             roles=frozenset({"user"}),
+            permissions=STANDARD_USER_PERMISSIONS,
         )
         return IssuedTokenPair(
             user=user,

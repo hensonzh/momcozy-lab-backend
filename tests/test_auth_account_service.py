@@ -7,7 +7,9 @@ import pytest
 from app.core.errors import ApiError
 from app.core.settings import Settings
 from app.modules.auth.account_service import AuthAccountService, DeviceContext
+from app.modules.auth.jwt import authenticate_access_token
 from app.modules.auth.models import DeviceSession, RefreshToken
+from app.modules.auth.permissions import STANDARD_USER_PERMISSIONS
 from app.modules.auth.passwords import hash_password, verify_password
 from app.modules.auth.service import CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
 from app.modules.invites.models import InviteCode
@@ -40,6 +42,10 @@ def test_signup_creates_email_identity_hashes_password_and_issues_tokens() -> No
     assert session_service.created_ip_hash
     assert issued.access_token
     assert issued.refresh_token == "refresh-token"
+
+    current_user = authenticate_access_token(issued.access_token, service.settings)
+    assert current_user.roles == frozenset({"user"})
+    assert current_user.permissions == STANDARD_USER_PERMISSIONS
 
 
 def test_signup_rejects_duplicate_email() -> None:
@@ -249,6 +255,8 @@ def test_refresh_rotates_token_and_issues_access_for_session_user() -> None:
     assert session_service.rotated_raw_token == "old-refresh"
     assert issued.user.id == user.id
     assert issued.refresh_token == "rotated-refresh-token"
+    current_user = authenticate_access_token(issued.access_token, service.settings)
+    assert current_user.permissions == STANDARD_USER_PERMISSIONS
 
 
 def _settings(*, auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)) -> Settings:

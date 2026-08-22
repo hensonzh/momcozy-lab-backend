@@ -3,6 +3,10 @@ from pathlib import Path
 
 from app.core.settings import Settings
 from app.factory import create_app
+from app.modules.auth.permissions import (
+    RUNTIME_TOKEN_PERMISSIONS_OPENAPI_FIELD,
+    STANDARD_USER_PERMISSIONS,
+)
 from app.api.surface import API_CLIENT_FIELD, API_OWNER_FIELD, API_STABILITY_FIELD, API_SURFACE_FIELD
 from scripts.export_api_surface_catalog import render_api_surface_catalog
 from scripts.export_openapi import build_openapi_schema
@@ -65,6 +69,14 @@ def test_jwks_is_an_unauthenticated_agent_runtime_auth_contract() -> None:
     assert operation[API_OWNER_FIELD] == "auth"
     assert operation[API_CLIENT_FIELD] == ["agent-runtime"]
     assert "security" not in operation
+
+
+def test_openapi_publishes_runtime_token_permission_contract() -> None:
+    schema = build_openapi_schema()
+
+    assert schema[RUNTIME_TOKEN_PERMISSIONS_OPENAPI_FIELD] == sorted(
+        STANDARD_USER_PERMISSIONS
+    )
 
 
 def test_openapi_contains_core_flutter_handoff_paths() -> None:

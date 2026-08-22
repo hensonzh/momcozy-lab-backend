@@ -12,6 +12,10 @@ from .core.middleware import install_http_middleware
 from .core.settings import Settings, get_settings
 from .core.trusted_hosts import install_trusted_host_middleware
 from .modules.auth.jwks_router import router as auth_jwks_router
+from .modules.auth.permissions import (
+    RUNTIME_TOKEN_PERMISSIONS_OPENAPI_FIELD,
+    STANDARD_USER_PERMISSIONS,
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -31,4 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
     app.include_router(auth_jwks_router)
     app.include_router(v1_router)
+    app.openapi()[RUNTIME_TOKEN_PERMISSIONS_OPENAPI_FIELD] = sorted(
+        STANDARD_USER_PERMISSIONS
+    )
     return app
