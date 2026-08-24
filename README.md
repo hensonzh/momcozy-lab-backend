@@ -97,32 +97,25 @@ no Agent worker or runtime-state checks.
 
 ## Staging
 
-The staging Compose profile owns resettable PostgreSQL, Redis, and MinIO volumes
-and binds Product API to `127.0.0.1:8001` by default:
+The Backend staging Compose profile is the single owner of the shared
+PostgreSQL, Redis, MinIO, and `momcozy-lab-staging` network. It creates separate
+`momcozy_staging` and `agent_runtime_staging` databases, reserves Redis DB 0/1,
+creates the `momcozy-staging` and `agent-runtime-staging` buckets, and binds the
+Product API to `127.0.0.1:8001`:
 
 ```bash
 cp env/compose.staging.env.example env/compose.staging.env
+# Fill every MOMCOZY_STAGING_* secret before continuing.
 make backend-staging-up
 make backend-staging-smoke
 ```
 
+Start this stack before Agent staging; Agent joins the shared network as an
+external consumer and does not create another infrastructure stack.
+
 `make backend-staging-reset` deletes the staging Compose volumes and must only
 be used while staging data remains explicitly resettable.
 
-## Production
-
-Production Compose starts only `api`; the one-time `migrate` service is in the
-`tools` profile. PostgreSQL, Redis, and object storage must be managed services:
-
-```bash
-cp env/compose.production.env.example env/compose.production.env
-export MOMCOZY_BACKEND_IMAGE=momcozy-lab-backend:<git-sha>
-make backend-production-readiness
-make backend-production-up
-```
-
-Use `backend-production-services` to rebuild/restart Product API without rerunning
-migrations. Agent Runtime is deployed, scaled, observed, and rolled back from
-its own repository and pipeline. See the
-[deployment runbook](docs/deployment-runbook.md) for release order and
-cross-service smoke checks.
+No production deployment profile is shipped. Production application safeguards
+remain in code, but a production Compose/env contract will be designed only
+when a real production target and managed dependencies are approved.

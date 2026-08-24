@@ -7,6 +7,15 @@ x-backend-image: &backend-image
     dockerfile: Dockerfile
   env_file:
     - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.staging.env}
+  environment:
+    MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD: ""
+    MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD: ""
+    MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD: ""
+    MOMCOZY_STAGING_REDIS_PASSWORD: ""
+    MOMCOZY_STAGING_MINIO_ROOT_USER: ""
+    MOMCOZY_STAGING_MINIO_ROOT_PASSWORD: ""
+  networks:
+    - staging
 
 services:
   api:
@@ -22,6 +31,10 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    networks:
+      staging:
+        aliases:
+          - product-backend
     healthcheck:
       test:
         [
@@ -46,52 +59,105 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: momcozy_staging
-      POSTGRES_PASSWORD: momcozy_staging
-      POSTGRES_DB: momcozy_staging
+      POSTGRES_USER: momcozy_staging_admin
+      POSTGRES_PASSWORD: ${MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD:?Set MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD: ${MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD}
+      MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD: ${MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD:?Set MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD}
     volumes:
       - postgres_staging_data:/var/lib/postgresql/data
+      - ./deploy/staging/init-postgres.sh:/docker-entrypoint-initdb.d/10-init-momcozy-databases.sh:ro
+    networks:
+      staging:
+        aliases:
+          - staging-postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U momcozy_staging -d momcozy_staging"]
+      test:
+        [
+          "CMD-SHELL",
+          "test \"$$(psql --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\" --tuples-only --no-align --command \"SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE (d.datname = 'momcozy_staging' AND r.rolname = 'momcozy_staging') OR (d.datname = 'agent_runtime_staging' AND r.rolname = 'agent_runtime_staging');\")\" = \"2\"",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
   redis:
-    image: redis:7
+    image: redis:7.4-alpine
     restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${MOMCOZY_STAGING_REDIS_PASSWORD:?Set MOMCOZY_STAGING_REDIS_PASSWORD}",
+      ]
+    environment:
+      REDISCLI_AUTH: ${MOMCOZY_STAGING_REDIS_PASSWORD:?Set MOMCOZY_STAGING_REDIS_PASSWORD}
     volumes:
       - redis_staging_data:/data
+    networks:
+      staging:
+        aliases:
+          - staging-redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
     restart: unless-stopped
-    command: server /data --address ":9000"
+    command: ["server", "/data", "--address", ":9000"]
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MOMCOZY_STAGING_MINIO_ROOT_USER:?Set MOMCOZY_STAGING_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MOMCOZY_STAGING_MINIO_ROOT_PASSWORD:?Set MOMCOZY_STAGING_MINIO_ROOT_PASSWORD}
     volumes:
       - minio_staging_data:/data
+    networks:
+      staging:
+        aliases:
+          - staging-minio
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://127.0.0.1:9000/minio/health/live",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
     depends_on:
       minio:
-        condition: service_started
-    entrypoint: >
-      /bin/sh -c "
-      until mc alias set staging http://minio:9000 minioadmin minioadmin; do
-        sleep 1;
-      done;
-      mc mb --ignore-existing staging/momcozy-staging;
-      "
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MOMCOZY_STAGING_MINIO_ROOT_USER:?Set MOMCOZY_STAGING_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MOMCOZY_STAGING_MINIO_ROOT_PASSWORD:?Set MOMCOZY_STAGING_MINIO_ROOT_PASSWORD}
+    networks:
+      - staging
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set staging http://staging-minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing staging/momcozy-staging
+        mc mb --ignore-existing staging/agent-runtime-staging
+    restart: "no"
 
 volumes:
   postgres_staging_data:
   redis_staging_data:
   minio_staging_data:
+
+networks:
+  staging:
+    name: momcozy-lab-staging

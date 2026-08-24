@@ -26,10 +26,10 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements-dev.txt
 
-      - name: Lint production backend
+      - name: Lint backend
         run: python -m ruff check app tests scripts
 
-      - name: Type-check production backend
+      - name: Type-check backend
         run: python -m mypy app scripts
 
       - name: Run backend tests
@@ -57,7 +57,7 @@ jobs:
           name: momcozy-product-openapi
           path: docs/openapi.generated.json
 
-      - name: Scan production backend for legacy runtime references
+      - name: Scan backend for legacy runtime references
         run: |
           ! grep -R -E 'previous_response_id|ChatSession|ENTRY_API_KEY|query_params.get\("user_id"|momcozy_agent' \
             app migrations tests
@@ -74,11 +74,17 @@ jobs:
         run: |
           MOMCOZY_BACKEND_ENV_FILE=env/compose.local.env.example \
             docker compose -f docker-compose.local.yml config
-          MOMCOZY_BACKEND_ENV_FILE=env/compose.staging.env.example \
-            docker compose -f docker-compose.staging.yml config
-          MOMCOZY_BACKEND_IMAGE=momcozy-lab-backend:ci \
-            MOMCOZY_BACKEND_ENV_FILE=env/compose.production.env.example \
-            docker compose -f docker-compose.production.yml config
+          MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD=ci-postgres-admin-password \
+            MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD=ci-product-postgres-password \
+            MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD=ci-agent-postgres-password \
+            MOMCOZY_STAGING_REDIS_PASSWORD=ci-redis-password \
+            MOMCOZY_STAGING_MINIO_ROOT_USER=ci-minio-user \
+            MOMCOZY_STAGING_MINIO_ROOT_PASSWORD=ci-minio-password \
+            MOMCOZY_BACKEND_ENV_FILE=env/compose.staging.env.example \
+            docker compose \
+              --env-file env/compose.staging.env.example \
+              -f docker-compose.staging.yml \
+              config
 
       - name: Build backend image
         run: docker build -f Dockerfile .

@@ -22,7 +22,9 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "actor_user_id",
         "make backend-productization-status",
         "make backend-staging-smoke",
-        "make backend-production-readiness",
+        "momcozy-lab-staging",
+        "agent_runtime_staging",
+        "agent-runtime-staging",
         "empty database",
         "upgrading an older Product schema",
     ]:
@@ -30,6 +32,8 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
 
     for retired in [
         "make backend-worker-backlog",
+        "make backend-production-readiness",
+        "docker-compose.production.yml",
         "make backend-agent-recover-stuck-runs",
         "recover_stuck_agent_runs.py",
         "AGENT_PROVIDER_EVAL_MAX_CASES",
@@ -54,7 +58,7 @@ def test_release_smoke_checklist_covers_product_and_runtime_boundary() -> None:
         "/v1/health/metrics",
         "make backend-productization-status",
         "make backend-smoke",
-        "make backend-production-readiness",
+        "make backend-staging-smoke",
         "OpenAPI snapshot",
     ]:
         assert phrase in text
@@ -64,5 +68,6 @@ def test_release_smoke_checklist_covers_product_and_runtime_boundary() -> None:
         "test_agent_task8_observed_eval.py",
         "make backend-worker-backlog",
         "run_agent_fact_eval.py",
+        "make backend-production-readiness",
     ]:
         assert retired not in text

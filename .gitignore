@@ -25,4 +25,5 @@ build/
 *.egg-info/
 
 *.sh
+!deploy/staging/init-postgres.sh
 data/

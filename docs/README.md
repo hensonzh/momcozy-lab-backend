@@ -24,7 +24,7 @@ workers, and evals belong to the independently deployed Agent Runtime repository
 - `deployment-runbook.md`: Product Backend deployment, rollback, and incident
   procedures.
 - `release-smoke-checklist.md`: Product Backend release acceptance checklist.
-- `environment-profiles.md`: local, test, and production environment rules.
+- `environment-profiles.md`: local, test, and staging environment rules.
 - `postgres-integration-profile.md`: PostgreSQL integration checks.
 - `object-storage-integration-profile.md`: object storage integration checks.
 

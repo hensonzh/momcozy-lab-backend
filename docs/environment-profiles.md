@@ -4,8 +4,8 @@ Keep real secrets outside the repository. Copy example files into local private
 files or the deployment secret manager.
 
 Environment names are fixed: `local` is developer-only, `test` is reserved for
-automated tests/CI, `staging` is the shared internal server, and `production` is
-the real production environment. A deployable profile must use the same token
+automated tests/CI, and `staging` is the shared internal server. A deployable
+profile must use the same token
 in its Compose filename, env filename, Compose project, and convenience targets.
 Release images use the environment-neutral repository name plus an immutable
 commit tag or digest (for example `momcozy-lab-backend:<git-sha>`); legacy names
@@ -16,12 +16,13 @@ such as `momcozy-production-backend` must not be reused.
 | Profile | File | Purpose |
 |---|---|---|
 | Local compose | `env/compose.local.env.example` | Product API with Compose Postgres, Redis, and MinIO. |
-| Staging compose | `env/compose.staging.env.example` | Product API and isolated infrastructure on the shared staging server. |
-| Production compose | `env/compose.production.env.example` | Product API with managed Postgres, Redis, and object storage. |
+| Staging compose | `env/compose.staging.env.example` | Product API plus the one shared staging PostgreSQL, Redis, MinIO, and network. |
 
 The Product compose profiles build and run only `migrate`, `api`, and the
-profile-appropriate infrastructure. Agent Runtime has a separate configuration,
-deployment, and repository.
+profile-appropriate infrastructure. Agent Runtime has a separate application
+configuration and repository, but joins Backend's staging network and consumes
+the shared infrastructure through isolated databases, logical Redis DBs, and
+buckets.
 
 ## Common Commands
 
@@ -47,7 +48,7 @@ eval settings are Runtime-owned and must not be added to Product profiles.
 The shared shape across environments is:
 
 ```env
-APP_ENV=local|test|staging|production
+APP_ENV=local|test|staging
 DATABASE_URL=...
 REDIS_URL=...
 
@@ -86,8 +87,8 @@ Runtime configuration.
 - `AGENT_RUNTIME_SERVICE_API_KEY` authenticates only Runtime calls to
   `/v1/internal/agent/*`.
 - Every hostname used by Runtime in `PRODUCT_BACKEND_BASE_URL` and
-  `AUTH_JWKS_URL` must also appear in Product `TRUSTED_HOSTS`; the production
-  templates use `product-api.internal`.
+  `AUTH_JWKS_URL` must also appear in Product `TRUSTED_HOSTS`; staging uses the
+  private network alias `product-backend`.
 - Authenticated `/v1/internal/agent/*` traffic uses the independent
   `AGENT_RUNTIME_RATE_LIMIT_REQUESTS` /
   `AGENT_RUNTIME_RATE_LIMIT_WINDOW_SECONDS` bucket. Size it from Agent
@@ -106,20 +107,17 @@ Runtime configuration.
   never extends capability lifetime, remains rate limited, and redacts bearer
   tokens from application request and exception logs.
 
-## Production Rules
+## Staging Shared Infrastructure
 
-Production startup rejects implicit localhost Postgres/Redis, filesystem object
-storage, missing managed storage credentials, missing service keys, missing RSA
-signing material, and wildcard trust settings.
+- Backend Compose owns network `momcozy-lab-staging` and must start first.
+- PostgreSQL uses separate roles/databases: `momcozy_staging` and
+  `agent_runtime_staging`.
+- Product uses Redis logical DB 0; Agent uses DB 1 and its existing
+  `agent-runtime:*`/`momcozy-agent-runtime:*` key namespaces.
+- Product uses bucket `momcozy-staging`; Agent uses
+  `agent-runtime-staging`.
+- PostgreSQL, Redis, and MinIO have no host port mappings.
 
-The production compose starts only application processes. Infrastructure URLs
-must point to managed services. `AGENT_MODEL_ASSET_PUBLIC_BASE_URL` must be the
-public HTTPS Product API origin reachable from the model provider.
-
-`VISION_PROVIDER=openai` reads owner-scoped Product file bytes and sends a
-bounded request with `store=false` and a hard timeout. Keep it disabled until
-`vision-provider-integration.md` passes with deployment-owned credentials.
-
-Local and staging profiles use Compose-managed Postgres, Redis, and MinIO.
-Production changes only environment values; Product business code and internal
-Agent API contracts remain the same.
+No production Compose or env template is currently maintained. The code-level
+production startup validation remains available for a future reviewed
+production design.

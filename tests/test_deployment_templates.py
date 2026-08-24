@@ -4,10 +4,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_LOCAL_ENV = ROOT / "env" / "compose.local.env.example"
 COMPOSE_STAGING_ENV = ROOT / "env" / "compose.staging.env.example"
-COMPOSE_PRODUCTION_ENV = ROOT / "env" / "compose.production.env.example"
 LOCAL_COMPOSE = ROOT / "docker-compose.local.yml"
 STAGING_COMPOSE = ROOT / "docker-compose.staging.yml"
-PRODUCTION_COMPOSE = ROOT / "docker-compose.production.yml"
+POSTGRES_INIT = ROOT / "deploy" / "staging" / "init-postgres.sh"
 NGINX_CONFIG = ROOT / "deploy" / "nginx" / "momcozy-api.conf"
 
 RETIRED_RUNTIME_ENV_NAMES = (
@@ -36,15 +35,14 @@ def test_project_metadata_uses_backend_name() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text()
     local_compose = LOCAL_COMPOSE.read_text()
     staging_compose = STAGING_COMPOSE.read_text()
-    production_compose = PRODUCTION_COMPOSE.read_text()
 
     assert 'name = "backend"' in pyproject
     assert local_compose.startswith("name: momcozy-lab-backend-local\n")
     assert staging_compose.startswith("name: momcozy-lab-backend-staging\n")
-    assert production_compose.startswith("name: momcozy-lab-backend-production\n")
     assert local_compose.count("image: momcozy-lab-backend:local") == 2
     assert "${MOMCOZY_BACKEND_IMAGE:-momcozy-lab-backend:staging}" in staging_compose
-    assert "${MOMCOZY_BACKEND_IMAGE:?" in production_compose
+    assert not (ROOT / "docker-compose.production.yml").exists()
+    assert not (ROOT / "env" / "compose.production.env.example").exists()
     assert (
         ROOT / ".github" / "workflows" / "backend-ci.yml"
     ).exists()
@@ -157,14 +155,14 @@ def test_environment_profiles_keep_product_runtime_boundary_only() -> None:
     assert (env_dir / "compose.staging.env.example").exists()
     assert not (env_dir / "compose.test.env.example").exists()
     assert not (ROOT / "docker-compose.test.yml").exists()
-    assert (env_dir / "compose.production.env.example").exists()
+    assert not (env_dir / "compose.production.env.example").exists()
     assert not (env_dir / "compose.prod.env.example").exists()
     assert not (ROOT / "docker-compose.prod.yml").exists()
     assert not (env_dir / "local.env.example").exists()
     assert not (env_dir / "staging.env.example").exists()
     assert not (env_dir / "production.env.example").exists()
 
-    for env_path in (COMPOSE_LOCAL_ENV, COMPOSE_STAGING_ENV, COMPOSE_PRODUCTION_ENV):
+    for env_path in (COMPOSE_LOCAL_ENV, COMPOSE_STAGING_ENV):
         env = env_path.read_text()
         names = _environment_names(env)
         assert "AGENT_RUNTIME_SERVICE_API_KEY=" in env
@@ -180,7 +178,7 @@ def test_environment_profiles_keep_product_runtime_boundary_only() -> None:
 
 
 def test_environment_profiles_use_asymmetric_user_jwt_contract() -> None:
-    for env_path in (COMPOSE_LOCAL_ENV, COMPOSE_STAGING_ENV, COMPOSE_PRODUCTION_ENV):
+    for env_path in (COMPOSE_LOCAL_ENV, COMPOSE_STAGING_ENV):
         env = env_path.read_text()
 
         assert "AUTH_JWT_PRIVATE_KEY_B64=" in env
@@ -218,7 +216,8 @@ def test_makefile_builds_only_product_api_and_migration_services() -> None:
     assert "$(PYTHON) scripts/check_product_asset_storage.py" in makefile
     assert "backend-productization-status:" in makefile
     assert "backend-staging-smoke:" in makefile
-    assert "backend-production-readiness:" in makefile
+    assert "backend-production" not in makefile
+    assert "PRODUCTION_COMPOSE" not in makefile
     for retired in (
         "backend-workers",
         "backend-local-workers",
@@ -254,7 +253,7 @@ def test_docker_context_excludes_generated_and_private_artifacts() -> None:
 
 def test_product_media_provider_configuration_is_preserved() -> None:
     local_env = COMPOSE_LOCAL_ENV.read_text()
-    production_env = COMPOSE_PRODUCTION_ENV.read_text()
+    staging_env = COMPOSE_STAGING_ENV.read_text()
 
     assert "OPENAI_API_KEY=" in local_env
     assert "VOICE_PROVIDER=disabled" in local_env
@@ -264,19 +263,16 @@ def test_product_media_provider_configuration_is_preserved() -> None:
     assert "VOICE_TTS_RESOURCE_ID=seed-tts-2.0" in local_env
     assert "VOICE_REQUEST_TIMEOUT_SECONDS=30" in local_env
     assert "VISION_PROVIDER=disabled" in local_env
-    assert "VOICE_PROVIDER=doubao" in production_env
-    assert "VOICE_API_KEY=${VOICE_API_KEY}" in production_env
-    assert "OPENAI_API_KEY=${OPENAI_API_KEY}" in production_env
+    assert "VOICE_PROVIDER=disabled" in staging_env
+    assert "VISION_PROVIDER=disabled" in staging_env
 
 
 def test_deployment_templates_have_no_embedded_runtime_processes_or_assets() -> None:
     paths = [
         COMPOSE_LOCAL_ENV,
         COMPOSE_STAGING_ENV,
-        COMPOSE_PRODUCTION_ENV,
         LOCAL_COMPOSE,
         STAGING_COMPOSE,
-        PRODUCTION_COMPOSE,
         ROOT / "Makefile",
     ]
 
@@ -298,44 +294,13 @@ def test_compose_exposes_minio_as_default_local_object_storage() -> None:
     assert "mc mb --ignore-existing local/momcozy-local" in compose
 
 
-def test_production_compose_contains_only_product_application_services() -> None:
-    compose = PRODUCTION_COMPOSE.read_text()
-
-    assert "\n  api:" in compose
-    assert "\n  migrate:" in compose
-    assert "\n  postgres:" not in compose
-    assert "\n  redis:" not in compose
-    assert "\n  minio:" not in compose
-    assert "\n  minio-init:" not in compose
-    for retired in RETIRED_DEPLOYMENT_TOKENS:
-        assert retired not in compose
-
-
-def test_production_compose_uses_production_env_and_safe_api_bind() -> None:
-    compose = PRODUCTION_COMPOSE.read_text()
-    env = COMPOSE_PRODUCTION_ENV.read_text()
-
-    assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.production.env}" in compose
-    assert "${MOMCOZY_BACKEND_IMAGE:?" in compose
-    assert "${MOMCOZY_API_BIND:-127.0.0.1:8000}:8000" in compose
-    assert "python -m alembic -c alembic.ini upgrade head" in compose
-    assert "restart: unless-stopped" in compose
-    assert "APP_ENV=production" in env
-    assert "OBJECT_STORAGE_PROVIDER=oss" in env
-    assert (
-        "TRUSTED_HOSTS="
-        "lute-momcozylab.luteos.cloud,product-api.internal"
-    ) in env
-    assert "AGENT_RUNTIME_RATE_LIMIT_REQUESTS=6000" in env
-    assert "AGENT_RUNTIME_RATE_LIMIT_WINDOW_SECONDS=60" in env
-
-
-def test_staging_compose_starts_private_containerized_infrastructure() -> None:
+def test_staging_compose_owns_shared_containerized_infrastructure() -> None:
     compose = STAGING_COMPOSE.read_text()
+    init_script = POSTGRES_INIT.read_text()
 
     assert "postgres:16" in compose
     assert "redis:7" in compose
-    assert "minio/minio:latest" in compose
+    assert "minio/minio:RELEASE.2025-07-23T15-54-02Z" in compose
     assert "postgres_staging_data:" in compose
     assert "redis_staging_data:" in compose
     assert "minio_staging_data:" in compose
@@ -343,6 +308,27 @@ def test_staging_compose_starts_private_containerized_infrastructure() -> None:
     assert "6379:6379" not in compose
     assert "9000:9000" not in compose
     assert "mc mb --ignore-existing staging/momcozy-staging" in compose
+    assert "mc mb --ignore-existing staging/agent-runtime-staging" in compose
+    assert "name: momcozy-lab-staging" in compose
+    assert "staging-postgres" in compose
+    assert "staging-redis" in compose
+    assert "staging-minio" in compose
+    assert "product-backend" in compose
+    assert "momcozy_staging" in init_script
+    assert "agent_runtime_staging" in init_script
+    assert "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD" in init_script
+    assert "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD" in init_script
+    assert "SELECT count(*) FROM pg_database" in compose
+    for required_secret in (
+        "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD",
+        "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD",
+        "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD",
+        "MOMCOZY_STAGING_REDIS_PASSWORD",
+        "MOMCOZY_STAGING_MINIO_ROOT_USER",
+        "MOMCOZY_STAGING_MINIO_ROOT_PASSWORD",
+    ):
+        assert f"${{{required_secret}:?" in compose
+        assert f'{required_secret}: ""' in compose
     for retired in RETIRED_DEPLOYMENT_TOKENS:
         assert retired not in compose
 
@@ -354,24 +340,29 @@ def test_staging_compose_uses_staging_env_and_safe_api_bind() -> None:
     assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.staging.env}" in compose
     assert "${MOMCOZY_STAGING_API_BIND:-127.0.0.1:8001}:8000" in compose
     assert "APP_ENV=staging" in env
-    assert "postgresql+asyncpg://momcozy_staging:momcozy_staging@postgres:5432/momcozy_staging" in env
-    assert "REDIS_URL=redis://redis:6379/0" in env
+    assert (
+        "DATABASE_URL=postgresql+asyncpg://momcozy_staging:"
+        "${MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD}"
+        "@staging-postgres:5432/momcozy_staging"
+    ) in env
+    assert (
+        "REDIS_URL=redis://:${MOMCOZY_STAGING_REDIS_PASSWORD}"
+        "@staging-redis:6379/0"
+    ) in env
     assert "OBJECT_STORAGE_PROVIDER=minio" in env
     assert "OBJECT_STORAGE_BUCKET=momcozy-staging" in env
-    assert "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000" in env
+    assert "OBJECT_STORAGE_ENDPOINT_URL=http://staging-minio:9000" in env
+    assert "TRUSTED_HOSTS=product-staging.example.test,product-backend," in env
 
 
-def test_makefile_exposes_product_production_and_staging_release_targets() -> None:
+def test_makefile_exposes_staging_release_targets_only() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
-    assert "PRODUCTION_COMPOSE_ENV_FILE ?= env/compose.production.env" in makefile
-    assert "$(PRODUCTION_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api" in makefile
-    assert "$(PRODUCTION_COMPOSE) --profile tools run --rm migrate" in makefile
-    assert "$(PRODUCTION_COMPOSE) up -d --force-recreate api" in makefile
-    assert "backend-production-services:" in makefile
-    assert "backend-production-logs:" in makefile
+    assert "PRODUCTION_COMPOSE" not in makefile
+    assert "backend-production" not in makefile
 
     assert "STAGING_COMPOSE_ENV_FILE ?= env/compose.staging.env" in makefile
+    assert "--env-file $(STAGING_COMPOSE_ENV_FILE)" in makefile
     assert "$(STAGING_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api" in makefile
     assert "$(STAGING_COMPOSE) --profile tools run --rm migrate" in makefile
     assert "$(STAGING_COMPOSE) up -d postgres redis minio minio-init" in makefile

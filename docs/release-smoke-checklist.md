@@ -7,13 +7,12 @@ the Agent Runtime release.
 ## Infrastructure
 
 - `make backend-productization-status` passes.
-- `make backend-staging-smoke` passes in the isolated staging profile.
-- `make backend-production-readiness` passes with production-managed dependencies.
+- `make backend-staging-smoke` passes against the shared staging infrastructure.
 - `make backend-smoke` passes.
 - `GET /v1/health/live` returns `200`.
-- `GET /v1/health/ready` returns `200` and checks Postgres/Redis in production.
+- `GET /v1/health/ready` returns `200` and checks staging Postgres/Redis.
 - `GET /v1/health/metrics` returns Product request/dependency metrics;
-  production calls include the operator `X-Service-Key`.
+  staging calls include the operator `X-Service-Key`.
 - Alembic head matches the expected release revision.
 - CORS, trusted-host, security-header, rate-limit, and upload-limit checks pass.
 - Object-storage write/read/delete and Product asset checks pass.

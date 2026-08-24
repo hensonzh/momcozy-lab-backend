@@ -1,8 +1,9 @@
 # Product Backend Deployment Runbook
 
-This runbook covers only the Product Backend. Agent Runtime is deployed from a
-separate repository and has its own database, workers, model configuration,
-evals, and run-recovery procedures.
+This runbook covers the Product Backend and the staging infrastructure it owns.
+Agent Runtime is deployed from a separate repository and has its own database,
+workers, model configuration, evals, and run-recovery procedures, while sharing
+the same PostgreSQL, Redis, and MinIO service instances.
 
 The current shared server is `staging`. The word `test` is reserved for
 automated tests and CI; it is not a deployable server profile. Build release
@@ -24,10 +25,12 @@ correlation values, but they are not Product Backend execution state.
 
 ## Preflight
 
-1. Confirm the production configuration includes:
-   - `APP_ENV=production`
-   - managed `DATABASE_URL` and `REDIS_URL`
-   - managed `OBJECT_STORAGE_*`
+1. Confirm the private staging configuration includes:
+   - `APP_ENV=staging`
+   - all six `MOMCOZY_STAGING_*` infrastructure secrets
+   - Product `DATABASE_URL` on `momcozy_staging`
+   - Product `REDIS_URL` on logical DB 0
+   - Product bucket `momcozy-staging`
    - `AUTH_JWT_PRIVATE_KEY_B64`
    - `AUTH_JWT_ISSUER`
    - `AUTH_JWT_PRODUCT_AUDIENCE`
@@ -38,8 +41,7 @@ correlation values, but they are not Product Backend execution state.
    - explicit `CORS_ALLOWED_ORIGINS` and `TRUSTED_HOSTS`
    - environment-appropriate rate limits and upload limits
 2. Confirm the Product Backend is the only holder of the JWT private key.
-3. Confirm production does not use localhost infrastructure or filesystem
-   object storage.
+3. Confirm PostgreSQL, Redis, and MinIO have no host/public port mappings.
 4. Confirm `GET /.well-known/jwks.json` returns only public RSA fields and the
    expected active key id.
 5. Confirm the Runtime service key differs from the general operator service
@@ -55,7 +57,6 @@ correlation values, but they are not Product Backend execution state.
    ```bash
    make backend-productization-status
    make backend-staging-smoke
-   make backend-production-readiness
    ```
 
 ## Release
@@ -86,58 +87,18 @@ Product deployment does not start or manage Agent Runtime processes.
 Product Compose does not start an Agent worker; Runtime is independently
 deployed.
 
-## Production Docker Compose
-
-`docker-compose.production.yml` is the server deployment template. It contains the
-Product `migrate` job and `api` service only. Managed Postgres, Redis, and object
-storage are supplied through environment variables.
-
-Prepare a private environment file:
-
-```bash
-cp env/compose.production.env.example env/compose.production.env
-export MOMCOZY_BACKEND_IMAGE=momcozy-lab-backend:<git-sha>
-```
-
-Build and release:
-
-```bash
-make backend-production-build
-make backend-production-up
-```
-
-`backend-production-up` builds the current Product image, runs migrations, and
-recreates the API. Use `BACKEND_BUILD_FLAGS=--no-cache` only when a clean image
-build is required.
-
-Restart the API without another migration:
-
-```bash
-make backend-production-services
-```
-
-Inspect the deployment:
-
-```bash
-make backend-production-ps
-make backend-production-logs
-```
-
-The production compose binds the API to `127.0.0.1:8000` by default. Put Nginx,
-Caddy, or a cloud load balancer in front of it. External health probes should
-use `/v1/health/ready`, not container liveness alone.
-
-To deploy a registry image:
-
-```bash
-MOMCOZY_BACKEND_IMAGE=registry.example.com/momcozy/backend:2026-07-26 \
-make backend-production-up
-```
-
 ## Staging Docker Compose
 
-`docker-compose.staging.yml` runs the Product API with isolated Postgres, Redis,
-and MinIO. It does not start Agent Runtime.
+`docker-compose.staging.yml` is the only staging infrastructure owner. It creates:
+
+- Docker network `momcozy-lab-staging`;
+- PostgreSQL databases/roles `momcozy_staging` and `agent_runtime_staging`;
+- Redis, with Product on logical DB 0 and Agent on logical DB 1;
+- MinIO buckets `momcozy-staging` and `agent-runtime-staging`;
+- Product API alias `product-backend` and host bind `127.0.0.1:8001`.
+
+Generate URL-safe secrets, copy the example, fill every empty
+`MOMCOZY_STAGING_*` value, then start Backend first:
 
 ```bash
 cp env/compose.staging.env.example env/compose.staging.env
@@ -146,14 +107,26 @@ make backend-staging-ps
 make backend-staging-logs
 ```
 
-Stop it while preserving data volumes:
+Then copy only the shared Agent password/Redis/MinIO values into the private
+Agent staging env and start Agent from its repository. Agent joins the existing
+network; it must not create another PostgreSQL, Redis, or MinIO service.
+
+Stop Agent before stopping Backend. To stop Backend while preserving volumes:
 
 ```bash
 make backend-staging-down
 ```
 
-The staging API binds to `127.0.0.1:8001` by default. Keep Postgres, Redis, and
-MinIO private to the Compose network.
+`make backend-staging-reset` is destructive: it removes both Product and Agent
+staging database data plus both MinIO buckets. Use it only after both application
+stacks are stopped and the reset has been explicitly approved.
+
+The PostgreSQL init script runs only for an empty named volume. It does not
+upgrade an older staging volume or rotate existing role passwords; those
+operations require an explicit migration/credential-rotation procedure.
+
+No production deployment profile is currently shipped. Production application
+safeguards remain in code until a separate production design is approved.
 
 ## Agent Runtime Integration Boundary
 

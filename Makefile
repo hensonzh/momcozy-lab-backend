@@ -1,14 +1,12 @@
 COMPOSE_ENV_FILE ?= env/compose.local.env
 STAGING_COMPOSE_ENV_FILE ?= env/compose.staging.env
-PRODUCTION_COMPOSE_ENV_FILE ?= env/compose.production.env
 BACKEND_ENV_FILE ?= $(COMPOSE_ENV_FILE)
 PYTHON ?= .venv/bin/python
 BACKEND_BUILD_FLAGS ?=
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f docker-compose.local.yml
-STAGING_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE) docker compose -f docker-compose.staging.yml
-PRODUCTION_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(PRODUCTION_COMPOSE_ENV_FILE) docker compose -f docker-compose.production.yml
+STAGING_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE) docker compose --env-file $(STAGING_COMPOSE_ENV_FILE) -f docker-compose.staging.yml
 
-.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-staging-build backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset backend-staging-ps backend-staging-logs backend-production-build backend-production-migrate backend-production-up backend-production-services backend-production-down backend-production-ps backend-production-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-production-readiness backend-env-print
+.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-staging-build backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset backend-staging-ps backend-staging-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-env-print
 
 backend-local-build:
 	$(MAKE) backend-build
@@ -67,31 +65,6 @@ backend-staging-ps:
 backend-staging-logs:
 	$(STAGING_COMPOSE) logs -f api
 
-backend-production-build:
-	$(PRODUCTION_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api
-
-backend-production-migrate:
-	$(PRODUCTION_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
-	$(PRODUCTION_COMPOSE) --profile tools run --rm migrate
-
-backend-production-up:
-	$(MAKE) backend-production-build PRODUCTION_COMPOSE_ENV_FILE=$(PRODUCTION_COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
-	$(MAKE) backend-production-migrate PRODUCTION_COMPOSE_ENV_FILE=$(PRODUCTION_COMPOSE_ENV_FILE)
-	$(PRODUCTION_COMPOSE) up -d --force-recreate api
-
-backend-production-services:
-	$(PRODUCTION_COMPOSE) build $(BACKEND_BUILD_FLAGS) api
-	$(PRODUCTION_COMPOSE) up -d --force-recreate api
-
-backend-production-down:
-	$(PRODUCTION_COMPOSE) down
-
-backend-production-ps:
-	$(PRODUCTION_COMPOSE) ps
-
-backend-production-logs:
-	$(PRODUCTION_COMPOSE) logs -f api
-
 backend-export-contracts:
 	$(PYTHON) scripts/export_openapi.py --output docs/openapi.generated.json
 	$(PYTHON) scripts/export_api_surface_catalog.py --openapi-input docs/openapi.generated.json --output docs/api-surface-catalog.md
@@ -114,14 +87,9 @@ backend-staging-smoke:
 	$(MAKE) backend-productization-status
 	$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)
 
-backend-production-readiness:
-	$(MAKE) backend-productization-status
-	$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(PRODUCTION_COMPOSE_ENV_FILE)
-
 backend-env-print:
 	@echo "BACKEND_ENV_FILE=$(BACKEND_ENV_FILE)"
 	@echo "COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE)"
 	@echo "STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)"
-	@echo "PRODUCTION_COMPOSE_ENV_FILE=$(PRODUCTION_COMPOSE_ENV_FILE)"
 	@echo "PYTHON=$(PYTHON)"
 	@echo "BACKEND_BUILD_FLAGS=$(BACKEND_BUILD_FLAGS)"

@@ -9,7 +9,7 @@ WORKFLOW = (
 )
 
 
-def test_production_backend_ci_runs_core_gates() -> None:
+def test_backend_ci_runs_core_gates() -> None:
     text = WORKFLOW.read_text()
 
     for phrase in [
@@ -22,8 +22,8 @@ def test_production_backend_ci_runs_core_gates() -> None:
         "scripts/export_openapi.py",
         "previous_response" + "_id|Chat" + "Session|ENTRY" + "_API_KEY",
         "docker compose -f docker-compose.local.yml config",
-        "docker compose -f docker-compose.staging.yml config",
-        "docker compose -f docker-compose.production.yml config",
+        "-f docker-compose.staging.yml",
+        "--env-file env/compose.staging.env.example",
         "docker build -f Dockerfile .",
         "postgres-migration",
         "python -m alembic -c alembic.ini upgrade head",
@@ -39,6 +39,9 @@ def test_production_backend_ci_runs_core_gates() -> None:
     ]:
         assert phrase in text
 
+    assert "docker-compose.production.yml" not in text
+    assert "compose.production.env" not in text
+
     for retired in [
         "test_agent_task8_observed_eval",
         "run_agent_fact_eval.py",
@@ -49,7 +52,7 @@ def test_production_backend_ci_runs_core_gates() -> None:
         assert retired not in text
 
 
-def test_production_backend_ci_is_scoped_to_isolated_backend() -> None:
+def test_backend_ci_is_scoped_to_product_backend() -> None:
     text = WORKFLOW.read_text()
 
     assert "**" in text

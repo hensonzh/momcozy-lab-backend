@@ -57,7 +57,7 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "docs/release-smoke-checklist.md",
         "docker-compose.local.yml",
         "docker-compose.staging.yml",
-        "docker-compose.production.yml",
+        "deploy/staging/init-postgres.sh",
         "scripts/check_database_profile.py",
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
@@ -84,19 +84,12 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
         ],
         "env/compose.staging.env.example": [
             "APP_ENV=staging",
-            "DATABASE_URL=postgresql+asyncpg://momcozy_staging:momcozy_staging@postgres",
-            "REDIS_URL=redis://redis",
+            "DATABASE_URL=postgresql+asyncpg://momcozy_staging:${MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD}@staging-postgres",
+            "REDIS_URL=redis://:${MOMCOZY_STAGING_REDIS_PASSWORD}@staging-redis:6379/0",
             "OBJECT_STORAGE_PROVIDER=minio",
             "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
             "AUTH_JWT_ISSUER=momcozy-staging",
-        ],
-        "env/compose.production.env.example": [
-            "APP_ENV=production",
-            "OBJECT_STORAGE_PROVIDER=oss",
-            "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
-            "AUTH_JWT_ISSUER=momcozy-production",
-            "AUTH_REQUIRE_ACTIVE_SESSION=true",
-            "METRICS_REQUIRE_SERVICE_KEY=true",
+            "OBJECT_STORAGE_ENDPOINT_URL=http://staging-minio:9000",
         ],
     }
     common = [
@@ -152,8 +145,8 @@ def _check_ci_workflow(root: Path) -> list[CheckResult]:
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
         "docker-compose.local.yml config",
-        "docker-compose.staging.yml config",
-        "docker-compose.production.yml config",
+        "docker-compose.staging.yml",
+        "--env-file env/compose.staging.env.example",
     ]
     retired = [
         "test_agent_task8_observed_eval",
@@ -171,7 +164,6 @@ def _check_makefile(root: Path) -> list[CheckResult]:
         "backend-productization-status:",
         "backend-smoke:",
         "backend-staging-smoke:",
-        "backend-production-readiness:",
         "scripts/check_redis_profile.py",
         "scripts/check_product_asset_storage.py",
     ]
