@@ -3,13 +3,21 @@
 Keep real secrets outside the repository. Copy example files into local private
 files or the deployment secret manager.
 
+Environment names are fixed: `local` is developer-only, `test` is reserved for
+automated tests/CI, `staging` is the shared internal server, and `production` is
+the real production environment. A deployable profile must use the same token
+in its Compose filename, env filename, Compose project, and convenience targets.
+Release images use the environment-neutral repository name plus an immutable
+commit tag or digest (for example `momcozy-lab-backend:<git-sha>`); legacy names
+such as `momcozy-production-backend` must not be reused.
+
 ## Profiles
 
 | Profile | File | Purpose |
 |---|---|---|
 | Local compose | `env/compose.local.env.example` | Product API with Compose Postgres, Redis, and MinIO. |
-| Server test compose | `env/compose.test.env.example` | Product API and isolated infrastructure on a test server. |
-| Production compose | `env/compose.prod.env.example` | Product API with managed Postgres, Redis, and object storage. |
+| Staging compose | `env/compose.staging.env.example` | Product API and isolated infrastructure on the shared staging server. |
+| Production compose | `env/compose.production.env.example` | Product API with managed Postgres, Redis, and object storage. |
 
 The Product compose profiles build and run only `migrate`, `api`, and the
 profile-appropriate infrastructure. Agent Runtime has a separate configuration,
@@ -39,7 +47,7 @@ eval settings are Runtime-owned and must not be added to Product profiles.
 The shared shape across environments is:
 
 ```env
-APP_ENV=local|test|production
+APP_ENV=local|test|staging|production
 DATABASE_URL=...
 REDIS_URL=...
 
@@ -112,6 +120,6 @@ public HTTPS Product API origin reachable from the model provider.
 bounded request with `store=false` and a hard timeout. Keep it disabled until
 `vision-provider-integration.md` passes with deployment-owned credentials.
 
-Local and server-test profiles use Compose-managed Postgres, Redis, and MinIO.
+Local and staging profiles use Compose-managed Postgres, Redis, and MinIO.
 Production changes only environment values; Product business code and internal
 Agent API contracts remain the same.

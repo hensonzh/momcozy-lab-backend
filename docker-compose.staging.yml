@@ -1,12 +1,12 @@
-name: backend-test
+name: momcozy-lab-backend-staging
 
 x-backend-image: &backend-image
-  image: ${MOMCOZY_BACKEND_IMAGE:-backend:test}
+  image: ${MOMCOZY_BACKEND_IMAGE:-momcozy-lab-backend:staging}
   build:
     context: .
     dockerfile: Dockerfile
   env_file:
-    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.test.env}
+    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.staging.env}
 
 services:
   api:
@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
     init: true
     ports:
-      - "${MOMCOZY_TEST_API_BIND:-127.0.0.1:8001}:8000"
+      - "${MOMCOZY_STAGING_API_BIND:-127.0.0.1:8001}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,13 +46,13 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: momcozy_test
-      POSTGRES_PASSWORD: momcozy_test
-      POSTGRES_DB: momcozy_test
+      POSTGRES_USER: momcozy_staging
+      POSTGRES_PASSWORD: momcozy_staging
+      POSTGRES_DB: momcozy_staging
     volumes:
-      - postgres_test_data:/var/lib/postgresql/data
+      - postgres_staging_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U momcozy_test -d momcozy_test"]
+      test: ["CMD-SHELL", "pg_isready -U momcozy_staging -d momcozy_staging"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -61,7 +61,7 @@ services:
     image: redis:7
     restart: unless-stopped
     volumes:
-      - redis_test_data:/data
+      - redis_staging_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -76,7 +76,7 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
-      - minio_test_data:/data
+      - minio_staging_data:/data
 
   minio-init:
     image: minio/mc:latest
@@ -85,13 +85,13 @@ services:
         condition: service_started
     entrypoint: >
       /bin/sh -c "
-      until mc alias set test http://minio:9000 minioadmin minioadmin; do
+      until mc alias set staging http://minio:9000 minioadmin minioadmin; do
         sleep 1;
       done;
-      mc mb --ignore-existing test/momcozy-test;
+      mc mb --ignore-existing staging/momcozy-staging;
       "
 
 volumes:
-  postgres_test_data:
-  redis_test_data:
-  minio_test_data:
+  postgres_staging_data:
+  redis_staging_data:
+  minio_staging_data:

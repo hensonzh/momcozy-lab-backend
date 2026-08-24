@@ -1,12 +1,12 @@
-name: backend
+name: momcozy-lab-backend-production
 
 x-backend-image: &backend-image
-  image: ${MOMCOZY_BACKEND_IMAGE:-backend:latest}
+  image: ${MOMCOZY_BACKEND_IMAGE:?Set MOMCOZY_BACKEND_IMAGE to an immutable image tag or digest}
   build:
     context: .
     dockerfile: Dockerfile
   env_file:
-    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.prod.env}
+    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.production.env}
 
 services:
   api:

@@ -72,9 +72,13 @@ jobs:
 
       - name: Validate docker compose
         run: |
-          docker compose -f docker-compose.local.yml config
-          docker compose -f docker-compose.test.yml config
-          docker compose -f docker-compose.prod.yml config
+          MOMCOZY_BACKEND_ENV_FILE=env/compose.local.env.example \
+            docker compose -f docker-compose.local.yml config
+          MOMCOZY_BACKEND_ENV_FILE=env/compose.staging.env.example \
+            docker compose -f docker-compose.staging.yml config
+          MOMCOZY_BACKEND_IMAGE=momcozy-lab-backend:ci \
+            MOMCOZY_BACKEND_ENV_FILE=env/compose.production.env.example \
+            docker compose -f docker-compose.production.yml config
 
       - name: Build backend image
         run: docker build -f Dockerfile .

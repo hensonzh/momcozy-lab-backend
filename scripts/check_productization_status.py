@@ -56,8 +56,8 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "docs/environment-profiles.md",
         "docs/release-smoke-checklist.md",
         "docker-compose.local.yml",
-        "docker-compose.test.yml",
-        "docker-compose.prod.yml",
+        "docker-compose.staging.yml",
+        "docker-compose.production.yml",
         "scripts/check_database_profile.py",
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
@@ -82,15 +82,15 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
             "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
             "AUTH_JWT_ISSUER=momcozy-local",
         ],
-        "env/compose.test.env.example": [
-            "APP_ENV=test",
-            "DATABASE_URL=postgresql+asyncpg://momcozy_test:momcozy_test@postgres",
+        "env/compose.staging.env.example": [
+            "APP_ENV=staging",
+            "DATABASE_URL=postgresql+asyncpg://momcozy_staging:momcozy_staging@postgres",
             "REDIS_URL=redis://redis",
             "OBJECT_STORAGE_PROVIDER=minio",
             "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
-            "AUTH_JWT_ISSUER=momcozy-test",
+            "AUTH_JWT_ISSUER=momcozy-staging",
         ],
-        "env/compose.prod.env.example": [
+        "env/compose.production.env.example": [
             "APP_ENV=production",
             "OBJECT_STORAGE_PROVIDER=oss",
             "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
@@ -152,8 +152,8 @@ def _check_ci_workflow(root: Path) -> list[CheckResult]:
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
         "docker-compose.local.yml config",
-        "docker-compose.test.yml config",
-        "docker-compose.prod.yml config",
+        "docker-compose.staging.yml config",
+        "docker-compose.production.yml config",
     ]
     retired = [
         "test_agent_task8_observed_eval",
@@ -170,8 +170,8 @@ def _check_makefile(root: Path) -> list[CheckResult]:
         "backend-check-infra:",
         "backend-productization-status:",
         "backend-smoke:",
-        "backend-test-smoke:",
-        "backend-prod-readiness:",
+        "backend-staging-smoke:",
+        "backend-production-readiness:",
         "scripts/check_redis_profile.py",
         "scripts/check_product_asset_storage.py",
     ]

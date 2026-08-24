@@ -19,8 +19,8 @@ set -a; . env/compose.local.env; set +a
 | 检查数据库、Redis、对象存储和 Product 素材 | `make backend-check-infra` |
 | 检查静态产品化门禁 | `make backend-productization-status` |
 | 运行 Product 边界 smoke | `make backend-smoke` |
-| 测试环境验收 | `make backend-test-smoke` |
-| 生产发布前验收 | `make backend-prod-readiness` |
+| Staging 环境验收 | `make backend-staging-smoke` |
+| 生产发布前验收 | `make backend-production-readiness` |
 | 导出 OpenAPI 和 API surface | `make backend-export-contracts` |
 
 ## 脚本清单

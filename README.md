@@ -95,19 +95,19 @@ make backend-down
 ping, object-storage round trips, and the Product asset manifest. It contains
 no Agent worker or runtime-state checks.
 
-## Server Test
+## Staging
 
-The test Compose profile owns disposable PostgreSQL, Redis, and MinIO volumes
+The staging Compose profile owns resettable PostgreSQL, Redis, and MinIO volumes
 and binds Product API to `127.0.0.1:8001` by default:
 
 ```bash
-cp env/compose.test.env.example env/compose.test.env
-make backend-test-up
-make backend-test-smoke
+cp env/compose.staging.env.example env/compose.staging.env
+make backend-staging-up
+make backend-staging-smoke
 ```
 
-`make backend-test-reset` deletes the test Compose volumes and must only be used
-for disposable environments.
+`make backend-staging-reset` deletes the staging Compose volumes and must only
+be used while staging data remains explicitly resettable.
 
 ## Production
 
@@ -115,12 +115,13 @@ Production Compose starts only `api`; the one-time `migrate` service is in the
 `tools` profile. PostgreSQL, Redis, and object storage must be managed services:
 
 ```bash
-cp env/compose.prod.env.example env/compose.prod.env
-make backend-prod-readiness
-make backend-prod-up
+cp env/compose.production.env.example env/compose.production.env
+export MOMCOZY_BACKEND_IMAGE=momcozy-lab-backend:<git-sha>
+make backend-production-readiness
+make backend-production-up
 ```
 
-Use `backend-prod-services` to rebuild/restart Product API without rerunning
+Use `backend-production-services` to rebuild/restart Product API without rerunning
 migrations. Agent Runtime is deployed, scaled, observed, and rolled back from
 its own repository and pipeline. See the
 [deployment runbook](docs/deployment-runbook.md) for release order and

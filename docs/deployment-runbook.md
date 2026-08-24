@@ -4,6 +4,11 @@ This runbook covers only the Product Backend. Agent Runtime is deployed from a
 separate repository and has its own database, workers, model configuration,
 evals, and run-recovery procedures.
 
+The current shared server is `staging`. The word `test` is reserved for
+automated tests and CI; it is not a deployable server profile. Build release
+images under the environment-neutral `momcozy-lab-backend` repository and tag
+them with an immutable commit or digest rather than an environment name.
+
 ## Required IDs
 
 Start release and incident debugging from these IDs when available:
@@ -49,8 +54,8 @@ correlation values, but they are not Product Backend execution state.
 
    ```bash
    make backend-productization-status
-   make backend-test-smoke
-   make backend-prod-readiness
+   make backend-staging-smoke
+   make backend-production-readiness
    ```
 
 ## Release
@@ -83,38 +88,39 @@ deployed.
 
 ## Production Docker Compose
 
-`docker-compose.prod.yml` is the server deployment template. It contains the
+`docker-compose.production.yml` is the server deployment template. It contains the
 Product `migrate` job and `api` service only. Managed Postgres, Redis, and object
 storage are supplied through environment variables.
 
 Prepare a private environment file:
 
 ```bash
-cp env/compose.prod.env.example env/compose.prod.env
+cp env/compose.production.env.example env/compose.production.env
+export MOMCOZY_BACKEND_IMAGE=momcozy-lab-backend:<git-sha>
 ```
 
 Build and release:
 
 ```bash
-make backend-prod-build
-make backend-prod-up
+make backend-production-build
+make backend-production-up
 ```
 
-`backend-prod-up` builds the current Product image, runs migrations, and
+`backend-production-up` builds the current Product image, runs migrations, and
 recreates the API. Use `BACKEND_BUILD_FLAGS=--no-cache` only when a clean image
 build is required.
 
 Restart the API without another migration:
 
 ```bash
-make backend-prod-services
+make backend-production-services
 ```
 
 Inspect the deployment:
 
 ```bash
-make backend-prod-ps
-make backend-prod-logs
+make backend-production-ps
+make backend-production-logs
 ```
 
 The production compose binds the API to `127.0.0.1:8000` by default. Put Nginx,
@@ -125,28 +131,28 @@ To deploy a registry image:
 
 ```bash
 MOMCOZY_BACKEND_IMAGE=registry.example.com/momcozy/backend:2026-07-26 \
-make backend-prod-up
+make backend-production-up
 ```
 
-## Server Test Docker Compose
+## Staging Docker Compose
 
-`docker-compose.test.yml` runs the Product API with isolated Postgres, Redis,
+`docker-compose.staging.yml` runs the Product API with isolated Postgres, Redis,
 and MinIO. It does not start Agent Runtime.
 
 ```bash
-cp env/compose.test.env.example env/compose.test.env
-make backend-test-up
-make backend-test-ps
-make backend-test-logs
+cp env/compose.staging.env.example env/compose.staging.env
+make backend-staging-up
+make backend-staging-ps
+make backend-staging-logs
 ```
 
 Stop it while preserving data volumes:
 
 ```bash
-make backend-test-down
+make backend-staging-down
 ```
 
-The test API binds to `127.0.0.1:8001` by default. Keep Postgres, Redis, and
+The staging API binds to `127.0.0.1:8001` by default. Keep Postgres, Redis, and
 MinIO private to the Compose network.
 
 ## Agent Runtime Integration Boundary

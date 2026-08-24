@@ -7,8 +7,8 @@ the Agent Runtime release.
 ## Infrastructure
 
 - `make backend-productization-status` passes.
-- `make backend-test-smoke` passes in the isolated server-test profile.
-- `make backend-prod-readiness` passes with production-managed dependencies.
+- `make backend-staging-smoke` passes in the isolated staging profile.
+- `make backend-production-readiness` passes with production-managed dependencies.
 - `make backend-smoke` passes.
 - `GET /v1/health/live` returns `200`.
 - `GET /v1/health/ready` returns `200` and checks Postgres/Redis in production.

@@ -1,7 +1,8 @@
-name: backend
+name: momcozy-lab-backend-local
 
 services:
   api:
+    image: momcozy-lab-backend:local
     build:
       context: .
       dockerfile: Dockerfile
@@ -28,6 +29,7 @@ services:
       start_period: 20s
 
   migrate:
+    image: momcozy-lab-backend:local
     build:
       context: .
       dockerfile: Dockerfile

@@ -21,8 +21,8 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "Idempotency-Key",
         "actor_user_id",
         "make backend-productization-status",
-        "make backend-test-smoke",
-        "make backend-prod-readiness",
+        "make backend-staging-smoke",
+        "make backend-production-readiness",
         "empty database",
         "upgrading an older Product schema",
     ]:
@@ -54,7 +54,7 @@ def test_release_smoke_checklist_covers_product_and_runtime_boundary() -> None:
         "/v1/health/metrics",
         "make backend-productization-status",
         "make backend-smoke",
-        "make backend-prod-readiness",
+        "make backend-production-readiness",
         "OpenAPI snapshot",
     ]:
         assert phrase in text
