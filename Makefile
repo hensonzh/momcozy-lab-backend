@@ -6,7 +6,7 @@ BACKEND_BUILD_FLAGS ?=
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f docker-compose.local.yml
 STAGING_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE) docker compose --env-file $(STAGING_COMPOSE_ENV_FILE) -f docker-compose.staging.yml
 
-.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-staging-build backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset backend-staging-ps backend-staging-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-env-print
+.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-staging-pull backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset backend-staging-ps backend-staging-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-env-print
 
 backend-local-build:
 	$(MAKE) backend-build
@@ -36,22 +36,21 @@ backend-migrate:
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
 
-backend-staging-build:
-	$(STAGING_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api
+backend-staging-pull:
+	$(STAGING_COMPOSE) --profile tools pull migrate api
 
 backend-staging-migrate:
-	$(STAGING_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
-	$(STAGING_COMPOSE) --profile tools run --rm migrate
+	$(STAGING_COMPOSE) --profile tools run --rm --no-deps migrate
 
 backend-staging-up:
-	$(MAKE) backend-staging-build STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
-	$(STAGING_COMPOSE) up -d postgres redis minio minio-init
+	$(MAKE) backend-staging-pull STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)
+	$(STAGING_COMPOSE) up -d --no-build postgres redis minio minio-init
 	$(MAKE) backend-staging-migrate STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)
-	$(STAGING_COMPOSE) up -d --force-recreate api
+	$(STAGING_COMPOSE) up -d --no-build --force-recreate api
 
 backend-staging-services:
-	$(STAGING_COMPOSE) build $(BACKEND_BUILD_FLAGS) api
-	$(STAGING_COMPOSE) up -d --force-recreate api
+	$(STAGING_COMPOSE) pull api
+	$(STAGING_COMPOSE) up -d --no-build --force-recreate api
 
 backend-staging-down:
 	$(STAGING_COMPOSE) down

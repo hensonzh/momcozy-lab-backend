@@ -1,10 +1,7 @@
 name: momcozy-lab-backend-staging
 
 x-backend-image: &backend-image
-  image: ${MOMCOZY_BACKEND_IMAGE:-momcozy-lab-backend:staging}
-  build:
-    context: .
-    dockerfile: Dockerfile
+  image: ${MOMCOZY_BACKEND_IMAGE:?Set MOMCOZY_BACKEND_IMAGE to an immutable digest reference}
   env_file:
     - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.staging.env}
   environment:

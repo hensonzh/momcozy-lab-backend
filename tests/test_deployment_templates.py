@@ -48,7 +48,8 @@ def test_project_metadata_uses_backend_name() -> None:
     assert ci_compose.count("image: momcozy-lab-backend:ci") == 2
     assert ci_compose.count("APP_ENV: test") == 2
     assert local_compose.count("image: momcozy-lab-backend:local") == 2
-    assert "${MOMCOZY_BACKEND_IMAGE:-momcozy-lab-backend:staging}" in staging_compose
+    assert "${MOMCOZY_BACKEND_IMAGE:?" in staging_compose
+    assert "build:" not in staging_compose
     assert not (ROOT / "docker-compose.production.yml").exists()
     assert not (ROOT / "env" / "compose.production.env.example").exists()
     assert (
@@ -434,10 +435,11 @@ def test_makefile_exposes_staging_release_targets_only() -> None:
 
     assert "STAGING_COMPOSE_ENV_FILE ?= env/compose.staging.env" in makefile
     assert "--env-file $(STAGING_COMPOSE_ENV_FILE)" in makefile
-    assert "$(STAGING_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api" in makefile
-    assert "$(STAGING_COMPOSE) --profile tools run --rm migrate" in makefile
-    assert "$(STAGING_COMPOSE) up -d postgres redis minio minio-init" in makefile
-    assert "$(STAGING_COMPOSE) up -d --force-recreate api" in makefile
+    assert "$(STAGING_COMPOSE) --profile tools pull migrate api" in makefile
+    assert "$(STAGING_COMPOSE) --profile tools run --rm --no-deps migrate" in makefile
+    assert "$(STAGING_COMPOSE) up -d --no-build --force-recreate api" in makefile
+    assert "$(STAGING_COMPOSE) build" not in makefile
+    assert "$(STAGING_COMPOSE) up -d --no-build postgres redis minio minio-init" in makefile
     assert "backend-staging-services:" in makefile
     assert "backend-staging-reset:" in makefile
     assert "$(STAGING_COMPOSE) down --volumes --remove-orphans" in makefile

@@ -48,9 +48,11 @@ correlation values, but they are not Product Backend execution state.
    expected active key id.
 5. Confirm the Agent Runtime service key differs from the general operator service
    key and is available only to the two services.
-6. Build the `migrate` and `api` images.
-7. Run tests, migration checks, backup-hook validation, and OpenAPI drift
-   checks.
+6. Confirm `backend-ci` passed every test, migration, integration, container,
+   backup-hook, and OpenAPI drift gate for the exact full commit.
+7. Obtain the CI image manifest and copy its digest-qualified
+   `ghcr.io/hensonzh/momcozy-lab-backend@sha256:...` reference. Do not rebuild
+   or retag the image on the server.
 8. Confirm the Product Backend origin is
    `https://backend-test.lute-momcozylab.luteos.cloud:8443`, capability paths
    are redacted from application logs, and the inactivity TTL remains 1800
@@ -62,7 +64,48 @@ correlation values, but they are not Product Backend execution state.
    make backend-staging-smoke
    ```
 
-## Release
+## Standard Staging Delivery
+
+The host layout is fixed under `/opt/momcozy-lab`:
+
+- private configuration: `/opt/momcozy-lab/shared/backend/deploy.env`, mode
+  `0600`;
+- immutable source snapshots:
+  `/opt/momcozy-lab/releases/backend/<full-commit>`;
+- current and previous pointers: `/opt/momcozy-lab/current/backend` and
+  `/opt/momcozy-lab/previous/backend`;
+- database backups: `/opt/momcozy-lab/backups/backend`;
+- archived release manifests: `/opt/momcozy-lab/manifests`.
+
+Configure the GitHub `staging` environment with required reviewers and these
+environment secrets: `STAGING_SSH_HOST`, `STAGING_SSH_PORT`,
+`STAGING_SSH_USER`, `STAGING_SSH_PRIVATE_KEY`, and
+`STAGING_SSH_KNOWN_HOSTS`. The host must already be authenticated to pull the
+private GHCR package, and the deployment user must own the release paths and
+be allowed to run Docker. The known-hosts value is mandatory; host-key checks
+are never disabled.
+
+Run `.github/workflows/backend-staging-delivery.yml` manually with:
+
+1. `operation=deploy`;
+2. the full 40-character commit published by `backend-ci`;
+3. the digest-qualified image reference from the CI manifest.
+
+`scripts/staging_release.py` rejects a mutable tag, a different release root,
+an image whose OCI revision label differs from the commit, an occupied
+`127.0.0.1:8001`, or a staging network owned by another Compose project. It
+then validates the private env, starts the shared infrastructure without a
+build, writes a PostgreSQL backup, applies Alembic explicitly, replaces the API,
+checks both local and public readiness, and atomically advances the release
+pointer. The resulting manifest records commit, image digest, migration
+revision, OpenAPI hash, URL, and release time but no secret values.
+
+For `operation=rollback`, set `confirm_schema_compatible=true`. Rollback loads
+the previous manifest and image digest and replaces only the API. It does not
+run an Alembic downgrade. If the previous code cannot read the current schema,
+roll forward instead.
+
+## Manual Release Semantics
 
 1. Run the migration job:
 

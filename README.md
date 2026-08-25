@@ -122,7 +122,8 @@ Product Backend to `127.0.0.1:8001`:
 
 ```bash
 cp env/compose.staging.env.example env/compose.staging.env
-# Fill every MOMCOZY_STAGING_* secret before continuing.
+# Fill every MOMCOZY_STAGING_* secret and set MOMCOZY_BACKEND_IMAGE to a
+# ghcr.io/hensonzh/momcozy-lab-backend@sha256:... digest before continuing.
 make backend-staging-up
 make backend-staging-smoke
 ```
@@ -132,6 +133,19 @@ network as an external consumer and does not create another infrastructure stack
 
 `make backend-staging-reset` deletes the staging Compose volumes and must only
 be used while staging data remains explicitly resettable.
+
+The normal delivery path is not an on-host build. A successful `backend-ci`
+run on `main` publishes the exact image tested by CI to GHCR under the full
+commit SHA and records its digest. An operator then runs
+`backend-staging-delivery`, selects the protected `staging` environment, and
+supplies the full commit plus `ghcr.io/hensonzh/momcozy-lab-backend@sha256:...`.
+The workflow checks port/network ownership, backs up PostgreSQL, runs the
+migration explicitly, verifies loopback and SNI readiness, and writes
+`/opt/momcozy-lab/current/backend/release-manifest.json`.
+
+Rollback is an explicit operation in the same workflow. It changes application
+code only, never downgrades PostgreSQL, and therefore requires the operator to
+confirm schema compatibility.
 
 No production deployment profile is shipped. Production application safeguards
 remain in code, but a production Compose/env contract will be designed only
