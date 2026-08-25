@@ -4,6 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE_LOCAL_ENV = ROOT / "env" / "compose.local.env.example"
 COMPOSE_STAGING_ENV = ROOT / "env" / "compose.staging.env.example"
+CI_COMPOSE = ROOT / "docker-compose.ci.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "backend-ci.yml"
 LOCAL_COMPOSE = ROOT / "docker-compose.local.yml"
 STAGING_COMPOSE = ROOT / "docker-compose.staging.yml"
 POSTGRES_INIT = ROOT / "deploy" / "staging" / "init-postgres.sh"
@@ -35,12 +37,16 @@ RETIRED_DEPLOYMENT_TOKENS = (
 
 def test_project_metadata_uses_backend_name() -> None:
     pyproject = (ROOT / "pyproject.toml").read_text()
+    ci_compose = CI_COMPOSE.read_text()
     local_compose = LOCAL_COMPOSE.read_text()
     staging_compose = STAGING_COMPOSE.read_text()
 
     assert 'name = "backend"' in pyproject
+    assert "name: momcozy-lab-backend-ci" in ci_compose
     assert local_compose.startswith("name: momcozy-lab-backend-local\n")
     assert staging_compose.startswith("name: momcozy-lab-backend-staging\n")
+    assert ci_compose.count("image: momcozy-lab-backend:ci") == 2
+    assert ci_compose.count("APP_ENV: test") == 2
     assert local_compose.count("image: momcozy-lab-backend:local") == 2
     assert "${MOMCOZY_BACKEND_IMAGE:-momcozy-lab-backend:staging}" in staging_compose
     assert not (ROOT / "docker-compose.production.yml").exists()
@@ -73,6 +79,53 @@ def test_dockerfile_runs_product_backend() -> None:
     assert '"--no-access-log"' in dockerfile
     assert "COPY --chown=app:app . ." in dockerfile
     assert "chown -R" not in dockerfile
+
+
+def test_ci_compose_is_a_secret_safe_runtime_override() -> None:
+    compose = CI_COMPOSE.read_text()
+
+    assert "CI-only override" in compose
+    assert "AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64:?" in compose
+    assert "/v1/health/ready" in compose
+    assert "BEGIN PRIVATE KEY" not in compose
+    assert "\n  postgres:" not in compose
+    assert "\n  redis:" not in compose
+    assert "\n  minio:" not in compose
+
+
+def test_ci_container_job_builds_migrates_smokes_and_cleans_up() -> None:
+    workflow = CI_WORKFLOW.read_text()
+    container_job = workflow.split("  container:", maxsplit=1)[1].split(
+        "\n  postgres-migration:",
+        maxsplit=1,
+    )[0]
+
+    assert "openssl genpkey" in container_job
+    assert "AUTH_JWT_PRIVATE_KEY_B64" in container_job
+    assert '"$GITHUB_ENV"' in container_job
+    assert container_job.count("-f docker-compose.ci.yml") >= 5
+    assert "docker-compose.local.yml" in container_job
+    assert "docker-compose.staging.yml" in container_job
+    assert "momcozy-lab-backend:ci" in container_job
+    assert "--profile tools run --rm migrate" in container_job
+    assert "--wait-timeout 90" in container_job
+    assert "http://127.0.0.1:8000/v1/health/ready" in container_job
+    assert "if: failure()" in container_job
+    assert "if: always()" in container_job
+    assert "down --volumes" in container_job
+    assert "docker build -f Dockerfile ." not in container_job
+
+
+def test_ci_profile_identity_and_override_usage_are_documented() -> None:
+    readme = (ROOT / "README.md").read_text()
+    profiles = (ROOT / "docs" / "environment-profiles.md").read_text()
+    docs = readme + profiles
+
+    assert "momcozy-lab-backend-ci" in docs
+    assert "momcozy-lab-backend:ci" in docs
+    assert "docker-compose.ci.yml" in docs
+    assert "CI-only override" in docs
+    assert "ephemeral" in docs
 
 
 def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> None:

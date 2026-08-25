@@ -1,0 +1,24 @@
+# CI-only override. Use together with docker-compose.local.yml.
+name: momcozy-lab-backend-ci
+
+services:
+  api:
+    image: momcozy-lab-backend:ci
+    environment:
+      AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64:?Set AUTH_JWT_PRIVATE_KEY_B64}
+      APP_ENV: test
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/ready', timeout=2)\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    image: momcozy-lab-backend:ci
+    environment:
+      APP_ENV: test

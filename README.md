@@ -102,6 +102,16 @@ make backend-down
 ping, object-storage round trips, and the product asset manifest. It contains
 no Agent Runtime worker or runtime-state checks.
 
+## CI Container Profile
+
+`docker-compose.ci.yml` is a CI-only override and is never deployed to a
+server. CI combines it with `docker-compose.local.yml`, changes the Compose
+project to `momcozy-lab-backend-ci`, and builds
+`momcozy-lab-backend:ci`. The workflow generates an ephemeral RSA signing key,
+runs the migration job, starts the real API container, and requires
+`/v1/health/ready` to pass before cleaning up the stack. No CI private key is
+committed or reused.
+
 ## Staging
 
 The Product Backend staging Compose profile is the single owner of the shared

@@ -21,10 +21,15 @@ def test_backend_ci_runs_core_gates() -> None:
         "scripts/check_backup_restore_hooks.py",
         "scripts/export_openapi.py",
         "previous_response" + "_id|Chat" + "Session|ENTRY" + "_API_KEY",
-        "docker compose -f docker-compose.local.yml config",
+        "docker-compose.local.yml",
+        "docker-compose.ci.yml",
         "-f docker-compose.staging.yml",
         "--env-file env/compose.staging.env.example",
-        "docker build -f Dockerfile .",
+        "openssl genpkey",
+        "momcozy-lab-backend:ci",
+        "--profile tools run --rm migrate",
+        "http://127.0.0.1:8000/v1/health/ready",
+        "down --volumes",
         "postgres-migration",
         "python -m alembic -c alembic.ini upgrade head",
         "python -m alembic -c alembic.ini check",
@@ -41,6 +46,7 @@ def test_backend_ci_runs_core_gates() -> None:
 
     assert "docker-compose.production.yml" not in text
     assert "compose.production.env" not in text
+    assert "docker build -f Dockerfile ." not in text
 
     for retired in [
         "test_agent_task8_observed_eval",

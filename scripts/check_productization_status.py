@@ -22,6 +22,7 @@ def run_checks(root: Path = ROOT) -> list[CheckResult]:
     return [
         *_check_required_files(root),
         *_check_environment_profiles(root),
+        *_check_ci_compose(root),
         *_check_ci_workflow(root),
         *_check_makefile(root),
         *_check_retired_runtime_absent(root),
@@ -53,6 +54,7 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "docs/deployment-runbook.md",
         "docs/environment-profiles.md",
         "docs/release-smoke-checklist.md",
+        "docker-compose.ci.yml",
         "docker-compose.local.yml",
         "docker-compose.staging.yml",
         "deploy/staging/init-postgres.sh",
@@ -133,6 +135,21 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
     return results
 
 
+def _check_ci_compose(root: Path) -> list[CheckResult]:
+    compose = root / "docker-compose.ci.yml"
+    required = [
+        "CI-only override",
+        "name: momcozy-lab-backend-ci",
+        "image: momcozy-lab-backend:ci",
+        "AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64:?",
+        "/v1/health/ready",
+    ]
+    return [
+        *_required_phrases(compose, required),
+        *_retired_phrases(compose, ["BEGIN PRIVATE KEY"]),
+    ]
+
+
 def _check_ci_workflow(root: Path) -> list[CheckResult]:
     workflow = root / ".github" / "workflows" / "backend-ci.yml"
     required = [
@@ -142,9 +159,15 @@ def _check_ci_workflow(root: Path) -> list[CheckResult]:
         "python -m alembic -c alembic.ini upgrade head --sql",
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
-        "docker-compose.local.yml config",
+        "docker-compose.local.yml",
+        "docker-compose.ci.yml",
         "docker-compose.staging.yml",
         "--env-file env/compose.staging.env.example",
+        "openssl genpkey",
+        "momcozy-lab-backend:ci",
+        "--profile tools run --rm migrate",
+        "http://127.0.0.1:8000/v1/health/ready",
+        "down --volumes",
     ]
     retired = [
         "test_agent_task8_observed_eval",

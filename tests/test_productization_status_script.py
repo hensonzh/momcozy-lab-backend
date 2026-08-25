@@ -38,6 +38,8 @@ def test_productization_status_checks_product_operations_and_runtime_boundary() 
 
     assert "scripts/check_redis_profile.py" in names
     assert "scripts/check_product_asset_storage.py" in names
+    assert "docker-compose.ci.yml" in names
+    assert "docker-compose.ci.yml:name: momcozy-lab-backend-ci" in names
     assert "app/modules/auth/jwks_router.py" in names
     assert "app/modules/profiles/agent_router.py" in names
     assert "retired:app/agent_runtime" in names

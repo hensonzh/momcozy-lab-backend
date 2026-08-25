@@ -16,7 +16,15 @@ such as `momcozy-production-backend` must not be reused.
 | Profile | File | Purpose |
 |---|---|---|
 | Local compose | `env/compose.local.env.example` | Product Backend with Compose Postgres, Redis, and MinIO. |
+| CI override | `docker-compose.ci.yml` | CI-only override for project `momcozy-lab-backend-ci` and image `momcozy-lab-backend:ci`. |
 | Staging compose | `env/compose.staging.env.example` | Product Backend plus the one shared staging PostgreSQL, Redis, MinIO, and network. |
+
+`docker-compose.ci.yml` is combined with `docker-compose.local.yml`; it is
+not a standalone Compose file or a deployable server profile. CI injects an
+ephemeral RSA private key generated on the runner, executes the explicit
+migration job, then verifies the built API image through
+`/v1/health/ready`. The key is never stored in the repository or promoted to
+staging.
 
 The Product Backend Compose profiles build and run only `migrate`, `api`, and the
 profile-appropriate infrastructure. Agent Runtime has a separate application
