@@ -1,4 +1,4 @@
-# Flutter Product API Compatibility
+# Flutter Product Backend API Compatibility
 
 Flutter Product repositories treat `docs/openapi.generated.json` as the Product
 Backend source of truth. Agent conversation and streaming APIs are generated
@@ -25,7 +25,7 @@ Regenerate or validate the Product typed client whenever a change affects:
 - file-upload multipart fields
 - voice or vision contracts
 
-CI must fail when the committed Product OpenAPI snapshot drifts from the
+CI must fail when the committed Product Backend OpenAPI snapshot drifts from the
 application schema.
 
 ## Compatibility Policy
@@ -64,7 +64,7 @@ window, or API version.
 ## Agent UI Boundary
 
 The Flutter Agent base URL points to the independently deployed Agent Runtime,
-not the Product API. The Agent UI authenticates there with the same
+not the Product Backend API. The Agent UI authenticates there with the same
 Product-issued access token. Product publishes the verification key through
 `GET /.well-known/jwks.json`, and the token includes the Runtime audience.
 
@@ -75,7 +75,7 @@ OpenAPI intentionally exposes none of those routes.
 
 ## Release Checklist
 
-1. Export Product OpenAPI.
+1. Export Product Backend OpenAPI.
 2. Regenerate or validate the Product typed client.
 3. Run `docs/flutter-smoke-flows.json` against staging.
 4. Verify no credential appears in URLs or crash logs.
@@ -83,5 +83,5 @@ OpenAPI intentionally exposes none of those routes.
 6. Verify Flutter has no dependency on `/v1/internal/agent/*`.
 7. Validate the separately generated Runtime client against the deployed
    Runtime contract.
-8. Record Product schema, Runtime schema, and Flutter build versions in the
+8. Record Product Backend schema, Runtime schema, and Flutter build versions in the
    release note.

@@ -1,4 +1,4 @@
-# Production Backend API Contract Handoff
+# Product Backend API Contract Handoff
 
 This handoff is the human-readable companion to
 `docs/openapi.generated.json`.
@@ -8,7 +8,7 @@ This handoff is the human-readable companion to
 - OpenAPI snapshot: `docs/openapi.generated.json`
 - API surface catalog: `docs/api-surface-catalog.md`
 - Export command: `make backend-export-contracts`
-- Product API base path: `/v1`
+- Product Backend API base path: `/v1`
 - Error model: stable `{ "error": { "code", "message", "request_id", "details?" } }`
 
 ## API Surface Rules
@@ -24,7 +24,7 @@ Every OpenAPI operation carries MomCozy extension metadata:
 Flutter should integrate only routes marked `public_app_api`. It must not
 depend on `internal_service_api`, `admin_ops_api`, or `infra_probe_api` routes.
 Agent conversation and stream routes are published by the separate Agent
-Runtime contract, not Product OpenAPI.
+Runtime contract, not Product Backend OpenAPI.
 
 Update flow for API changes:
 
@@ -43,7 +43,7 @@ Update flow for API changes:
 
 Clients use `Authorization: Bearer <access_token>` for user-facing APIs.
 Refresh tokens are opaque and only sent in request bodies to `/auth/refresh`.
-Access tokens are RS256-signed, carry both the Product API and Agent Runtime
+Access tokens are RS256-signed, carry both the Product Backend API and Agent Runtime
 audiences, and expose their public signing key through
 `GET /.well-known/jwks.json`. The Product Backend is the only private-key owner;
 the Agent Runtime validates the same opaque client token from its local JWKS
@@ -56,7 +56,7 @@ using an already-bound invite code is rejected with `permission_denied`.
 Service-to-service callers use `X-Service-Key`; this is not a user token and
 must not be used by mobile clients.
 
-Product API authentication also checks the active device session. The Agent
+Product Backend API authentication also checks the active device session. The Agent
 Runtime does not call the Product Backend on every request, so logout or session
 revocation reaches it no later than the 15-minute access-token expiry.
 

@@ -7,7 +7,9 @@ COMPOSE_STAGING_ENV = ROOT / "env" / "compose.staging.env.example"
 LOCAL_COMPOSE = ROOT / "docker-compose.local.yml"
 STAGING_COMPOSE = ROOT / "docker-compose.staging.yml"
 POSTGRES_INIT = ROOT / "deploy" / "staging" / "init-postgres.sh"
-NGINX_CONFIG = ROOT / "deploy" / "nginx" / "momcozy-api.conf"
+NGINX_CONFIG = (
+    ROOT / "deploy" / "nginx" / "momcozy-lab-product-backend.conf"
+)
 
 RETIRED_RUNTIME_ENV_NAMES = (
     "AGENT_RUNTIME_WORKER_",
@@ -76,18 +78,26 @@ def test_dockerfile_runs_product_backend() -> None:
 def test_nginx_proxy_keeps_api_private_and_supports_streaming_transports() -> None:
     config = NGINX_CONFIG.read_text()
 
-    assert "server 127.0.0.1:8000;" in config
-    assert "server_name lute-momcozylab.luteos.cloud;" in config
-    assert "listen 8443 ssl default_server;" in config
+    assert NGINX_CONFIG.name == "momcozy-lab-product-backend.conf"
+    assert not (ROOT / "deploy" / "nginx" / "momcozy-api.conf").exists()
+    assert "server 127.0.0.1:8001;" in config
+    assert "server_name backend-test.lute-momcozylab.luteos.cloud;" in config
     assert "listen 8443 ssl http2;" in config
     assert "listen 80" not in config
     assert "listen 443" not in config
-    assert "return 444;" in config
+    assert "default_server" not in config
     assert "client_max_body_size 16m;" in config
-    assert "ssl_certificate /etc/nginx/tls/momcozy-api/fullchain.pem;" in config
-    assert "ssl_certificate_key /etc/nginx/tls/momcozy-api/privkey.pem;" in config
+    assert (
+        "ssl_certificate /etc/nginx/tls/momcozy-lab-staging/fullchain.pem;"
+        in config
+    )
+    assert (
+        "ssl_certificate_key "
+        "/etc/nginx/tls/momcozy-lab-staging/privkey.pem;" in config
+    )
     assert "ssl_protocols TLSv1.2 TLSv1.3;" in config
     assert "ssl_session_tickets off;" in config
+    assert "momcozy-lab-product-backend.access.log" in config
     assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" in config
     assert "proxy_set_header X-Forwarded-Proto $scheme;" in config
     assert "proxy_set_header X-Request-ID $request_id;" in config
@@ -340,6 +350,15 @@ def test_staging_compose_uses_staging_env_and_safe_api_bind() -> None:
     assert "${MOMCOZY_BACKEND_ENV_FILE:-env/compose.staging.env}" in compose
     assert "${MOMCOZY_STAGING_API_BIND:-127.0.0.1:8001}:8000" in compose
     assert "APP_ENV=staging" in env
+    assert 'APP_NAME="Product Backend"' in env
+    assert (
+        "AGENT_MODEL_ASSET_PUBLIC_BASE_URL="
+        "https://backend-test.lute-momcozylab.luteos.cloud:8443" in env
+    )
+    assert (
+        "TRUSTED_HOSTS=backend-test.lute-momcozylab.luteos.cloud,"
+        "product-backend,localhost,127.0.0.1" in env
+    )
     assert (
         "DATABASE_URL=postgresql+asyncpg://momcozy_staging:"
         "${MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD}"
@@ -352,7 +371,6 @@ def test_staging_compose_uses_staging_env_and_safe_api_bind() -> None:
     assert "OBJECT_STORAGE_PROVIDER=minio" in env
     assert "OBJECT_STORAGE_BUCKET=momcozy-staging" in env
     assert "OBJECT_STORAGE_ENDPOINT_URL=http://staging-minio:9000" in env
-    assert "TRUSTED_HOSTS=product-staging.example.test,product-backend," in env
 
 
 def test_makefile_exposes_staging_release_targets_only() -> None:

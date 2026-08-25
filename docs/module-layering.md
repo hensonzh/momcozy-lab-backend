@@ -38,9 +38,9 @@ Add `domain.py` when a module has rules that are:
 
 For small CRUD-only modules, `domain.py` can wait until rules emerge.
 
-## Agent Integration Boundary
+## Agent Runtime Integration Boundary
 
-Agent Runtime is an external service. Product business modules may expose a
+Agent Runtime is an external service. Product Backend business modules may expose a
 small internal adapter next to the owning module:
 
 ```text
@@ -48,7 +48,7 @@ agent_router.py
   /v1/internal/agent/* HTTP adapter and Runtime service authentication.
 
 agent_contracts.py
-  Bounded Product request/response schemas for the internal service API.
+  Bounded Product Backend request/response schemas for the internal service API.
 
 agent_service.py
   Owner-scope, action-bound idempotency, audit, and business-service reuse.

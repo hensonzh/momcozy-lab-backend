@@ -58,6 +58,7 @@ def test_settings_repr_does_not_expose_jwt_private_key() -> None:
 def test_settings_use_current_vision_defaults() -> None:
     settings = Settings()
 
+    assert settings.app_name == "Product Backend"
     assert settings.vision_openai_model == "gpt-5.4-mini"
     assert settings.vision_request_timeout_seconds == 20.0
 

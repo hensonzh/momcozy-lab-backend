@@ -1,24 +1,31 @@
-# Backend
+# Product Backend (backend/)
 
-This repository owns the Product API, business data, authentication, files,
-notifications, plans, profiles, records, diary, support, voice, and vision.
-Agent orchestration, model providers, conversation state, tools, skills,
+This repository contains Product Backend (backend/) and owns business data,
+authentication, files, notifications, plans, profiles, records, diary, support,
+voice, and vision. Agent Runtime orchestration, model providers, conversation state, tools, skills,
 workers, memory, and evals live in the independent Agent Runtime repository.
+
+Human-facing documentation uses the canonical service names `Product Backend
+(backend/)` and `Agent Runtime (agent/)`. Existing identifiers such as
+`PRODUCT_BACKEND_BASE_URL`, `AUTH_JWT_PRODUCT_AUDIENCE`, the `product-backend`
+Compose alias, and the `/v1` API contract remain stable compatibility names.
 
 ## Service Boundary
 
-- Flutter calls this service for Product APIs and calls Agent Runtime through
-  its separate Agent base URL.
+- Flutter calls Product Backend and calls Agent Runtime through its
+  separate Agent Runtime base URL.
 - Agent Runtime calls only `/v1/internal/agent/**` with
   `X-Service-Key: <AGENT_RUNTIME_SERVICE_API_KEY>`.
-- Runtime supplies the user actor explicitly; Product re-authorizes ownership
-  and policy and records audit/idempotency data before applying a write.
-- Product publishes user-token verification keys at
+- Agent Runtime supplies the user actor explicitly; Product Backend
+  re-authorizes ownership and policy and records audit/idempotency data before
+  applying a write.
+- Product Backend publishes user-token verification keys at
   `GET /.well-known/jwks.json`.
-- Product does not expose Agent run, thread, event, confirmation, memory, or
-  eval endpoints and does not start Agent workers.
+- Product Backend does not expose Agent Runtime run, thread, event,
+  confirmation, memory, or eval endpoints and does not start Agent Runtime
+  workers.
 
-The internal Agent API covers pregnancy diary, file resolution, plans, profile,
+The internal Agent Runtime API covers pregnancy diary, file resolution, plans, profile,
 and lactation records. The source of truth is
 the generated [API surface catalog](docs/api-surface-catalog.md); integration
 rules are in [API contract handoff](docs/api-contract-handoff.md).
@@ -27,19 +34,19 @@ rules are in [API contract handoff](docs/api-contract-handoff.md).
 
 ```text
 app/
-  api/                 # public Product API composition
+  api/                 # public Product Backend API composition
   core/                # settings, logging, metrics, rate limiting
   infrastructure/      # database, Redis, object storage
-  modules/             # Product domain modules and internal Agent adapters
-migrations/            # Product-owned database schema
-scripts/               # Product deployment and infrastructure checks
-tests/                 # Product API and boundary tests
-docs/                  # Product contracts and runbooks
+  modules/             # product domain modules and internal Agent Runtime adapters
+migrations/            # Product Backend-owned database schema
+scripts/               # Product Backend deployment and infrastructure checks
+tests/                 # Product Backend API and boundary tests
+docs/                  # Product Backend contracts and runbooks
 ```
 
-Each Product domain that is callable by Runtime owns an `agent_router.py`,
-`agent_service.py`, and `agent_contracts.py`. These are Product-side internal
-adapters, not an embedded Agent runtime.
+Each product domain that is callable by Agent Runtime owns an `agent_router.py`,
+`agent_service.py`, and `agent_contracts.py`. These are Product Backend internal
+adapters, not an embedded Agent Runtime.
 
 ## Environment Contract
 
@@ -60,22 +67,22 @@ Core infrastructure is configured through `DATABASE_URL`, `REDIS_URL`, and
 - `AGENT_MODEL_ASSET_PUBLIC_BASE_URL`
 - `AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS`
 
-`OPENAI_API_KEY` in this repository is only for Product voice transcription or
+`OPENAI_API_KEY` in this repository is only for Product Backend voice transcription or
 vision when those providers are enabled. Agent model credentials and model
 settings belong to Agent Runtime.
 
-Uploaded Agent images remain Product-owned assets. Runtime resolves an
+Images uploaded for Agent Runtime remain Product Backend-owned assets. Agent Runtime resolves an
 owner-scoped `asset_id` through the internal file endpoint and receives a
-stable opaque Product capability URL. Product revalidates owner/status/type on
+stable opaque Product Backend capability URL. Product Backend revalidates owner/status/type on
 every authorized resolve and slides the Redis capability TTL by 30 minutes.
 The unauthenticated model fetch endpoint revalidates the file again, never
 renews TTL, returns `no-store` bytes, and is revoked by deletion. Configure
-`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to the public HTTPS Product API origin
+`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to the public HTTPS Product Backend origin
 reachable by the model provider.
 
 ## Local Development
 
-Local Compose starts Product API, PostgreSQL, Redis, and MinIO:
+Local Compose starts Product Backend, PostgreSQL, Redis, and MinIO:
 
 ```bash
 make backend-local-up
@@ -91,17 +98,17 @@ make backend-export-contracts
 make backend-down
 ```
 
-`backend-check-infra` verifies Product database connectivity, a generic Redis
-ping, object-storage round trips, and the Product asset manifest. It contains
-no Agent worker or runtime-state checks.
+`backend-check-infra` verifies Product Backend database connectivity, a generic Redis
+ping, object-storage round trips, and the product asset manifest. It contains
+no Agent Runtime worker or runtime-state checks.
 
 ## Staging
 
-The Backend staging Compose profile is the single owner of the shared
+The Product Backend staging Compose profile is the single owner of the shared
 PostgreSQL, Redis, MinIO, and `momcozy-lab-staging` network. It creates separate
 `momcozy_staging` and `agent_runtime_staging` databases, reserves Redis DB 0/1,
 creates the `momcozy-staging` and `agent-runtime-staging` buckets, and binds the
-Product API to `127.0.0.1:8001`:
+Product Backend to `127.0.0.1:8001`:
 
 ```bash
 cp env/compose.staging.env.example env/compose.staging.env
@@ -110,8 +117,8 @@ make backend-staging-up
 make backend-staging-smoke
 ```
 
-Start this stack before Agent staging; Agent joins the shared network as an
-external consumer and does not create another infrastructure stack.
+Start this stack before Agent Runtime staging; Agent Runtime joins the shared
+network as an external consumer and does not create another infrastructure stack.
 
 `make backend-staging-reset` deletes the staging Compose volumes and must only
 be used while staging data remains explicitly resettable.

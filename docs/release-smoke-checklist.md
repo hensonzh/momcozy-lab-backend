@@ -11,7 +11,7 @@ the Agent Runtime release.
 - `make backend-smoke` passes.
 - `GET /v1/health/live` returns `200`.
 - `GET /v1/health/ready` returns `200` and checks staging Postgres/Redis.
-- `GET /v1/health/metrics` returns Product request/dependency metrics;
+- `GET /v1/health/metrics` returns Product Backend request/dependency metrics;
   staging calls include the operator `X-Service-Key`.
 - Alembic head matches the expected release revision.
 - CORS, trusted-host, security-header, rate-limit, and upload-limit checks pass.
@@ -35,7 +35,7 @@ the Agent Runtime release.
 - Operator `SERVICE_API_KEY` and `AGENT_RUNTIME_SERVICE_API_KEY` are distinct
   and cannot be substituted for each other.
 
-## Core Product APIs
+## Core Product Backend APIs
 
 - Upload a small file through `POST /v1/files/upload`.
 - Oversized upload returns `payload_too_large` without object metadata or bytes.
@@ -47,9 +47,9 @@ the Agent Runtime release.
 - Retry one write with the same `Idempotency-Key` and verify replay or the
   documented stable conflict.
 
-## Internal Agent API Boundary
+## Internal Agent Runtime API Boundary
 
-- Product Compose does not start an Agent worker; Agent Runtime is deployed
+- Product Backend Compose does not start an Agent Runtime worker; Agent Runtime is deployed
   independently.
 - `AGENT_RUNTIME_SERVICE_API_KEY` is installed only in Product and Runtime
   service secrets.
@@ -88,6 +88,6 @@ the Agent Runtime release.
 - No cross-user data access finding.
 - No duplicate Product write after idempotent replay.
 - JWKS and Runtime service authentication pass.
-- OpenAPI snapshot matches the deployed Product schema.
+- OpenAPI snapshot matches the deployed Product Backend schema.
 - Runtime-owned smoke checks pass separately before end-to-end Agent traffic is
   enabled.

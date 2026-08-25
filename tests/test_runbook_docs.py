@@ -26,7 +26,7 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "agent_runtime_staging",
         "agent-runtime-staging",
         "empty database",
-        "upgrading an older Product schema",
+        "upgrading an older Product Backend schema",
     ]:
         assert phrase in text
 

@@ -14,8 +14,8 @@ workers, and evals belong to the independently deployed Agent Runtime repository
 - `api-surface-catalog.md`: generated Product Backend API surface
   classification.
 - `api-contract-handoff.md`: human-readable public and internal API contract.
-- `flutter-client-compatibility.md`: Product API client compatibility policy.
-- `flutter-smoke-flows.json`: Product API mobile smoke scenarios.
+- `flutter-client-compatibility.md`: Product Backend API client compatibility policy.
+- `flutter-smoke-flows.json`: Product Backend API mobile smoke scenarios.
 - `vision-provider-integration.md`: owner-scoped schedule screenshot preview
   contract.
 

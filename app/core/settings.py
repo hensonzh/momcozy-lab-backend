@@ -34,7 +34,7 @@ SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub", "openai"}
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str = "Backend"
+    app_name: str = "Product Backend"
     app_version: str = "0.1.0"
     app_env: str = "local"
     database_url: str = LOCAL_DATABASE_URL

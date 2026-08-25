@@ -29,9 +29,7 @@ def run_checks(root: Path = ROOT) -> list[CheckResult]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Check Product backend readiness guardrails that do not need live infrastructure."
-    )
+    parser = argparse.ArgumentParser(description=("Check Product Backend readiness guardrails that do not need live infrastructure."))
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
     args = parser.parse_args()
 
@@ -220,9 +218,7 @@ def _retired_phrases(path: Path, phrases: list[str]) -> list[CheckResult]:
 
 def _environment_names(text: str) -> set[str]:
     return {
-        line.partition("=")[0].strip()
-        for line in text.splitlines()
-        if line.strip() and not line.lstrip().startswith("#") and "=" in line
+        line.partition("=")[0].strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#") and "=" in line
     }
 
 

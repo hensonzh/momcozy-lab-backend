@@ -45,7 +45,7 @@ async def run_check() -> dict[str, object]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Check Redis connectivity for the active Product backend profile.")
+    parser = argparse.ArgumentParser(description="Check Redis connectivity for the active Product Backend profile.")
     parser.parse_args()
     print(json.dumps(asyncio.run(run_check()), indent=2, sort_keys=True))
 

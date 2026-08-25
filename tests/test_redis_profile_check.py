@@ -48,4 +48,4 @@ def test_redis_profile_check_cli_has_help() -> None:
         text=True,
     )
 
-    assert "Product backend profile" in completed.stdout
+    assert "Product Backend profile" in completed.stdout

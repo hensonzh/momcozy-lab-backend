@@ -35,7 +35,7 @@ verifies the bytes, and deletes it.
 ## Local Profile
 
 Local Docker Compose starts MinIO and creates the `momcozy-local` bucket before the
-Product API starts:
+Product Backend API starts:
 
 ```bash
 make backend-local-up
@@ -59,7 +59,7 @@ python scripts/check_object_storage_profile.py
 ```
 
 When Agent Runtime supplies model attachments, configure
-`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` as the public HTTPS Product API origin
+`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` as the public HTTPS Product Backend API origin
 reachable by the model provider. Never expose the MinIO administration
 endpoint or storage credentials to Runtime or mobile clients.
 
