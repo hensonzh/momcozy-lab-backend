@@ -84,12 +84,15 @@ The current private repository plan cannot enforce GitHub environment required
 reviewers. The workflow therefore uses a first-party issue-comment gate before
 the delivery job receives any deployment secret. Create one repository issue
 for staging approvals, set repository variable `STAGING_APPROVAL_ISSUE` to its
-number, and set `STAGING_APPROVERS` to a comma-separated allowlist of reviewer
-logins. At least one separate repository collaborator must be available. For
-each run, an allowlisted user other than the original or rerun actor must post the
-exact `/approve-staging ...` command shown in the approval job summary. The
+number, and set `STAGING_APPROVERS` to a comma-separated allowlist of operator
+logins. For each run, an allowlisted operator must post the exact
+`/approve-staging ...` command shown in the approval job summary. This separate
+confirmation may be performed by the run initiator, matching GitHub required
+reviewers when prevent-self-review is not enabled. The
 command binds the approval to the repository, run ID, attempt, and trigger SHA;
 missing variables or approval fail closed after at most 30 minutes.
+The current remote configuration uses issue `#1`,
+`STAGING_APPROVAL_ISSUE=1`, and `STAGING_APPROVERS=hensonzh`.
 
 Keep the `staging` environment for deployment records and configure
 `STAGING_SSH_HOST`, `STAGING_SSH_PORT`, `STAGING_SSH_USER`,
