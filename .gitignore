@@ -26,4 +26,5 @@ build/
 
 *.sh
 !deploy/staging/init-postgres.sh
+!deploy/staging/start-redis.sh
 data/

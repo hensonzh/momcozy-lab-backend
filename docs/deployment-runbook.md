@@ -29,7 +29,9 @@ correlation values, but they are not Product Backend execution state.
 
 1. Confirm the private staging configuration includes:
    - `APP_ENV=staging`
-   - all six `MOMCOZY_STAGING_*` infrastructure secrets
+   - distinct PostgreSQL admin/Product/Agent passwords;
+   - distinct Redis admin/Product/Agent passwords;
+   - MinIO root credentials plus distinct Product/Agent access-key pairs;
    - Product Backend `DATABASE_URL` on `momcozy_staging`
    - Product Backend `REDIS_URL` on logical DB 0
    - Product Backend bucket `momcozy-staging`
@@ -37,6 +39,7 @@ correlation values, but they are not Product Backend execution state.
    - `AUTH_JWT_ISSUER`
    - `AUTH_JWT_PRODUCT_AUDIENCE`
    - `AUTH_JWT_RUNTIME_AUDIENCE`
+   - one or more private staging `AUTH_INVITE_CODES`
    - `AGENT_RUNTIME_SERVICE_API_KEY`
    - `AGENT_MODEL_ASSET_PUBLIC_BASE_URL`
    - `AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS`
@@ -88,40 +91,51 @@ are never disabled.
 Run `.github/workflows/backend-staging-delivery.yml` manually with:
 
 1. `operation=deploy`;
-2. the full 40-character commit published by `backend-ci`;
-3. the digest-qualified image reference from the CI manifest.
+2. the full 40-character commit already merged into `main` and published by a
+   successful `backend-ci` push run.
 
 `scripts/staging_release.py` rejects a mutable tag, a different release root,
 an image whose OCI revision label differs from the commit, an occupied
-`127.0.0.1:8001`, or a staging network owned by another Compose project. It
-then validates the private env, starts the shared infrastructure without a
-build, writes a PostgreSQL backup, applies Alembic explicitly, replaces the API,
-checks both local and public readiness, and atomically advances the release
-pointer. The resulting manifest records commit, image digest, migration
-revision, OpenAPI hash, URL, and release time but no secret values.
+`127.0.0.1:8001`, or a staging network owned by another Compose project. The
+workflow checks out trusted release tooling from `main`, proves that the
+requested commit is reachable from `main`, and downloads the exact image
+manifest from that commit's successful CI run. Workflow inputs enter shell only
+through quoted environment variables. Backend and Agent deliveries serialize
+on `/opt/momcozy-lab/shared/staging-release.lock`.
+
+A retry reuses an existing release directory only when its source-archive and
+extracted-tree checksums match. Deploy verifies the already-running shared infrastructure
+without reconciling it, compares the database revision with the image's unique
+Alembic head, and creates a private backup plus runs migration only when the
+revision changes. It then verifies object-storage write/read/delete, replaces
+only the API, checks local and public readiness, and atomically advances the
+release pointer. A failed switch restores the exact image from the current
+manifest. The manifest—not `deploy.env`—is the canonical image identity for
+restart and rollback.
+
+On a brand-new server, run the same workflow once with `operation=bootstrap`
+before `operation=deploy`. Bootstrap is the only normal path that creates the
+shared PostgreSQL, Redis, and MinIO containers and service-scoped MinIO users;
+it is deliberately separate from application delivery.
 
 For `operation=rollback`, set `confirm_schema_compatible=true`. Rollback loads
 the previous manifest and image digest and replaces only the API. It does not
 run an Alembic downgrade. If the previous code cannot read the current schema,
 roll forward instead.
 
-## Manual Release Semantics
+## Release Semantics
 
-1. Run the migration job:
-
-   ```bash
-   python -m alembic -c alembic.ini upgrade head
-   ```
-
-   The current baseline targets an empty database and does not support
-   upgrading an older Product Backend schema. This is intentional while the product is
-   limited to resettable internal testing. Drop and recreate the test database
-   before deploying this baseline; do not point it at a database whose data
-   must be preserved.
-
-2. Deploy the Product Backend.
+1. Do not use a bare `docker compose up` as a release or recovery mechanism.
+   Use the protected workflow; use `staging_release.py restart-current` only for
+   an audited host-side restart so image identity is derived from the current
+   manifest.
+2. The current baseline targets an empty database and does not support
+   upgrading an older Product Backend schema. Do not point it at a database
+   whose data must be preserved without an explicit migration plan.
+   The release-owned tools job is the only path that invokes
+   `python -m alembic -c alembic.ini upgrade head`.
 3. Wait for `GET /v1/health/live`.
-4. Wait for `GET /v1/health/ready`; readiness must verify configured Postgres
+4. Wait for `GET /v1/health/ready`; readiness must verify configured PostgreSQL
    and Redis.
 5. Run `docs/release-smoke-checklist.md`.
 6. Verify the JWKS and internal Agent Runtime API boundary before allowing a separately
@@ -139,36 +153,37 @@ deployed.
 
 - Docker network `momcozy-lab-staging`;
 - PostgreSQL databases/roles `momcozy_staging` and `agent_runtime_staging`;
-- Redis, with Product Backend on logical DB 0 and Agent Runtime on logical DB 1;
-- MinIO buckets `momcozy-staging` and `agent-runtime-staging`;
+- Redis, with a disabled default user, a private admin account, and separate
+  Product/Agent ACL users restricted to their key prefixes; Product Backend
+  uses logical DB 0 and Agent Runtime uses logical DB 1;
+- MinIO buckets `momcozy-staging` and `agent-runtime-staging`, each with a
+  bucket-scoped service user; application containers never receive root keys;
 - Product Backend alias `product-backend` and host bind `127.0.0.1:8001`.
 
 Generate URL-safe secrets, copy the example, fill every empty
-`MOMCOZY_STAGING_*` value, then start Product Backend first:
+`MOMCOZY_STAGING_*` and application-secret value, set the private file to mode
+`0600`, then use the protected workflow's `bootstrap` operation followed by
+`deploy`. The image digest is deliberately absent from the private env; the
+workflow obtains it from the successful CI artifact.
 
-```bash
-cp env/compose.staging.env.example env/compose.staging.env
-make backend-staging-up
-make backend-staging-ps
-make backend-staging-logs
-```
-
-Then copy only the shared Agent Runtime password/Redis/MinIO values into the
-private Agent Runtime staging env and start Agent Runtime from its repository.
+Then copy only the Agent-scoped PostgreSQL password, Redis password, and MinIO
+access-key pair into the private Agent Runtime staging env and deploy Agent
+Runtime from its repository.
 Agent Runtime joins the existing network; it must not create another
 PostgreSQL, Redis, or MinIO service.
 
-Stop Agent Runtime before stopping Product Backend. To stop Product Backend
-while preserving volumes:
+The release script creates database dumps as mode `0600` under a mode `0700`
+directory only when the Alembic revision changes and retains the latest ten
+successful pre-migration dumps. Stateful credential or image changes are
+planned maintenance: ordinary application deploys never recreate these
+containers before backup.
 
-```bash
-make backend-staging-down
-```
-
-`make backend-staging-reset` is destructive: it removes both Product Backend
-and Agent Runtime staging database data plus both MinIO buckets. Use it only
-after both application stacks are stopped and the reset has been explicitly
-approved.
+Direct staging mutation targets in the Makefile intentionally fail closed.
+Stopping shared infrastructure, rotating its credentials, or resetting its
+volumes is a separate approved maintenance procedure: first stop Agent Runtime,
+acquire the shared host lock, derive the exact Compose/image identity from the
+current manifest, and complete the required backup. An application delivery
+must never perform these operations.
 
 The PostgreSQL init script runs only for an empty named volume. It does not
 upgrade an older staging volume or rotate existing role passwords; those

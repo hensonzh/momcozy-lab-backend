@@ -36,33 +36,15 @@ backend-migrate:
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
 
-backend-staging-pull:
-	$(STAGING_COMPOSE) --profile tools pull migrate api
-
-backend-staging-migrate:
-	$(STAGING_COMPOSE) --profile tools run --rm --no-deps migrate
-
-backend-staging-up:
-	$(MAKE) backend-staging-pull STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)
-	$(STAGING_COMPOSE) up -d --no-build postgres redis minio minio-init
-	$(MAKE) backend-staging-migrate STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)
-	$(STAGING_COMPOSE) up -d --no-build --force-recreate api
-
-backend-staging-services:
-	$(STAGING_COMPOSE) pull api
-	$(STAGING_COMPOSE) up -d --no-build --force-recreate api
-
-backend-staging-down:
-	$(STAGING_COMPOSE) down
-
-backend-staging-reset:
-	$(STAGING_COMPOSE) down --volumes --remove-orphans
+backend-staging-pull backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset:
+	@echo "Direct staging mutation is disabled; use the protected backend-staging-delivery workflow or an approved maintenance runbook." >&2
+	@exit 2
 
 backend-staging-ps:
-	$(STAGING_COMPOSE) ps
+	docker ps --filter label=com.docker.compose.project=momcozy-lab-backend-staging
 
 backend-staging-logs:
-	$(STAGING_COMPOSE) logs -f api
+	docker logs --follow $$(docker ps --quiet --filter label=com.docker.compose.project=momcozy-lab-backend-staging --filter label=com.docker.compose.service=api)
 
 backend-export-contracts:
 	$(PYTHON) scripts/export_openapi.py --output docs/openapi.generated.json

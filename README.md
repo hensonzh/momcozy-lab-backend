@@ -116,31 +116,33 @@ committed or reused.
 
 The Product Backend staging Compose profile is the single owner of the shared
 PostgreSQL, Redis, MinIO, and `momcozy-lab-staging` network. It creates separate
-`momcozy_staging` and `agent_runtime_staging` databases, reserves Redis DB 0/1,
-creates the `momcozy-staging` and `agent-runtime-staging` buckets, and binds the
-Product Backend to `127.0.0.1:8001`:
+`momcozy_staging` and `agent_runtime_staging` databases, Redis ACL identities
+and DB 0/1 separation, bucket-scoped MinIO identities for `momcozy-staging` and
+`agent-runtime-staging`, and binds Product Backend to `127.0.0.1:8001`.
 
-```bash
-cp env/compose.staging.env.example env/compose.staging.env
-# Fill every MOMCOZY_STAGING_* secret and set MOMCOZY_BACKEND_IMAGE to a
-# ghcr.io/hensonzh/momcozy-lab-backend@sha256:... digest before continuing.
-make backend-staging-up
-make backend-staging-smoke
-```
+Copy `env/compose.staging.env.example` to the private host env, generate every
+empty secret, and set mode `0600`. Do not add an image reference. On a new host,
+run the protected delivery workflow with `operation=bootstrap`; then deploy the
+application with `operation=deploy`.
 
 Start this stack before Agent Runtime staging; Agent Runtime joins the shared
 network as an external consumer and does not create another infrastructure stack.
 
-`make backend-staging-reset` deletes the staging Compose volumes and must only
-be used while staging data remains explicitly resettable.
+Direct staging mutation targets in the Makefile fail closed. Infrastructure
+shutdown, reset, or credential rotation is separate approved maintenance and
+must not bypass the protected release lock, current manifest, and backup gate.
 
 The normal delivery path is not an on-host build. A successful `backend-ci`
 run on `main` publishes the exact image tested by CI to GHCR under the full
 commit SHA and records its digest. An operator then runs
 `backend-staging-delivery`, selects the protected `staging` environment, and
-supplies the full commit plus `ghcr.io/hensonzh/momcozy-lab-backend@sha256:...`.
-The workflow checks port/network ownership, backs up PostgreSQL, runs the
-migration explicitly, verifies loopback and SNI readiness, and writes
+supplies only a full commit already merged into `main`. The workflow consumes
+that commit's successful CI image manifest, serializes with Agent/App delivery
+through the host lock, checks port/network ownership, and never reconciles
+stateful containers during application delivery. It backs up PostgreSQL and
+migrates only when the Alembic revision changes, verifies object storage plus
+loopback/SNI readiness, restores the current-manifest image on a failed switch,
+and writes
 `/opt/momcozy-lab/current/backend/release-manifest.json`.
 
 Rollback is an explicit operation in the same workflow. It changes application

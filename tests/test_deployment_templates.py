@@ -9,6 +9,9 @@ CI_WORKFLOW = ROOT / ".github" / "workflows" / "backend-ci.yml"
 LOCAL_COMPOSE = ROOT / "docker-compose.local.yml"
 STAGING_COMPOSE = ROOT / "docker-compose.staging.yml"
 POSTGRES_INIT = ROOT / "deploy" / "staging" / "init-postgres.sh"
+REDIS_START = ROOT / "deploy" / "staging" / "start-redis.sh"
+PRODUCT_MINIO_POLICY = ROOT / "deploy" / "staging" / "minio-product-policy.json"
+AGENT_MINIO_POLICY = ROOT / "deploy" / "staging" / "minio-agent-policy.json"
 NGINX_CONFIG = (
     ROOT / "deploy" / "nginx" / "momcozy-lab-product-backend.conf"
 )
@@ -61,6 +64,61 @@ def test_project_metadata_uses_backend_name() -> None:
         / "workflows"
         / "production-backend-ci.yml"
     ).exists()
+
+
+def test_staging_shared_services_enforce_service_credentials_and_resource_limits() -> None:
+    compose = STAGING_COMPOSE.read_text()
+    env = COMPOSE_STAGING_ENV.read_text()
+    redis_start = REDIS_START.read_text()
+
+    assert "MOMCOZY_STAGING_REDIS_PASSWORD" not in compose + env
+    assert "redis://product-backend:${MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD:?" in compose
+    assert "MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD" in compose + env
+    assert "MOMCOZY_STAGING_AGENT_REDIS_PASSWORD" in compose + env
+    assert "user default off" in redis_start
+    assert "user product-backend" in redis_start
+    assert "~rate-limit:*" in redis_start
+    assert "~product:agent-asset-capability:v1:*" in redis_start
+    assert "user agent-runtime" in redis_start
+    assert "~agent-runtime:*" in redis_start
+    assert "~momcozy-agent-runtime:*" in redis_start
+    assert "-@dangerous" in redis_start
+
+    assert "MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY" in compose + env
+    assert "MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY" in compose + env
+    assert "OBJECT_STORAGE_ACCESS_KEY_ID: ${MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY" in compose
+    assert "mc admin user add" in compose
+    assert "mc admin policy attach" in compose
+    assert "momcozy-staging" in PRODUCT_MINIO_POLICY.read_text()
+    assert "agent-runtime-staging" not in PRODUCT_MINIO_POLICY.read_text()
+    assert "agent-runtime-staging" in AGENT_MINIO_POLICY.read_text()
+    assert "momcozy-staging" not in AGENT_MINIO_POLICY.read_text()
+
+    for cpu, memory in (
+        ("cpus: 1.0", "mem_limit: 1g"),
+        ("cpus: 1.0", "mem_limit: 1536m"),
+        ("cpus: 0.25", "mem_limit: 256m"),
+        ("cpus: 0.5", "mem_limit: 1g"),
+    ):
+        assert cpu in compose
+        assert memory in compose
+
+
+def test_staging_template_contains_no_deployable_credentials_or_stale_image() -> None:
+    env = COMPOSE_STAGING_ENV.read_text()
+    release_script = (ROOT / "scripts" / "staging_release.py").read_text()
+
+    assert "MOMCOZY_BACKEND_IMAGE=" not in env
+    assert "SERVICE_API_KEY=\n" in env
+    assert "AGENT_RUNTIME_SERVICE_API_KEY=\n" in env
+    assert "AUTH_INVITE_CODES=\n" in env
+    assert "MOMCOZY-BETA" not in env
+    assert "staging-service-key-with-at-least-32-bytes" not in env
+    assert "staging-agent-runtime-service-key-with-at-least-32-bytes" not in env
+    assert "staging-service-key-with-at-least-32-bytes" in release_script
+    assert "staging-agent-runtime-service-key-with-at-least-32-bytes" in release_script
+    assert "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD" in release_script
+    assert "MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY" in release_script
 
 
 def _environment_names(text: str) -> set[str]:
@@ -387,9 +445,15 @@ def test_staging_compose_owns_shared_containerized_infrastructure() -> None:
         "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD",
         "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD",
         "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD",
-        "MOMCOZY_STAGING_REDIS_PASSWORD",
+        "MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD",
+        "MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD",
+        "MOMCOZY_STAGING_AGENT_REDIS_PASSWORD",
         "MOMCOZY_STAGING_MINIO_ROOT_USER",
         "MOMCOZY_STAGING_MINIO_ROOT_PASSWORD",
+        "MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY",
+        "MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY",
+        "MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY",
+        "MOMCOZY_STAGING_AGENT_MINIO_SECRET_KEY",
     ):
         assert f"${{{required_secret}:?" in compose
         assert f'{required_secret}: ""' in compose
@@ -419,15 +483,15 @@ def test_staging_compose_uses_staging_env_and_safe_api_bind() -> None:
         "@staging-postgres:5432/momcozy_staging"
     ) in env
     assert (
-        "REDIS_URL=redis://:${MOMCOZY_STAGING_REDIS_PASSWORD}"
-        "@staging-redis:6379/0"
+        "REDIS_URL=redis://product-backend:"
+        "${MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD}@staging-redis:6379/0"
     ) in env
     assert "OBJECT_STORAGE_PROVIDER=minio" in env
     assert "OBJECT_STORAGE_BUCKET=momcozy-staging" in env
     assert "OBJECT_STORAGE_ENDPOINT_URL=http://staging-minio:9000" in env
 
 
-def test_makefile_exposes_staging_release_targets_only() -> None:
+def test_makefile_blocks_direct_staging_mutation() -> None:
     makefile = (ROOT / "Makefile").read_text()
 
     assert "PRODUCTION_COMPOSE" not in makefile
@@ -435,11 +499,10 @@ def test_makefile_exposes_staging_release_targets_only() -> None:
 
     assert "STAGING_COMPOSE_ENV_FILE ?= env/compose.staging.env" in makefile
     assert "--env-file $(STAGING_COMPOSE_ENV_FILE)" in makefile
-    assert "$(STAGING_COMPOSE) --profile tools pull migrate api" in makefile
-    assert "$(STAGING_COMPOSE) --profile tools run --rm --no-deps migrate" in makefile
-    assert "$(STAGING_COMPOSE) up -d --no-build --force-recreate api" in makefile
     assert "$(STAGING_COMPOSE) build" not in makefile
-    assert "$(STAGING_COMPOSE) up -d --no-build postgres redis minio minio-init" in makefile
-    assert "backend-staging-services:" in makefile
+    assert "backend-staging-services" in makefile
     assert "backend-staging-reset:" in makefile
-    assert "$(STAGING_COMPOSE) down --volumes --remove-orphans" in makefile
+    assert "Direct staging mutation is disabled" in makefile
+    assert "docker ps --filter label=com.docker.compose.project=momcozy-lab-backend-staging" in makefile
+    assert "$(STAGING_COMPOSE) up" not in makefile
+    assert "$(STAGING_COMPOSE) down --volumes" not in makefile

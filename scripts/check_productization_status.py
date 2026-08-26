@@ -85,10 +85,11 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
         "env/compose.staging.env.example": [
             "APP_ENV=staging",
             "DATABASE_URL=postgresql+asyncpg://momcozy_staging:${MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD}@staging-postgres",
-            "REDIS_URL=redis://:${MOMCOZY_STAGING_REDIS_PASSWORD}@staging-redis:6379/0",
+            "REDIS_URL=redis://product-backend:${MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD}@staging-redis:6379/0",
             "OBJECT_STORAGE_PROVIDER=minio",
-            "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
+            "AUTH_JWT_PRIVATE_KEY_B64=",
             "AUTH_JWT_ISSUER=momcozy-staging",
+            "AUTH_INVITE_CODES=",
             "OBJECT_STORAGE_ENDPOINT_URL=http://staging-minio:9000",
         ],
     }

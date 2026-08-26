@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deploy or roll back one immutable Product Backend staging release."""
+"""Stage, bootstrap, deploy, restart, or roll back Product Backend staging."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -25,10 +26,28 @@ EXPECTED_RELEASE_ROOT = Path("/opt/momcozy-lab")
 OPENAPI_PATH = Path("docs/openapi.generated.json")
 COMPOSE_PATH = Path("docker-compose.staging.yml")
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_REF_PATTERN = re.compile(
     rf"^{re.escape(IMAGE_REPOSITORY)}@sha256:[0-9a-f]{{64}}$"
 )
 SAFE_REVISION_PATTERN = re.compile(r"^[0-9A-Za-z_.-]+$")
+SAFE_ATTEMPT_PATTERN = re.compile(r"^[0-9]+-[0-9]+$")
+BACKUP_RETENTION_COUNT = 10
+SOURCE_ARCHIVE_MARKER = ".source-archive.sha256"
+SOURCE_TREE_MARKER = ".source-tree.sha256"
+SOURCE_TREE_EXCLUSIONS = frozenset(
+    {SOURCE_ARCHIVE_MARKER, SOURCE_TREE_MARKER, "release-manifest.json"}
+)
+KNOWN_SECRET_PLACEHOLDERS = frozenset(
+    {
+        "staging-service-key-with-at-least-32-bytes",
+        "staging-agent-runtime-service-key-with-at-least-32-bytes",
+        "replace-me",
+        "changeme",
+        "minioadmin",
+        "momcozy-beta",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -53,8 +72,7 @@ class CommandRunner:
         stdout: IO[bytes] | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        rendered = " ".join(command)
-        print(f"$ {rendered}", flush=True)
+        print(f"$ {' '.join(command)}", flush=True)
         return subprocess.run(
             list(command),
             cwd=cwd,
@@ -129,25 +147,76 @@ def build_image_manifest(*, image_ref: str, commit_sha: str) -> dict[str, Any]:
     }
 
 
+def stage_release_snapshot(
+    *,
+    archive: Path,
+    archive_sha256: str,
+    commit_sha: str,
+    release_root: Path,
+    attempt_id: str,
+) -> Path:
+    root = validate_release_root(release_root)
+    commit = validate_commit_sha(commit_sha)
+    _validate_sha256(archive_sha256, "archive SHA256")
+    if not SAFE_ATTEMPT_PATTERN.fullmatch(attempt_id):
+        raise ValueError("attempt id must be <run-id>-<attempt-number>")
+    if not archive.is_file() or archive.is_symlink():
+        raise FileNotFoundError(archive)
+    if _sha256_file(archive) != archive_sha256:
+        raise RuntimeError("release archive checksum does not match")
+
+    release_dir = root / "releases" / "backend" / commit
+    if release_dir.exists():
+        _verify_staged_snapshot(release_dir, archive_sha256)
+        print(f"Reusing verified Product Backend snapshot: {release_dir}")
+        return release_dir
+
+    attempts_root = root / "releases" / ".attempts" / "backend"
+    attempts_root.mkdir(parents=True, mode=0o750, exist_ok=True)
+    attempt_dir = attempts_root / f"{commit}-{attempt_id}"
+    attempt_dir.mkdir(mode=0o750)
+    try:
+        with tarfile.open(archive, mode="r:gz") as bundle:
+            bundle.extractall(attempt_dir, filter="data")
+        for reserved_name in SOURCE_TREE_EXCLUSIONS:
+            reserved_path = attempt_dir / reserved_name
+            if reserved_path.exists() or reserved_path.is_symlink():
+                raise RuntimeError(
+                    f"release archive contains reserved path: {reserved_name}"
+                )
+        source_tree_sha256 = _source_tree_sha256(attempt_dir)
+        _write_text_exclusive(
+            attempt_dir / SOURCE_ARCHIVE_MARKER,
+            f"{archive_sha256}\n",
+            mode=0o444,
+        )
+        _write_text_exclusive(
+            attempt_dir / SOURCE_TREE_MARKER,
+            f"{source_tree_sha256}\n",
+            mode=0o444,
+        )
+        release_dir.parent.mkdir(parents=True, mode=0o750, exist_ok=True)
+        os.rename(attempt_dir, release_dir)
+    except Exception:
+        print(f"Failed snapshot retained for diagnosis: {attempt_dir}", file=sys.stderr)
+        raise
+    _verify_staged_snapshot(release_dir, archive_sha256)
+    print(f"Staged immutable Product Backend snapshot: {release_dir}")
+    return release_dir
+
+
 def build_deploy_commands(spec: BackendReleaseSpec) -> list[list[str]]:
     compose = _compose_base(spec)
     return [
         ["docker", "pull", spec.image_ref],
+        _image_revision_command(spec.image_ref),
+        [*compose, "config", "--quiet"],
         [
-            "docker",
-            "image",
-            "inspect",
-            "--format",
-            '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
-            spec.image_ref,
-        ],
-        [
-            "docker",
+            *compose,
             "run",
             "--rm",
-            "--env-file",
-            str(spec.env_file),
-            spec.image_ref,
+            "--no-deps",
+            "api",
             "python",
             "-c",
             (
@@ -155,119 +224,188 @@ def build_deploy_commands(spec: BackendReleaseSpec) -> list[list[str]]:
                 "Settings.from_env().validate_for_startup()"
             ),
         ],
-        [*compose, "config", "--quiet"],
+        [
+            *compose,
+            "run",
+            "--rm",
+            "--no-deps",
+            "api",
+            "python",
+            "scripts/check_object_storage_profile.py",
+        ],
         [
             *compose,
             "up",
             "--detach",
             "--no-build",
-            "postgres",
-            "redis",
-            "minio",
-            "minio-init",
-        ],
-        [
-            *compose,
-            "exec",
-            "-T",
-            "postgres",
-            "pg_dump",
-            "--username",
-            "momcozy_staging_admin",
-            "--dbname",
-            "momcozy_staging",
-            "--format",
-            "custom",
-        ],
-        [*compose, "--profile", "tools", "run", "--rm", "--no-deps", "migrate"],
-        [
-            *compose,
-            "up",
-            "--detach",
-            "--no-build",
+            "--no-deps",
             "--force-recreate",
             "api",
         ],
-        [
-            "curl",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--retry",
-            "20",
-            "--retry-all-errors",
-            "--retry-delay",
-            "3",
-            "http://127.0.0.1:8001/v1/health/ready",
-        ],
-        [
-            "curl",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--cacert",
-            str(spec.ca_file),
-            f"{spec.public_url.rstrip('/')}/v1/health/ready",
-        ],
+        _local_readiness_command(),
+        _public_readiness_command(spec.public_url, spec.ca_file),
     ]
+
+
+def bootstrap(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
+    """Create shared staging infrastructure without deploying application code."""
+    _validate_spec_files(spec)
+    _validate_env_file(spec.env_file)
+    _check_collision_boundaries(runner)
+    env = _command_env(spec)
+    compose = _compose_base(spec)
+    runner.run(["docker", "pull", spec.image_ref], env=env)
+    _verify_image_revision(spec, runner, env)
+    runner.run([*compose, "config", "--quiet"], cwd=spec.repo_dir, env=env)
+
+    ids = {
+        service: _service_container_ids(spec, service, runner, env)
+        for service in ("postgres", "redis", "minio")
+    }
+    present = sum(bool(values) for values in ids.values())
+    if present not in {0, len(ids)}:
+        raise RuntimeError(
+            "shared infrastructure is partially present; repair it explicitly before bootstrap"
+        )
+    if present == 0:
+        runner.run(
+            [
+                *compose,
+                "up",
+                "--detach",
+                "--wait",
+                "--wait-timeout",
+                "120",
+                "--no-build",
+                "postgres",
+                "redis",
+                "minio",
+            ],
+            cwd=spec.repo_dir,
+            env=env,
+        )
+    _require_healthy_infrastructure(spec, runner, env)
+    runner.run(
+        [
+            *compose,
+            "--profile",
+            "tools",
+            "run",
+            "--rm",
+            "--no-deps",
+            "minio-init",
+        ],
+        cwd=spec.repo_dir,
+        env=env,
+    )
+    print("Product Backend shared staging infrastructure is healthy and initialized.")
 
 
 def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
     _validate_spec_files(spec)
     _validate_env_file(spec.env_file)
     _check_collision_boundaries(runner)
+    env = _command_env(spec)
     commands = build_deploy_commands(spec)
-    command_env = _command_env(spec)
-    backup_path = _backup_path(spec)
-    backup_path.parent.mkdir(parents=True, exist_ok=True)
 
-    revision_result: subprocess.CompletedProcess[str] | None = None
-    for index, command in enumerate(commands):
-        if index == 1:
-            revision_result = runner.run(
-                command,
-                cwd=spec.repo_dir,
-                env=command_env,
-                capture_output=True,
-            )
-            observed_revision = (revision_result.stdout or "").strip()
-            if observed_revision != spec.commit_sha:
+    runner.run(commands[0], cwd=spec.repo_dir, env=env)
+    _verify_image_revision(spec, runner, env)
+    runner.run(commands[2], cwd=spec.repo_dir, env=env)
+    infrastructure = _require_healthy_infrastructure(spec, runner, env)
+    runner.run(commands[3], cwd=spec.repo_dir, env=env)
+
+    image_head = _read_image_migration_head(spec, runner, env)
+    database_revision = _read_database_revision(
+        postgres_container=infrastructure["postgres"],
+        database="momcozy_staging",
+        runner=runner,
+    )
+    if database_revision != image_head:
+        backup_path = _backup_path(spec)
+        _write_secure_backup(
+            runner=runner,
+            command=_pg_dump_command(
+                infrastructure["postgres"], database="momcozy_staging"
+            ),
+            backup_path=backup_path,
+            cwd=spec.repo_dir,
+            env=env,
+        )
+        runner.run(
+            [
+                *_compose_base(spec),
+                "--profile",
+                "tools",
+                "run",
+                "--rm",
+                "--no-deps",
+                "migrate",
+            ],
+            cwd=spec.repo_dir,
+            env=env,
+        )
+        database_revision = _read_database_revision(
+            postgres_container=infrastructure["postgres"],
+            database="momcozy_staging",
+            runner=runner,
+        )
+        if database_revision != image_head:
+            raise RuntimeError("Product Backend migration did not reach the image head")
+        _prune_backups(backup_path.parent, keep=BACKUP_RETENTION_COUNT)
+    else:
+        print(f"Schema unchanged at {image_head}; skipping backup and migration.")
+
+    runner.run(commands[4], cwd=spec.repo_dir, env=env)
+    previous = _current_release_spec(spec)
+    switched = False
+    try:
+        switched = True
+        for command in commands[5:]:
+            runner.run(command, cwd=spec.repo_dir, env=env)
+        manifest_path = _write_and_promote_manifest(
+            spec,
+            migration_revision=image_head,
+        )
+    except Exception as deploy_error:
+        if switched:
+            try:
+                _restore_backend(previous=previous, failed=spec, runner=runner)
+            except Exception as restore_error:
                 raise RuntimeError(
-                    "image revision label does not match the requested commit"
-                )
-        elif "pg_dump" in command:
-            with backup_path.open("wb") as backup_file:
-                runner.run(
-                    command,
-                    cwd=spec.repo_dir,
-                    env=command_env,
-                    stdout=backup_file,
-                )
-        else:
-            runner.run(command, cwd=spec.repo_dir, env=command_env)
-
-    migration_revision = _read_migration_revision(spec, runner, command_env)
-    openapi_sha256 = _sha256_file(spec.repo_dir / OPENAPI_PATH)
-    released_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace(
-        "+00:00", "Z"
-    )
-    manifest = build_release_manifest(
-        image_ref=spec.image_ref,
-        commit_sha=spec.commit_sha,
-        migration_revision=migration_revision,
-        openapi_sha256=openapi_sha256,
-        public_url=spec.public_url,
-        released_at=released_at,
-    )
-    manifest_path = spec.repo_dir / "release-manifest.json"
-    _write_json_atomic(manifest_path, manifest)
-    archived_manifest = (
-        spec.release_root / "manifests" / f"backend-{spec.commit_sha}.json"
-    )
-    _write_json_atomic(archived_manifest, manifest)
-    _promote_release_pointer(spec.release_root, spec.repo_dir)
+                    "Product Backend deploy failed and the previous release could not be restored: "
+                    f"{restore_error}"
+                ) from deploy_error
+        raise
     print(f"Product Backend staging release promoted: {manifest_path}")
     return manifest_path
+
+
+def restart_current(
+    *,
+    env_file: Path,
+    release_root: Path,
+    public_url: str,
+    ca_file: Path,
+    runner: CommandRunner,
+) -> Path:
+    root = validate_release_root(release_root)
+    current_dir = _resolved_release_link(root / "current" / "backend")
+    spec = _spec_from_manifest(
+        current_dir,
+        env_file=env_file,
+        release_root=root,
+        public_url=public_url,
+        ca_file=ca_file,
+    )
+    _validate_spec_files(spec)
+    _validate_env_file(spec.env_file)
+    _check_collision_boundaries(runner)
+    env = _command_env(spec)
+    _require_healthy_infrastructure(spec, runner, env)
+    runner.run(["docker", "pull", spec.image_ref], env=env)
+    _verify_image_revision(spec, runner, env)
+    _start_backend(spec, runner)
+    return current_dir / "release-manifest.json"
 
 
 def rollback(
@@ -286,71 +424,42 @@ def rollback(
     previous_link = root / "previous" / "backend"
     current_dir = _resolved_release_link(current_link)
     previous_dir = _resolved_release_link(previous_link)
-    manifest_path = previous_dir / "release-manifest.json"
-    manifest = _read_manifest(manifest_path)
-    spec = BackendReleaseSpec(
-        image_ref=validate_image_ref(str(manifest["image_ref"])),
-        commit_sha=validate_commit_sha(str(manifest["commit"])),
-        repo_dir=previous_dir,
-        env_file=env_file.resolve(),
+    current = _spec_from_manifest(
+        current_dir,
+        env_file=env_file,
         release_root=root,
         public_url=public_url,
-        ca_file=ca_file.resolve(),
+        ca_file=ca_file,
     )
-    _validate_spec_files(spec)
-    _validate_env_file(spec.env_file)
+    previous = _spec_from_manifest(
+        previous_dir,
+        env_file=env_file,
+        release_root=root,
+        public_url=public_url,
+        ca_file=ca_file,
+    )
+    _validate_spec_files(previous)
+    _validate_env_file(previous.env_file)
     _check_collision_boundaries(runner)
-    command_env = _command_env(spec)
-    compose = _compose_base(spec)
-    runner.run(["docker", "pull", spec.image_ref], env=command_env)
-    revision = runner.run(
-        [
-            "docker",
-            "image",
-            "inspect",
-            "--format",
-            '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
-            spec.image_ref,
-        ],
-        capture_output=True,
-        env=command_env,
-    )
-    if (revision.stdout or "").strip() != spec.commit_sha:
-        raise RuntimeError("rollback image revision label does not match manifest")
-    runner.run(
-        [*compose, "up", "--detach", "--no-build", "--force-recreate", "api"],
-        cwd=spec.repo_dir,
-        env=command_env,
-    )
-    runner.run(
-        [
-            "curl",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--retry",
-            "20",
-            "--retry-all-errors",
-            "--retry-delay",
-            "3",
-            "http://127.0.0.1:8001/v1/health/ready",
-        ]
-    )
-    runner.run(
-        [
-            "curl",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--cacert",
-            str(spec.ca_file),
-            f"{public_url.rstrip('/')}/v1/health/ready",
-        ]
-    )
+    env = _command_env(previous)
+    _require_healthy_infrastructure(previous, runner, env)
+    runner.run(["docker", "pull", previous.image_ref], env=env)
+    _verify_image_revision(previous, runner, env)
+    try:
+        _start_backend(previous, runner)
+    except Exception as rollback_error:
+        try:
+            _start_backend(current, runner)
+        except Exception as restore_error:
+            raise RuntimeError(
+                "rollback failed and the current Product Backend could not be restored: "
+                f"{restore_error}"
+            ) from rollback_error
+        raise
     _replace_symlink(previous_link, current_dir)
     _replace_symlink(current_link, previous_dir)
-    print(f"Product Backend staging rolled back to {spec.commit_sha}")
-    return manifest_path
+    print(f"Product Backend staging rolled back to {previous.commit_sha}")
+    return previous_dir / "release-manifest.json"
 
 
 def _compose_base(spec: BackendReleaseSpec) -> list[str]:
@@ -379,10 +488,9 @@ def _validate_spec_files(spec: BackendReleaseSpec) -> None:
     expected_repo_dir = root / "releases" / "backend" / spec.commit_sha
     if spec.repo_dir.resolve() != expected_repo_dir:
         raise ValueError(f"repo directory must be {expected_repo_dir}")
-    if not (spec.repo_dir / COMPOSE_PATH).is_file():
-        raise FileNotFoundError(spec.repo_dir / COMPOSE_PATH)
-    if not (spec.repo_dir / OPENAPI_PATH).is_file():
-        raise FileNotFoundError(spec.repo_dir / OPENAPI_PATH)
+    for relative_path in (COMPOSE_PATH, OPENAPI_PATH):
+        if not (spec.repo_dir / relative_path).is_file():
+            raise FileNotFoundError(spec.repo_dir / relative_path)
     if not spec.env_file.is_file():
         raise FileNotFoundError(spec.env_file)
     if not spec.ca_file.is_file():
@@ -396,19 +504,89 @@ def _validate_env_file(path: Path) -> None:
     if mode & 0o077:
         raise PermissionError(f"staging env must not be group/world readable: {mode:o}")
     values = _read_env_values(path)
+    if "MOMCOZY_BACKEND_IMAGE" in values:
+        raise ValueError("MOMCOZY_BACKEND_IMAGE is release-owned and must not be in deploy.env")
     required = (
         "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD",
         "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD",
         "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD",
-        "MOMCOZY_STAGING_REDIS_PASSWORD",
+        "MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD",
+        "MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD",
+        "MOMCOZY_STAGING_AGENT_REDIS_PASSWORD",
         "MOMCOZY_STAGING_MINIO_ROOT_USER",
         "MOMCOZY_STAGING_MINIO_ROOT_PASSWORD",
+        "MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY",
+        "MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY",
+        "MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY",
+        "MOMCOZY_STAGING_AGENT_MINIO_SECRET_KEY",
         "AUTH_JWT_PRIVATE_KEY_B64",
+        "AUTH_INVITE_CODES",
+        "SERVICE_API_KEY",
         "AGENT_RUNTIME_SERVICE_API_KEY",
     )
     missing = [name for name in required if not values.get(name, "").strip()]
     if missing:
         raise ValueError(f"staging env is missing required values: {', '.join(missing)}")
+    unsafe = [
+        name
+        for name in required
+        if _is_known_placeholder(values[name])
+    ]
+    if any(
+        _is_known_placeholder(code)
+        for code in values["AUTH_INVITE_CODES"].split(",")
+    ) and "AUTH_INVITE_CODES" not in unsafe:
+        unsafe.append("AUTH_INVITE_CODES")
+    if unsafe:
+        raise ValueError(f"staging env contains placeholder values: {', '.join(unsafe)}")
+    _require_distinct(
+        values,
+        (
+            "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD",
+            "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD",
+            "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD",
+        ),
+    )
+    _require_distinct(
+        values,
+        (
+            "MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD",
+            "MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD",
+            "MOMCOZY_STAGING_AGENT_REDIS_PASSWORD",
+        ),
+    )
+    _require_distinct(
+        values,
+        (
+            "MOMCOZY_STAGING_MINIO_ROOT_USER",
+            "MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY",
+            "MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY",
+        ),
+    )
+    _require_distinct(
+        values,
+        (
+            "MOMCOZY_STAGING_MINIO_ROOT_PASSWORD",
+            "MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY",
+            "MOMCOZY_STAGING_AGENT_MINIO_SECRET_KEY",
+        ),
+    )
+    _require_distinct(values, ("SERVICE_API_KEY", "AGENT_RUNTIME_SERVICE_API_KEY"))
+
+
+def _is_known_placeholder(value: str) -> bool:
+    normalized = value.strip()
+    return (
+        normalized.lower() in KNOWN_SECRET_PLACEHOLDERS
+        or (normalized.startswith("${") and normalized.endswith("}"))
+        or normalized == "0" * 64
+    )
+
+
+def _require_distinct(values: dict[str, str], names: Sequence[str]) -> None:
+    selected = [values[name].strip() for name in names]
+    if len(selected) != len(set(selected)):
+        raise ValueError(f"staging credentials must be distinct: {', '.join(names)}")
 
 
 def _read_env_values(path: Path) -> dict[str, str]:
@@ -469,8 +647,216 @@ def _check_collision_boundaries(runner: CommandRunner) -> None:
             raise RuntimeError(f"{STAGING_NETWORK} is owned by {owner}")
 
 
+def _require_healthy_infrastructure(
+    spec: BackendReleaseSpec,
+    runner: CommandRunner,
+    env: dict[str, str],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for service in ("postgres", "redis", "minio"):
+        ids = _service_container_ids(spec, service, runner, env)
+        if len(ids) != 1:
+            raise RuntimeError(
+                f"expected one existing {service} container; run bootstrap explicitly first"
+            )
+        state = runner.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                ids[0],
+            ],
+            capture_output=True,
+        )
+        if (state.stdout or "").strip() != "true healthy":
+            raise RuntimeError(f"existing shared {service} container is not healthy")
+        result[service] = ids[0]
+    return result
+
+
+def _service_container_ids(
+    spec: BackendReleaseSpec,
+    service: str,
+    runner: CommandRunner,
+    env: dict[str, str],
+) -> list[str]:
+    result = runner.run(
+        [*_compose_base(spec), "ps", "--quiet", service],
+        cwd=spec.repo_dir,
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"could not inspect shared {service} container")
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _image_revision_command(image_ref: str) -> list[str]:
+    return [
+        "docker",
+        "image",
+        "inspect",
+        "--format",
+        '{{ index .Config.Labels "org.opencontainers.image.revision" }}',
+        image_ref,
+    ]
+
+
+def _verify_image_revision(
+    spec: BackendReleaseSpec,
+    runner: CommandRunner,
+    env: dict[str, str],
+) -> None:
+    revision = runner.run(
+        _image_revision_command(spec.image_ref),
+        capture_output=True,
+        env=env,
+    )
+    if (revision.stdout or "").strip() != spec.commit_sha:
+        raise RuntimeError("image revision label does not match the requested commit")
+
+
+def _read_image_migration_head(
+    spec: BackendReleaseSpec,
+    runner: CommandRunner,
+    env: dict[str, str],
+) -> str:
+    result = runner.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            spec.image_ref,
+            "python",
+            "-c",
+            (
+                "from alembic.config import Config; "
+                "from alembic.script import ScriptDirectory; "
+                "heads=ScriptDirectory.from_config(Config('alembic.ini')).get_heads(); "
+                "assert len(heads) == 1, f'expected one Alembic head, got {heads}'; "
+                "print(heads[0])"
+            ),
+        ],
+        capture_output=True,
+        env=env,
+    )
+    revision = (result.stdout or "").strip()
+    if not SAFE_REVISION_PATTERN.fullmatch(revision):
+        raise RuntimeError("image does not contain one safe Product Backend migration head")
+    return revision
+
+
+def _read_database_revision(
+    *,
+    postgres_container: str,
+    database: str,
+    runner: CommandRunner,
+) -> str:
+    existence = _psql_query(
+        postgres_container,
+        database=database,
+        sql="SELECT to_regclass('public.alembic_version') IS NOT NULL",
+        runner=runner,
+    ).lower()
+    if existence in {"f", "false"}:
+        return ""
+    if existence not in {"t", "true"}:
+        raise RuntimeError("could not determine whether alembic_version exists")
+    revision = _psql_query(
+        postgres_container,
+        database=database,
+        sql="SELECT version_num FROM alembic_version",
+        runner=runner,
+    )
+    if not SAFE_REVISION_PATTERN.fullmatch(revision):
+        raise RuntimeError("could not read a safe Product Backend migration revision")
+    return revision
+
+
+def _psql_query(
+    postgres_container: str,
+    *,
+    database: str,
+    sql: str,
+    runner: CommandRunner,
+) -> str:
+    result = runner.run(
+        [
+            "docker",
+            "exec",
+            postgres_container,
+            "psql",
+            "--username",
+            "momcozy_staging_admin",
+            "--dbname",
+            database,
+            "--tuples-only",
+            "--no-align",
+            "--command",
+            sql,
+        ],
+        capture_output=True,
+    )
+    return (result.stdout or "").strip()
+
+
+def _pg_dump_command(postgres_container: str, *, database: str) -> list[str]:
+    return [
+        "docker",
+        "exec",
+        postgres_container,
+        "pg_dump",
+        "--username",
+        "momcozy_staging_admin",
+        "--dbname",
+        database,
+        "--format",
+        "custom",
+    ]
+
+
+def _write_secure_backup(
+    *,
+    runner: CommandRunner,
+    command: Sequence[str],
+    backup_path: Path,
+    cwd: Path,
+    env: dict[str, str],
+) -> None:
+    backup_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(backup_path.parent, 0o700)
+    partial = backup_path.with_name(f".{backup_path.name}.partial-{os.getpid()}")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as backup_file:
+            runner.run(command, cwd=cwd, env=env, stdout=backup_file)
+        os.replace(partial, backup_path)
+        os.chmod(backup_path, 0o600)
+    except Exception:
+        try:
+            partial.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    print(f"Created private Product Backend database backup: {backup_path}")
+
+
+def _prune_backups(directory: Path, *, keep: int) -> None:
+    if keep < 1:
+        raise ValueError("backup retention must be positive")
+    backups = sorted(
+        path
+        for path in directory.glob("*.dump")
+        if path.is_file() and not path.is_symlink()
+    )
+    for expired in backups[:-keep]:
+        expired.unlink()
+
+
 def _backup_path(spec: BackendReleaseSpec) -> Path:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     return (
         spec.release_root
         / "backups"
@@ -479,35 +865,133 @@ def _backup_path(spec: BackendReleaseSpec) -> Path:
     )
 
 
-def _read_migration_revision(
+def _write_and_promote_manifest(
     spec: BackendReleaseSpec,
+    *,
+    migration_revision: str,
+) -> Path:
+    manifest = build_release_manifest(
+        image_ref=spec.image_ref,
+        commit_sha=spec.commit_sha,
+        migration_revision=migration_revision,
+        openapi_sha256=_sha256_file(spec.repo_dir / OPENAPI_PATH),
+        public_url=spec.public_url,
+        released_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace(
+            "+00:00", "Z"
+        ),
+    )
+    manifest_path = spec.repo_dir / "release-manifest.json"
+    _write_json_atomic(manifest_path, manifest)
+    _write_json_atomic(
+        spec.release_root / "manifests" / f"backend-{spec.commit_sha}.json",
+        manifest,
+    )
+    _promote_release_pointer(spec.release_root, spec.repo_dir)
+    return manifest_path
+
+
+def _current_release_spec(spec: BackendReleaseSpec) -> BackendReleaseSpec | None:
+    current = spec.release_root / "current" / "backend"
+    if not current.is_symlink():
+        if current.exists():
+            raise RuntimeError(f"release pointer is not a symlink: {current}")
+        return None
+    return _spec_from_manifest(
+        current.resolve(),
+        env_file=spec.env_file,
+        release_root=spec.release_root,
+        public_url=spec.public_url,
+        ca_file=spec.ca_file,
+    )
+
+
+def _spec_from_manifest(
+    repo_dir: Path,
+    *,
+    env_file: Path,
+    release_root: Path,
+    public_url: str,
+    ca_file: Path,
+) -> BackendReleaseSpec:
+    manifest = _read_manifest(repo_dir / "release-manifest.json")
+    return BackendReleaseSpec(
+        image_ref=validate_image_ref(str(manifest["image_ref"])),
+        commit_sha=validate_commit_sha(str(manifest["commit"])),
+        repo_dir=repo_dir.resolve(),
+        env_file=env_file.resolve(),
+        release_root=release_root.resolve(),
+        public_url=public_url,
+        ca_file=ca_file.resolve(),
+    )
+
+
+def _restore_backend(
+    *,
+    previous: BackendReleaseSpec | None,
+    failed: BackendReleaseSpec,
     runner: CommandRunner,
-    env: dict[str, str],
-) -> str:
-    result = runner.run(
+) -> None:
+    if previous is None:
+        runner.run(
+            [*_compose_base(failed), "stop", "--timeout", "30", "api"],
+            cwd=failed.repo_dir,
+            env=_command_env(failed),
+            check=False,
+        )
+        print("First Product Backend deploy failed; failed API was stopped.", file=sys.stderr)
+        return
+    _start_backend(previous, runner)
+    print(
+        f"Restored Product Backend {previous.commit_sha} after failed deploy.",
+        file=sys.stderr,
+    )
+
+
+def _start_backend(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
+    _validate_spec_files(spec)
+    env = _command_env(spec)
+    runner.run(
         [
             *_compose_base(spec),
-            "exec",
-            "-T",
-            "postgres",
-            "psql",
-            "--username",
-            "momcozy_staging_admin",
-            "--dbname",
-            "momcozy_staging",
-            "--tuples-only",
-            "--no-align",
-            "--command",
-            "SELECT version_num FROM alembic_version",
+            "up",
+            "--detach",
+            "--no-build",
+            "--no-deps",
+            "--force-recreate",
+            "api",
         ],
         cwd=spec.repo_dir,
         env=env,
-        capture_output=True,
     )
-    revision = (result.stdout or "").strip()
-    if not SAFE_REVISION_PATTERN.fullmatch(revision):
-        raise RuntimeError("could not read a safe Product Backend migration revision")
-    return revision
+    runner.run(_local_readiness_command())
+    runner.run(_public_readiness_command(spec.public_url, spec.ca_file))
+
+
+def _local_readiness_command() -> list[str]:
+    return [
+        "curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--retry",
+        "20",
+        "--retry-all-errors",
+        "--retry-delay",
+        "3",
+        "http://127.0.0.1:8001/v1/health/ready",
+    ]
+
+
+def _public_readiness_command(public_url: str, ca_file: Path) -> list[str]:
+    return [
+        "curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--cacert",
+        str(ca_file),
+        f"{public_url.rstrip('/')}/v1/health/ready",
+    ]
 
 
 def _promote_release_pointer(release_root: Path, repo_dir: Path) -> None:
@@ -542,7 +1026,55 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     payload = cast(dict[str, Any], json.loads(path.read_text()))
     if payload.get("service") != SERVICE_NAME:
         raise ValueError("release manifest service does not match Product Backend")
+    validate_commit_sha(str(payload.get("commit", "")))
+    validate_image_ref(str(payload.get("image_ref", "")))
     return payload
+
+
+def _verify_staged_snapshot(release_dir: Path, archive_sha256: str) -> None:
+    archive_marker = release_dir / SOURCE_ARCHIVE_MARKER
+    tree_marker = release_dir / SOURCE_TREE_MARKER
+    if not release_dir.is_dir() or release_dir.is_symlink():
+        raise RuntimeError(f"release path is not a regular directory: {release_dir}")
+    if not archive_marker.is_file() or archive_marker.is_symlink():
+        raise RuntimeError(f"existing release is missing its checksum marker: {release_dir}")
+    if archive_marker.read_text().strip() != archive_sha256:
+        raise RuntimeError(f"existing release checksum does not match: {release_dir}")
+    if not tree_marker.is_file() or tree_marker.is_symlink():
+        raise RuntimeError(f"existing release is missing its tree marker: {release_dir}")
+    expected_tree_sha256 = tree_marker.read_text().strip()
+    _validate_sha256(expected_tree_sha256, "source tree SHA256")
+    if _source_tree_sha256(release_dir) != expected_tree_sha256:
+        raise RuntimeError(f"existing release tree checksum does not match: {release_dir}")
+
+
+def _source_tree_sha256(root: Path) -> str:
+    digest = hashlib.sha256()
+    paths = sorted(root.rglob("*"), key=lambda path: path.relative_to(root).as_posix())
+    for path in paths:
+        relative = path.relative_to(root).as_posix()
+        if relative in SOURCE_TREE_EXCLUSIONS:
+            continue
+        if path.is_symlink():
+            record = f"link\0{relative}\0{os.readlink(path)}\n"
+        elif path.is_dir():
+            record = f"directory\0{relative}\n"
+        elif path.is_file():
+            executable = int(bool(path.stat().st_mode & 0o111))
+            record = (
+                f"file\0{relative}\0{executable}\0{path.stat().st_size}\0"
+                f"{_sha256_file(path)}\n"
+            )
+        else:
+            raise RuntimeError(f"release tree contains unsupported path: {relative}")
+        digest.update(record.encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _write_text_exclusive(path: Path, value: str, *, mode: int) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(value)
 
 
 def _sha256_file(path: Path) -> str:
@@ -554,7 +1086,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _validate_sha256(value: str, label: str) -> None:
-    if not re.fullmatch(r"[0-9a-f]{64}", value):
+    if not SHA256_PATTERN.fullmatch(value):
         raise ValueError(f"{label} must contain 64 lowercase hex characters")
 
 
@@ -573,6 +1105,23 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     os.replace(temporary_path, path)
 
 
+def _add_common_release_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--image-ref", required=True)
+    parser.add_argument("--commit-sha", required=True)
+    parser.add_argument("--repo-dir", type=Path, required=True)
+    parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--release-root", type=Path, default=EXPECTED_RELEASE_ROOT)
+    parser.add_argument("--public-url", required=True)
+    parser.add_argument("--ca-file", type=Path, required=True)
+
+
+def _add_current_release_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--env-file", type=Path, required=True)
+    parser.add_argument("--release-root", type=Path, default=EXPECTED_RELEASE_ROOT)
+    parser.add_argument("--public-url", required=True)
+    parser.add_argument("--ca-file", type=Path, required=True)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -582,52 +1131,70 @@ def _parser() -> argparse.ArgumentParser:
     image_manifest.add_argument("--commit-sha", required=True)
     image_manifest.add_argument("--output", type=Path, required=True)
 
-    deploy_parser = subparsers.add_parser("deploy")
-    deploy_parser.add_argument("--image-ref", required=True)
-    deploy_parser.add_argument("--commit-sha", required=True)
-    deploy_parser.add_argument("--repo-dir", type=Path, required=True)
-    deploy_parser.add_argument("--env-file", type=Path, required=True)
-    deploy_parser.add_argument(
-        "--release-root", type=Path, default=EXPECTED_RELEASE_ROOT
-    )
-    deploy_parser.add_argument("--public-url", required=True)
-    deploy_parser.add_argument("--ca-file", type=Path, required=True)
+    snapshot = subparsers.add_parser("stage-snapshot")
+    snapshot.add_argument("--archive", type=Path, required=True)
+    snapshot.add_argument("--archive-sha256", required=True)
+    snapshot.add_argument("--commit-sha", required=True)
+    snapshot.add_argument("--release-root", type=Path, default=EXPECTED_RELEASE_ROOT)
+    snapshot.add_argument("--attempt-id", required=True)
 
+    _add_common_release_arguments(subparsers.add_parser("bootstrap"))
+    _add_common_release_arguments(subparsers.add_parser("deploy"))
+    _add_current_release_arguments(subparsers.add_parser("restart-current"))
     rollback_parser = subparsers.add_parser("rollback")
-    rollback_parser.add_argument("--env-file", type=Path, required=True)
-    rollback_parser.add_argument(
-        "--release-root", type=Path, default=EXPECTED_RELEASE_ROOT
-    )
-    rollback_parser.add_argument("--public-url", required=True)
-    rollback_parser.add_argument("--ca-file", type=Path, required=True)
-    rollback_parser.add_argument(
-        "--confirm-schema-compatible", action="store_true"
-    )
+    _add_current_release_arguments(rollback_parser)
+    rollback_parser.add_argument("--confirm-schema-compatible", action="store_true")
     return parser
+
+
+def _release_spec_from_args(args: argparse.Namespace) -> BackendReleaseSpec:
+    return BackendReleaseSpec(
+        image_ref=validate_image_ref(args.image_ref),
+        commit_sha=validate_commit_sha(args.commit_sha),
+        repo_dir=args.repo_dir.resolve(),
+        env_file=args.env_file.resolve(),
+        release_root=validate_release_root(args.release_root),
+        public_url=args.public_url,
+        ca_file=args.ca_file.resolve(),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "image-manifest":
-            manifest = build_image_manifest(
-                image_ref=args.image_ref,
-                commit_sha=args.commit_sha,
+            _write_json_atomic(
+                args.output,
+                build_image_manifest(
+                    image_ref=args.image_ref,
+                    commit_sha=args.commit_sha,
+                ),
             )
-            _write_json_atomic(args.output, manifest)
+            return 0
+        if args.command == "stage-snapshot":
+            stage_release_snapshot(
+                archive=args.archive,
+                archive_sha256=args.archive_sha256,
+                commit_sha=args.commit_sha,
+                release_root=args.release_root,
+                attempt_id=args.attempt_id,
+            )
             return 0
         runner = CommandRunner()
+        if args.command == "bootstrap":
+            bootstrap(_release_spec_from_args(args), runner)
+            return 0
         if args.command == "deploy":
-            spec = BackendReleaseSpec(
-                image_ref=validate_image_ref(args.image_ref),
-                commit_sha=validate_commit_sha(args.commit_sha),
-                repo_dir=args.repo_dir.resolve(),
-                env_file=args.env_file.resolve(),
-                release_root=validate_release_root(args.release_root),
+            deploy(_release_spec_from_args(args), runner)
+            return 0
+        if args.command == "restart-current":
+            restart_current(
+                env_file=args.env_file,
+                release_root=args.release_root,
                 public_url=args.public_url,
-                ca_file=args.ca_file.resolve(),
+                ca_file=args.ca_file,
+                runner=runner,
             )
-            deploy(spec, runner)
             return 0
         rollback(
             env_file=args.env_file,

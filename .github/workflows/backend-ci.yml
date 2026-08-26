@@ -95,9 +95,16 @@ jobs:
           MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD=ci-postgres-admin-password \
             MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD=ci-product-postgres-password \
             MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD=ci-agent-postgres-password \
-            MOMCOZY_STAGING_REDIS_PASSWORD=ci-redis-password \
+            MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD=ci-redis-admin-password \
+            MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD=ci-product-redis-password \
+            MOMCOZY_STAGING_AGENT_REDIS_PASSWORD=ci-agent-redis-password \
             MOMCOZY_STAGING_MINIO_ROOT_USER=ci-minio-user \
             MOMCOZY_STAGING_MINIO_ROOT_PASSWORD=ci-minio-password \
+            MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY=ci-product-minio-access \
+            MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY=ci-product-minio-secret \
+            MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY=ci-agent-minio-access \
+            MOMCOZY_STAGING_AGENT_MINIO_SECRET_KEY=ci-agent-minio-secret \
+            MOMCOZY_BACKEND_IMAGE=ghcr.io/hensonzh/momcozy-lab-backend@sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             MOMCOZY_BACKEND_ENV_FILE=env/compose.staging.env.example \
             docker compose \
               --env-file env/compose.staging.env.example \
