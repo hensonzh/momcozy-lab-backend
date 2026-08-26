@@ -80,13 +80,24 @@ The host layout is fixed under `/opt/momcozy-lab`:
 - database backups: `/opt/momcozy-lab/backups/backend`;
 - archived release manifests: `/opt/momcozy-lab/manifests`.
 
-Configure the GitHub `staging` environment with required reviewers and these
-environment secrets: `STAGING_SSH_HOST`, `STAGING_SSH_PORT`,
-`STAGING_SSH_USER`, `STAGING_SSH_PRIVATE_KEY`, and
-`STAGING_SSH_KNOWN_HOSTS`. The host must already be authenticated to pull the
-private GHCR package, and the deployment user must own the release paths and
-be allowed to run Docker. The known-hosts value is mandatory; host-key checks
-are never disabled.
+The current private repository plan cannot enforce GitHub environment required
+reviewers. The workflow therefore uses a first-party issue-comment gate before
+the delivery job receives any deployment secret. Create one repository issue
+for staging approvals, set repository variable `STAGING_APPROVAL_ISSUE` to its
+number, and set `STAGING_APPROVERS` to a comma-separated allowlist of reviewer
+logins. At least one separate repository collaborator must be available. For
+each run, an allowlisted user other than the original or rerun actor must post the
+exact `/approve-staging ...` command shown in the approval job summary. The
+command binds the approval to the repository, run ID, attempt, and trigger SHA;
+missing variables or approval fail closed after at most 30 minutes.
+
+Keep the `staging` environment for deployment records and configure
+`STAGING_SSH_HOST`, `STAGING_SSH_PORT`, `STAGING_SSH_USER`,
+`STAGING_SSH_PRIVATE_KEY`, and `STAGING_SSH_KNOWN_HOSTS` as staging-scoped
+secrets where the plan supports them, otherwise as repository secrets. The host
+must already be authenticated to pull the private GHCR package, and the
+deployment user must own the release paths and be allowed to run Docker. The
+known-hosts value is mandatory; host-key checks are never disabled.
 
 Run `.github/workflows/backend-staging-delivery.yml` manually with:
 
@@ -97,8 +108,8 @@ Run `.github/workflows/backend-staging-delivery.yml` manually with:
 `scripts/staging_release.py` rejects a mutable tag, a different release root,
 an image whose OCI revision label differs from the commit, an occupied
 `127.0.0.1:8001`, or a staging network owned by another Compose project. The
-workflow checks out trusted release tooling from `main`, proves that the
-requested commit is reachable from `main`, and downloads the exact image
+workflow checks out trusted release tooling from the immutable trigger SHA,
+proves that the requested commit is reachable from `main`, and downloads the exact image
 manifest from that commit's successful CI run. Workflow inputs enter shell only
 through quoted environment variables. Backend and Agent deliveries serialize
 on `/opt/momcozy-lab/shared/staging-release.lock`.
@@ -112,6 +123,9 @@ only the API, checks local and public readiness, and atomically advances the
 release pointer. A failed switch restores the exact image from the current
 manifest. The manifest—not `deploy.env`—is the canonical image identity for
 restart and rollback.
+
+Re-running the already-current commit refreshes its manifest without replacing
+the distinct `previous/backend` rollback pointer.
 
 On a brand-new server, run the same workflow once with `operation=bootstrap`
 before `operation=deploy`. Bootstrap is the only normal path that creates the
