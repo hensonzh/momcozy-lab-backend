@@ -96,6 +96,11 @@ def test_ci_publishes_one_sha_tagged_image_and_records_its_digest() -> None:
     assert "docker/build-push-action@" in workflow
     assert "ghcr.io/${{ github.repository }}:${{ github.sha }}" in workflow
     assert "org.opencontainers.image.revision=${{ github.sha }}" in workflow
+    assert (
+        '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+        in workflow
+    )
+    assert r'\"org.opencontainers.image.revision\"' not in workflow
     assert "steps.push.outputs.digest" in workflow
     assert "backend-image-manifest-${{ github.sha }}" in workflow
 
