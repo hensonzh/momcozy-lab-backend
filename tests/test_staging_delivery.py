@@ -113,6 +113,7 @@ def test_staging_delivery_is_manual_protected_serial_and_host_key_checked() -> N
     assert "name: staging" in workflow
     assert "group: momcozy-lab-backend-staging" in workflow
     assert "issues: read" in workflow
+    assert "packages: read" in workflow
     assert "Wait for independent staging approval" in workflow
     assert "STAGING_APPROVERS" in workflow
     assert "STAGING_APPROVAL_ISSUE" in workflow
@@ -124,6 +125,11 @@ def test_staging_delivery_is_manual_protected_serial_and_host_key_checked() -> N
     assert "ref: main" not in workflow
     assert "timeout-minutes: 45" in workflow
     assert "STAGING_SSH_KNOWN_HOSTS" in workflow
+    assert "Authenticate the host to GHCR with an ephemeral token" in workflow
+    assert "GHCR_TOKEN: ${{ github.token }}" in workflow
+    assert "REMOTE_DOCKER_CONFIG:" in workflow
+    assert "docker login ghcr.io" in workflow
+    assert "docker logout ghcr.io" in workflow
     assert "git archive" in workflow
     assert "scripts/staging_release.py" in workflow
     assert "--image-ref" in workflow
