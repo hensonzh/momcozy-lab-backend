@@ -1,16 +1,25 @@
 # Product Backend Deployment Runbook
 
-This runbook covers the Product Backend and the staging infrastructure it owns.
+This runbook covers the Product Backend and the test infrastructure it owns.
 Agent Runtime is deployed from a separate repository and has its own database,
 workers, model configuration, evals, and run-recovery procedures, while sharing
 the same PostgreSQL, Redis, and MinIO service instances.
 
-The current shared server is `staging`. The word `test` is reserved for
-automated tests and CI; it is not a deployable server profile. Build release
-images under the environment-neutral `momcozy-lab-backend` repository and tag
-them with an immutable commit or digest rather than an environment name.
-The requested `backend-test` and `agent-test` DNS labels are ingress names only;
-they do not rename the Compose/env profile from `staging` to `test`.
+The current shared server profile is `test`; automated CI uses a separate,
+ephemeral `momcozy-lab-backend-ci` Compose project and is not a deployable
+environment. Build release images under the environment-neutral
+`momcozy-lab-backend` repository and tag them with an immutable commit or digest
+rather than an environment name. The `backend-test` and `agent-test` DNS labels,
+Compose/env profile, runtime metadata, and release manifest therefore use the
+same `test` identity.
+
+The environment rename is a controlled cutover, not an in-place alias. The
+test Compose file creates `momcozy_test` / `agent_runtime_test`, test buckets,
+and test-named volumes; it does not reuse legacy `momcozy-lab-*-staging`
+resources. If legacy containers still own `127.0.0.1:8001` or the previous
+network, the collision gate must stop the release. Back up and restore-test the
+legacy data, then obtain explicit authorization either to reset it or migrate
+it before bootstrapping this profile.
 
 ## Required IDs
 
@@ -27,19 +36,19 @@ correlation values, but they are not Product Backend execution state.
 
 ## Preflight
 
-1. Confirm the private staging configuration includes:
-   - `APP_ENV=staging`
+1. Confirm the private test configuration includes:
+   - `APP_ENV=test`
    - distinct PostgreSQL admin/Product/Agent passwords;
    - distinct Redis admin/Product/Agent passwords;
    - MinIO root credentials plus distinct Product/Agent access-key pairs;
-   - Product Backend `DATABASE_URL` on `momcozy_staging`
+   - Product Backend `DATABASE_URL` on `momcozy_test`
    - Product Backend `REDIS_URL` on logical DB 0
-   - Product Backend bucket `momcozy-staging`
+   - Product Backend bucket `momcozy-test`
    - `AUTH_JWT_PRIVATE_KEY_B64`
    - `AUTH_JWT_ISSUER`
    - `AUTH_JWT_PRODUCT_AUDIENCE`
    - `AUTH_JWT_RUNTIME_AUDIENCE`
-   - one or more private staging `AUTH_INVITE_CODES`
+   - one or more private test `AUTH_INVITE_CODES`
    - `AGENT_RUNTIME_SERVICE_API_KEY`
    - `AGENT_MODEL_ASSET_PUBLIC_BASE_URL`
    - `AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS`
@@ -64,10 +73,10 @@ correlation values, but they are not Product Backend execution state.
 
    ```bash
    make backend-productization-status
-   make backend-staging-smoke
+   make backend-test-smoke
    ```
 
-## Standard Staging Delivery
+## Standard Test Delivery
 
 The host layout is fixed under `/opt/momcozy-lab`:
 
@@ -83,39 +92,39 @@ The host layout is fixed under `/opt/momcozy-lab`:
 The current private repository plan cannot enforce GitHub environment required
 reviewers. The workflow therefore uses a first-party issue-comment gate before
 the delivery job receives any deployment secret. Create one repository issue
-for staging approvals, set repository variable `STAGING_APPROVAL_ISSUE` to its
-number, and set `STAGING_APPROVERS` to a comma-separated allowlist of operator
+for test approvals, set repository variable `TEST_APPROVAL_ISSUE` to its
+number, and set `TEST_APPROVERS` to a comma-separated allowlist of operator
 logins. For each run, an allowlisted operator must post the exact
-`/approve-staging ...` command shown in the approval job summary. This separate
+`/approve-test ...` command shown in the approval job summary. This separate
 confirmation may be performed by the run initiator, matching GitHub required
 reviewers when prevent-self-review is not enabled. The
 command binds the approval to the repository, run ID, attempt, and trigger SHA;
 missing variables or approval fail closed after at most 30 minutes.
 The current remote configuration uses issue `#1`,
-`STAGING_APPROVAL_ISSUE=1`, and `STAGING_APPROVERS=hensonzh`.
+`TEST_APPROVAL_ISSUE=1`, and `TEST_APPROVERS=hensonzh`.
 
-Keep the `staging` environment for deployment records and configure
-`STAGING_SSH_HOST`, `STAGING_SSH_PORT`, `STAGING_SSH_USER`,
-`STAGING_SSH_PRIVATE_KEY`, and `STAGING_SSH_KNOWN_HOSTS` as staging-scoped
+Keep the `test` environment for deployment records and configure
+`TEST_SSH_HOST`, `TEST_SSH_PORT`, `TEST_SSH_USER`,
+`TEST_SSH_PRIVATE_KEY`, and `TEST_SSH_KNOWN_HOSTS` as test-scoped
 secrets where the plan supports them, otherwise as repository secrets. The host
 must already be authenticated to pull the private GHCR package, and the
 deployment user must own the release paths and be allowed to run Docker. The
 known-hosts value is mandatory; host-key checks are never disabled.
 
-Run `.github/workflows/backend-staging-delivery.yml` manually with:
+Run `.github/workflows/backend-test-delivery.yml` manually with:
 
 1. `operation=deploy`;
 2. the full 40-character commit already merged into `main` and published by a
    successful `backend-ci` push run.
 
-`scripts/staging_release.py` rejects a mutable tag, a different release root,
+`scripts/test_release.py` rejects a mutable tag, a different release root,
 an image whose OCI revision label differs from the commit, an occupied
-`127.0.0.1:8001`, or a staging network owned by another Compose project. The
+`127.0.0.1:8001`, or a test network owned by another Compose project. The
 workflow checks out trusted release tooling from the immutable trigger SHA,
 proves that the requested commit is reachable from `main`, and downloads the exact image
 manifest from that commit's successful CI run. Workflow inputs enter shell only
 through quoted environment variables. Backend and Agent deliveries serialize
-on `/opt/momcozy-lab/shared/staging-release.lock`.
+on `/opt/momcozy-lab/shared/test-release.lock`.
 
 A retry reuses an existing release directory only when its source-archive and
 extracted-tree checksums match. Deploy verifies the already-running shared infrastructure
@@ -143,7 +152,7 @@ roll forward instead.
 ## Release Semantics
 
 1. Do not use a bare `docker compose up` as a release or recovery mechanism.
-   Use the protected workflow; use `staging_release.py restart-current` only for
+   Use the protected workflow; use `test_release.py restart-current` only for
    an audited host-side restart so image identity is derived from the current
    manifest.
 2. The current baseline targets an empty database and does not support
@@ -164,27 +173,27 @@ Product Backend deployment does not start or manage Agent Runtime processes.
 Product Backend Compose does not start an Agent Runtime worker; Agent Runtime is independently
 deployed.
 
-## Staging Docker Compose
+## Test Docker Compose
 
-`docker-compose.staging.yml` is the only staging infrastructure owner. It creates:
+`docker-compose.test.yml` is the only test infrastructure owner. It creates:
 
-- Docker network `momcozy-lab-staging`;
-- PostgreSQL databases/roles `momcozy_staging` and `agent_runtime_staging`;
+- Docker network `momcozy-lab-test`;
+- PostgreSQL databases/roles `momcozy_test` and `agent_runtime_test`;
 - Redis, with a disabled default user, a private admin account, and separate
   Product/Agent ACL users restricted to their key prefixes; Product Backend
   uses logical DB 0 and Agent Runtime uses logical DB 1;
-- MinIO buckets `momcozy-staging` and `agent-runtime-staging`, each with a
+- MinIO buckets `momcozy-test` and `agent-runtime-test`, each with a
   bucket-scoped service user; application containers never receive root keys;
 - Product Backend alias `product-backend` and host bind `127.0.0.1:8001`.
 
 Generate URL-safe secrets, copy the example, fill every empty
-`MOMCOZY_STAGING_*` and application-secret value, set the private file to mode
+`MOMCOZY_TEST_*` and application-secret value, set the private file to mode
 `0600`, then use the protected workflow's `bootstrap` operation followed by
 `deploy`. The image digest is deliberately absent from the private env; the
 workflow obtains it from the successful CI artifact.
 
 Then copy only the Agent-scoped PostgreSQL password, Redis password, and MinIO
-access-key pair into the private Agent Runtime staging env and deploy Agent
+access-key pair into the private Agent Runtime test env and deploy Agent
 Runtime from its repository.
 Agent Runtime joins the existing network; it must not create another
 PostgreSQL, Redis, or MinIO service.
@@ -195,7 +204,7 @@ successful pre-migration dumps. Stateful credential or image changes are
 planned maintenance: ordinary application deploys never recreate these
 containers before backup.
 
-Direct staging mutation targets in the Makefile intentionally fail closed.
+Direct test mutation targets in the Makefile intentionally fail closed.
 Stopping shared infrastructure, rotating its credentials, or resetting its
 volumes is a separate approved maintenance procedure: first stop Agent Runtime,
 acquire the shared host lock, derive the exact Compose/image identity from the
@@ -203,7 +212,7 @@ current manifest, and complete the required backup. An application delivery
 must never perform these operations.
 
 The PostgreSQL init script runs only for an empty named volume. It does not
-upgrade an older staging volume or rotate existing role passwords; those
+upgrade an older test volume or rotate existing role passwords; those
 operations require an explicit migration/credential-rotation procedure.
 
 No production deployment profile is currently shipped. Production application
@@ -259,13 +268,13 @@ through the host Nginx listener. The Agent Runtime site is maintained by the
 
 The host must keep exactly one separate unknown-host rejection site. Individual
 service files must not declare `default_server`, because all legacy and new
-sites share the same host listener. The shared staging leaf certificate at
-`/etc/nginx/tls/momcozy-lab-staging/fullchain.pem` must contain both DNS SANs:
+sites share the same host listener. The shared test leaf certificate at
+`/etc/nginx/tls/momcozy-lab-test/fullchain.pem` must contain both DNS SANs:
 
 - `backend-test.lute-momcozylab.luteos.cloud`
 - `agent-test.lute-momcozylab.luteos.cloud`
 
-Its private key is `/etc/nginx/tls/momcozy-lab-staging/privkey.pem`. Both Nginx
+Its private key is `/etc/nginx/tls/momcozy-lab-test/privkey.pem`. Both Nginx
 sites deliberately reference this one SAN certificate, while SNI selects the
 correct service site and upstream.
 

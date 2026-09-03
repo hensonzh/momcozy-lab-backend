@@ -77,7 +77,7 @@ OpenAPI intentionally exposes none of those routes.
 
 1. Export Product Backend OpenAPI.
 2. Regenerate or validate the Product typed client.
-3. Run `docs/flutter-smoke-flows.json` against staging.
+3. Run `docs/flutter-smoke-flows.json` against test.
 4. Verify no credential appears in URLs or crash logs.
 5. Verify retryable Product writes preserve idempotency keys.
 6. Verify Flutter has no dependency on `/v1/internal/agent/*`.

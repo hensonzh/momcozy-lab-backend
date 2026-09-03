@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage, bootstrap, deploy, restart, or roll back Product Backend staging."""
+"""Stage, bootstrap, deploy, restart, or roll back Product Backend test."""
 
 from __future__ import annotations
 
@@ -20,11 +20,11 @@ from typing import IO, Any, Sequence, cast
 
 SERVICE_NAME = "product-backend"
 IMAGE_REPOSITORY = "ghcr.io/hensonzh/momcozy-lab-backend"
-COMPOSE_PROJECT = "momcozy-lab-backend-staging"
-STAGING_NETWORK = "momcozy-lab-staging"
+COMPOSE_PROJECT = "momcozy-lab-backend-test"
+TEST_NETWORK = "momcozy-lab-test"
 EXPECTED_RELEASE_ROOT = Path("/opt/momcozy-lab")
 OPENAPI_PATH = Path("docs/openapi.generated.json")
-COMPOSE_PATH = Path("docker-compose.staging.yml")
+COMPOSE_PATH = Path("docker-compose.test.yml")
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_REF_PATTERN = re.compile(
@@ -40,8 +40,8 @@ SOURCE_TREE_EXCLUSIONS = frozenset(
 )
 KNOWN_SECRET_PLACEHOLDERS = frozenset(
     {
-        "staging-service-key-with-at-least-32-bytes",
-        "staging-agent-runtime-service-key-with-at-least-32-bytes",
+        "test-service-key-with-at-least-32-bytes",
+        "test-agent-runtime-service-key-with-at-least-32-bytes",
         "replace-me",
         "changeme",
         "minioadmin",
@@ -124,7 +124,7 @@ def build_release_manifest(
     return {
         "schema_version": 1,
         "service": SERVICE_NAME,
-        "environment": "staging",
+        "environment": "test",
         "commit": commit_sha,
         "image_ref": image_ref,
         "image_digest": image_ref.rsplit("@", maxsplit=1)[1],
@@ -248,7 +248,7 @@ def build_deploy_commands(spec: BackendReleaseSpec) -> list[list[str]]:
 
 
 def bootstrap(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
-    """Create shared staging infrastructure without deploying application code."""
+    """Create shared test infrastructure without deploying application code."""
     _validate_spec_files(spec)
     _validate_env_file(spec.env_file)
     _check_collision_boundaries(runner)
@@ -298,7 +298,7 @@ def bootstrap(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
         cwd=spec.repo_dir,
         env=env,
     )
-    print("Product Backend shared staging infrastructure is healthy and initialized.")
+    print("Product Backend shared test infrastructure is healthy and initialized.")
 
 
 def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
@@ -317,7 +317,7 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
     image_head = _read_image_migration_head(spec, runner, env)
     database_revision = _read_database_revision(
         postgres_container=infrastructure["postgres"],
-        database="momcozy_staging",
+        database="momcozy_test",
         runner=runner,
     )
     if database_revision != image_head:
@@ -325,7 +325,7 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
         _write_secure_backup(
             runner=runner,
             command=_pg_dump_command(
-                infrastructure["postgres"], database="momcozy_staging"
+                infrastructure["postgres"], database="momcozy_test"
             ),
             backup_path=backup_path,
             cwd=spec.repo_dir,
@@ -346,7 +346,7 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
         )
         database_revision = _read_database_revision(
             postgres_container=infrastructure["postgres"],
-            database="momcozy_staging",
+            database="momcozy_test",
             runner=runner,
         )
         if database_revision != image_head:
@@ -376,7 +376,7 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
                     f"{restore_error}"
                 ) from deploy_error
         raise
-    print(f"Product Backend staging release promoted: {manifest_path}")
+    print(f"Product Backend test release promoted: {manifest_path}")
     return manifest_path
 
 
@@ -458,7 +458,7 @@ def rollback(
         raise
     _replace_symlink(previous_link, current_dir)
     _replace_symlink(current_link, previous_dir)
-    print(f"Product Backend staging rolled back to {previous.commit_sha}")
+    print(f"Product Backend test rolled back to {previous.commit_sha}")
     return previous_dir / "release-manifest.json"
 
 
@@ -502,23 +502,23 @@ def _validate_spec_files(spec: BackendReleaseSpec) -> None:
 def _validate_env_file(path: Path) -> None:
     mode = path.stat().st_mode & 0o777
     if mode & 0o077:
-        raise PermissionError(f"staging env must not be group/world readable: {mode:o}")
+        raise PermissionError(f"test env must not be group/world readable: {mode:o}")
     values = _read_env_values(path)
     if "MOMCOZY_BACKEND_IMAGE" in values:
         raise ValueError("MOMCOZY_BACKEND_IMAGE is release-owned and must not be in deploy.env")
     required = (
-        "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD",
-        "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD",
-        "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD",
-        "MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD",
-        "MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD",
-        "MOMCOZY_STAGING_AGENT_REDIS_PASSWORD",
-        "MOMCOZY_STAGING_MINIO_ROOT_USER",
-        "MOMCOZY_STAGING_MINIO_ROOT_PASSWORD",
-        "MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY",
-        "MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY",
-        "MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY",
-        "MOMCOZY_STAGING_AGENT_MINIO_SECRET_KEY",
+        "MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD",
+        "MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD",
+        "MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD",
+        "MOMCOZY_TEST_REDIS_ADMIN_PASSWORD",
+        "MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD",
+        "MOMCOZY_TEST_AGENT_REDIS_PASSWORD",
+        "MOMCOZY_TEST_MINIO_ROOT_USER",
+        "MOMCOZY_TEST_MINIO_ROOT_PASSWORD",
+        "MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY",
+        "MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY",
+        "MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY",
+        "MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY",
         "AUTH_JWT_PRIVATE_KEY_B64",
         "AUTH_INVITE_CODES",
         "SERVICE_API_KEY",
@@ -526,7 +526,7 @@ def _validate_env_file(path: Path) -> None:
     )
     missing = [name for name in required if not values.get(name, "").strip()]
     if missing:
-        raise ValueError(f"staging env is missing required values: {', '.join(missing)}")
+        raise ValueError(f"test env is missing required values: {', '.join(missing)}")
     unsafe = [
         name
         for name in required
@@ -538,37 +538,37 @@ def _validate_env_file(path: Path) -> None:
     ) and "AUTH_INVITE_CODES" not in unsafe:
         unsafe.append("AUTH_INVITE_CODES")
     if unsafe:
-        raise ValueError(f"staging env contains placeholder values: {', '.join(unsafe)}")
+        raise ValueError(f"test env contains placeholder values: {', '.join(unsafe)}")
     _require_distinct(
         values,
         (
-            "MOMCOZY_STAGING_POSTGRES_ADMIN_PASSWORD",
-            "MOMCOZY_STAGING_PRODUCT_POSTGRES_PASSWORD",
-            "MOMCOZY_STAGING_AGENT_POSTGRES_PASSWORD",
+            "MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD",
+            "MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD",
+            "MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD",
         ),
     )
     _require_distinct(
         values,
         (
-            "MOMCOZY_STAGING_REDIS_ADMIN_PASSWORD",
-            "MOMCOZY_STAGING_PRODUCT_REDIS_PASSWORD",
-            "MOMCOZY_STAGING_AGENT_REDIS_PASSWORD",
+            "MOMCOZY_TEST_REDIS_ADMIN_PASSWORD",
+            "MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD",
+            "MOMCOZY_TEST_AGENT_REDIS_PASSWORD",
         ),
     )
     _require_distinct(
         values,
         (
-            "MOMCOZY_STAGING_MINIO_ROOT_USER",
-            "MOMCOZY_STAGING_PRODUCT_MINIO_ACCESS_KEY",
-            "MOMCOZY_STAGING_AGENT_MINIO_ACCESS_KEY",
+            "MOMCOZY_TEST_MINIO_ROOT_USER",
+            "MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY",
+            "MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY",
         ),
     )
     _require_distinct(
         values,
         (
-            "MOMCOZY_STAGING_MINIO_ROOT_PASSWORD",
-            "MOMCOZY_STAGING_PRODUCT_MINIO_SECRET_KEY",
-            "MOMCOZY_STAGING_AGENT_MINIO_SECRET_KEY",
+            "MOMCOZY_TEST_MINIO_ROOT_PASSWORD",
+            "MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY",
+            "MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY",
         ),
     )
     _require_distinct(values, ("SERVICE_API_KEY", "AGENT_RUNTIME_SERVICE_API_KEY"))
@@ -586,7 +586,7 @@ def _is_known_placeholder(value: str) -> bool:
 def _require_distinct(values: dict[str, str], names: Sequence[str]) -> None:
     selected = [values[name].strip() for name in names]
     if len(selected) != len(set(selected)):
-        raise ValueError(f"staging credentials must be distinct: {', '.join(names)}")
+        raise ValueError(f"test credentials must be distinct: {', '.join(names)}")
 
 
 def _read_env_values(path: Path) -> dict[str, str]:
@@ -634,7 +634,7 @@ def _check_collision_boundaries(runner: CommandRunner) -> None:
             "docker",
             "network",
             "inspect",
-            STAGING_NETWORK,
+            TEST_NETWORK,
             "--format",
             '{{ index .Labels "com.docker.compose.project" }}',
         ],
@@ -644,7 +644,7 @@ def _check_collision_boundaries(runner: CommandRunner) -> None:
     if network.returncode == 0:
         owner = (network.stdout or "").strip()
         if owner != COMPOSE_PROJECT:
-            raise RuntimeError(f"{STAGING_NETWORK} is owned by {owner}")
+            raise RuntimeError(f"{TEST_NETWORK} is owned by {owner}")
 
 
 def _require_healthy_infrastructure(
@@ -789,7 +789,7 @@ def _psql_query(
             postgres_container,
             "psql",
             "--username",
-            "momcozy_staging_admin",
+            "momcozy_test_admin",
             "--dbname",
             database,
             "--tuples-only",
@@ -809,7 +809,7 @@ def _pg_dump_command(postgres_container: str, *, database: str) -> list[str]:
         postgres_container,
         "pg_dump",
         "--username",
-        "momcozy_staging_admin",
+        "momcozy_test_admin",
         "--dbname",
         database,
         "--format",

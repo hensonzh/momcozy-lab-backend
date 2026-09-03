@@ -3,9 +3,9 @@
 Keep real secrets outside the repository. Copy example files into local private
 files or the deployment secret manager.
 
-Environment names are fixed: `local` is developer-only, `test` is reserved for
-automated tests/CI, and `staging` is the shared internal server. A deployable
-profile must use the same token
+Environment names are fixed: `local` is developer-only and `test` is the shared
+internal server. CI is an ephemeral verification lane with a distinct Compose
+project, not another deployable environment. A deployable profile must use the same token
 in its Compose filename, env filename, Compose project, and convenience targets.
 Release images use the environment-neutral repository name plus an immutable
 commit tag or digest (for example `momcozy-lab-backend:<git-sha>`); legacy names
@@ -17,18 +17,18 @@ such as `momcozy-production-backend` must not be reused.
 |---|---|---|
 | Local compose | `env/compose.local.env.example` | Product Backend with Compose Postgres, Redis, and MinIO. |
 | CI override | `docker-compose.ci.yml` | CI-only override for project `momcozy-lab-backend-ci` and image `momcozy-lab-backend:ci`. |
-| Staging compose | `env/compose.staging.env.example` | Product Backend plus the one shared staging PostgreSQL, Redis, MinIO, and network. |
+| Test compose | `env/compose.test.env.example` | Product Backend plus the one shared test PostgreSQL, Redis, MinIO, and network. |
 
 `docker-compose.ci.yml` is combined with `docker-compose.local.yml`; it is
 not a standalone Compose file or a deployable server profile. CI injects an
 ephemeral RSA private key generated on the runner, executes the explicit
 migration job, then verifies the built API image through
 `/v1/health/ready`. The key is never stored in the repository or promoted to
-staging.
+test.
 
 The Product Backend Compose profiles build and run only `migrate`, `api`, and the
 profile-appropriate infrastructure. Agent Runtime has a separate application
-configuration and repository, but joins Product Backend's staging network and consumes
+configuration and repository, but joins Product Backend's test network and consumes
 the shared infrastructure through isolated databases, logical Redis DBs, and
 buckets.
 
@@ -56,7 +56,7 @@ eval settings are Agent Runtime-owned and must not be added to Product Backend p
 The shared shape across environments is:
 
 ```env
-APP_ENV=local|test|staging
+APP_ENV=local|test
 DATABASE_URL=...
 REDIS_URL=...
 
@@ -95,7 +95,7 @@ Agent Runtime configuration.
 - `AGENT_RUNTIME_SERVICE_API_KEY` authenticates only Agent Runtime calls to
   `/v1/internal/agent/*`.
 - Every hostname used by Agent Runtime in `PRODUCT_BACKEND_BASE_URL` and
-  `AUTH_JWKS_URL` must also appear in Product Backend `TRUSTED_HOSTS`; staging uses the
+  `AUTH_JWKS_URL` must also appear in Product Backend `TRUSTED_HOSTS`; test uses the
   private network alias `product-backend`.
 - Authenticated `/v1/internal/agent/*` traffic uses the independent
   `AGENT_RUNTIME_RATE_LIMIT_REQUESTS` /
@@ -115,15 +115,15 @@ Agent Runtime configuration.
   never extends capability lifetime, remains rate limited, and redacts bearer
   tokens from application request and exception logs.
 
-## Staging Shared Infrastructure
+## Test Shared Infrastructure
 
-- Product Backend Compose owns network `momcozy-lab-staging` and must start first.
-- PostgreSQL uses separate roles/databases: `momcozy_staging` and
-  `agent_runtime_staging`.
+- Product Backend Compose owns network `momcozy-lab-test` and must start first.
+- PostgreSQL uses separate roles/databases: `momcozy_test` and
+  `agent_runtime_test`.
 - Product Backend uses Redis logical DB 0; Agent Runtime uses DB 1 and its existing
   `agent-runtime:*`/`momcozy-agent-runtime:*` key namespaces.
-- Product Backend uses bucket `momcozy-staging`; Agent Runtime uses
-  `agent-runtime-staging`.
+- Product Backend uses bucket `momcozy-test`; Agent Runtime uses
+  `agent-runtime-test`.
 - PostgreSQL, Redis, and MinIO have no host port mappings.
 
 No production Compose or env template is currently maintained. The code-level

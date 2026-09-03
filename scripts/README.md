@@ -19,7 +19,7 @@ set -a; . env/compose.local.env; set +a
 | 检查数据库、Redis、对象存储和产品素材 | `make backend-check-infra` |
 | 检查静态产品化门禁 | `make backend-productization-status` |
 | 运行 Product Backend 边界 smoke | `make backend-smoke` |
-| Staging 环境验收 | `make backend-staging-smoke` |
+| Test 环境验收 | `make backend-test-smoke` |
 | 导出 OpenAPI 和 API surface | `make backend-export-contracts` |
 
 ## 脚本清单
@@ -45,7 +45,7 @@ PR 门禁：
 - `pytest tests`
 - Alembic head 与空库 SQL 检查
 - OpenAPI/API surface 快照 diff
-- local/staging Compose config 校验
+- local/test Compose config 校验
 
 有真实依赖服务时：
 

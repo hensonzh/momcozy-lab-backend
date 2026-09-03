@@ -112,30 +112,30 @@ runs the migration job, starts the real API container, and requires
 `/v1/health/ready` to pass before cleaning up the stack. No CI private key is
 committed or reused.
 
-## Staging
+## Test
 
-The Product Backend staging Compose profile is the single owner of the shared
-PostgreSQL, Redis, MinIO, and `momcozy-lab-staging` network. It creates separate
-`momcozy_staging` and `agent_runtime_staging` databases, Redis ACL identities
-and DB 0/1 separation, bucket-scoped MinIO identities for `momcozy-staging` and
-`agent-runtime-staging`, and binds Product Backend to `127.0.0.1:8001`.
+The Product Backend test Compose profile is the single owner of the shared
+PostgreSQL, Redis, MinIO, and `momcozy-lab-test` network. It creates separate
+`momcozy_test` and `agent_runtime_test` databases, Redis ACL identities
+and DB 0/1 separation, bucket-scoped MinIO identities for `momcozy-test` and
+`agent-runtime-test`, and binds Product Backend to `127.0.0.1:8001`.
 
-Copy `env/compose.staging.env.example` to the private host env, generate every
+Copy `env/compose.test.env.example` to the private host env, generate every
 empty secret, and set mode `0600`. Do not add an image reference. On a new host,
 run the protected delivery workflow with `operation=bootstrap`; then deploy the
 application with `operation=deploy`.
 
-Start this stack before Agent Runtime staging; Agent Runtime joins the shared
+Start this stack before Agent Runtime test; Agent Runtime joins the shared
 network as an external consumer and does not create another infrastructure stack.
 
-Direct staging mutation targets in the Makefile fail closed. Infrastructure
+Direct test mutation targets in the Makefile fail closed. Infrastructure
 shutdown, reset, or credential rotation is separate approved maintenance and
 must not bypass the protected release lock, current manifest, and backup gate.
 
 The normal delivery path is not an on-host build. A successful `backend-ci`
 run on `main` publishes the exact image tested by CI to GHCR under the full
 commit SHA and records its digest. An operator then runs
-`backend-staging-delivery`, selects the protected `staging` environment, and
+`backend-test-delivery`, selects the protected `test` environment, and
 supplies only a full commit already merged into `main`. The workflow consumes
 that commit's successful CI image manifest, serializes with Agent/App delivery
 through the host lock, checks port/network ownership, and never reconciles

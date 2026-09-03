@@ -1,0 +1,199 @@
+name: momcozy-lab-backend-test
+
+x-backend-image: &backend-image
+  image: ${MOMCOZY_BACKEND_IMAGE:?Set MOMCOZY_BACKEND_IMAGE to an immutable digest reference}
+  env_file:
+    - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.test.env}
+  environment:
+    DATABASE_URL: postgresql+asyncpg://momcozy_test:${MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD}@test-postgres:5432/momcozy_test
+    REDIS_URL: redis://product-backend:${MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD}@test-redis:6379/0
+    OBJECT_STORAGE_ACCESS_KEY_ID: ${MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY:?Set MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY}
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: ${MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY:?Set MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY}
+    MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD: ""
+    MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD: ""
+    MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD: ""
+    MOMCOZY_TEST_REDIS_ADMIN_PASSWORD: ""
+    MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD: ""
+    MOMCOZY_TEST_AGENT_REDIS_PASSWORD: ""
+    MOMCOZY_TEST_MINIO_ROOT_USER: ""
+    MOMCOZY_TEST_MINIO_ROOT_PASSWORD: ""
+    MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY: ""
+    MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY: ""
+    MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY: ""
+    MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY: ""
+  networks:
+    - test
+
+services:
+  api:
+    <<: *backend-image
+    restart: unless-stopped
+    init: true
+    cpus: 1.0
+    mem_limit: 1g
+    ports:
+      - "${MOMCOZY_TEST_API_BIND:-127.0.0.1:8001}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      test:
+        aliases:
+          - product-backend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/live', timeout=2)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  migrate:
+    <<: *backend-image
+    command: python -m alembic -c alembic.ini upgrade head
+    profiles:
+      - tools
+    cpus: 0.5
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1536m
+    environment:
+      POSTGRES_USER: momcozy_test_admin
+      POSTGRES_PASSWORD: ${MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD:?Set MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD: ${MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD}
+      MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD: ${MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD:?Set MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./deploy/test/init-postgres.sh:/docker-entrypoint-initdb.d/10-init-momcozy-databases.sh:ro
+    networks:
+      test:
+        aliases:
+          - test-postgres
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test \"$$(psql --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\" --tuples-only --no-align --command \"SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE (d.datname = 'momcozy_test' AND r.rolname = 'momcozy_test') OR (d.datname = 'agent_runtime_test' AND r.rolname = 'agent_runtime_test');\")\" = \"2\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 256m
+    command: ["/usr/local/bin/start-momcozy-redis"]
+    environment:
+      MOMCOZY_TEST_REDIS_ADMIN_PASSWORD: ${MOMCOZY_TEST_REDIS_ADMIN_PASSWORD:?Set MOMCOZY_TEST_REDIS_ADMIN_PASSWORD}
+      MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD: ${MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD}
+      MOMCOZY_TEST_AGENT_REDIS_PASSWORD: ${MOMCOZY_TEST_AGENT_REDIS_PASSWORD:?Set MOMCOZY_TEST_AGENT_REDIS_PASSWORD}
+    volumes:
+      - redis_test_data:/data
+      - ./deploy/test/start-redis.sh:/usr/local/bin/start-momcozy-redis:ro
+    tmpfs:
+      - /run/redis:mode=0700
+    networks:
+      test:
+        aliases:
+          - test-redis
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --user test-admin --pass \"$$MOMCOZY_TEST_REDIS_ADMIN_PASSWORD\" --no-auth-warning ping | grep -qx PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 1g
+    command: ["server", "/data", "--address", ":9000"]
+    environment:
+      MINIO_ROOT_USER: ${MOMCOZY_TEST_MINIO_ROOT_USER:?Set MOMCOZY_TEST_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MOMCOZY_TEST_MINIO_ROOT_PASSWORD:?Set MOMCOZY_TEST_MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_test_data:/data
+    networks:
+      test:
+        aliases:
+          - test-minio
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://127.0.0.1:9000/minio/health/live",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MOMCOZY_TEST_MINIO_ROOT_USER:?Set MOMCOZY_TEST_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MOMCOZY_TEST_MINIO_ROOT_PASSWORD:?Set MOMCOZY_TEST_MINIO_ROOT_PASSWORD}
+      PRODUCT_MINIO_ACCESS_KEY: ${MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY:?Set MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY}
+      PRODUCT_MINIO_SECRET_KEY: ${MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY:?Set MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY}
+      AGENT_MINIO_ACCESS_KEY: ${MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY:?Set MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY}
+      AGENT_MINIO_SECRET_KEY: ${MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY:?Set MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY}
+    volumes:
+      - ./deploy/test/minio-product-policy.json:/policies/product-backend.json:ro
+      - ./deploy/test/minio-agent-policy.json:/policies/agent-runtime.json:ro
+    networks:
+      - test
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set test http://test-minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing test/momcozy-test
+        mc mb --ignore-existing test/agent-runtime-test
+        mc admin policy create test product-backend /policies/product-backend.json
+        mc admin policy create test agent-runtime /policies/agent-runtime.json
+        mc admin user add test "$${PRODUCT_MINIO_ACCESS_KEY}" "$${PRODUCT_MINIO_SECRET_KEY}"
+        mc admin user add test "$${AGENT_MINIO_ACCESS_KEY}" "$${AGENT_MINIO_SECRET_KEY}"
+        mc admin policy attach test product-backend --user "$${PRODUCT_MINIO_ACCESS_KEY}"
+        mc admin policy attach test agent-runtime --user "$${AGENT_MINIO_ACCESS_KEY}"
+    profiles:
+      - tools
+    cpus: 0.25
+    mem_limit: 256m
+    restart: "no"
+
+volumes:
+  postgres_test_data:
+  redis_test_data:
+  minio_test_data:
+
+networks:
+  test:
+    name: momcozy-lab-test

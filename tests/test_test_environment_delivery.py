@@ -7,8 +7,8 @@ from typing import IO, cast
 
 import pytest
 
-import scripts.staging_release as staging_release
-from scripts.staging_release import (
+import scripts.test_release as test_release
+from scripts.test_release import (
     BackendReleaseSpec,
     _check_collision_boundaries,
     _promote_release_pointer,
@@ -26,9 +26,9 @@ from scripts.staging_release import (
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "backend-ci.yml"
 DELIVERY_WORKFLOW = (
-    ROOT / ".github" / "workflows" / "backend-staging-delivery.yml"
+    ROOT / ".github" / "workflows" / "backend-test-delivery.yml"
 )
-STAGING_COMPOSE = ROOT / "docker-compose.staging.yml"
+TEST_COMPOSE = ROOT / "docker-compose.test.yml"
 DIGEST = "sha256:" + "a" * 64
 COMMIT_SHA = "b" * 40
 IMAGE_REF = f"ghcr.io/hensonzh/momcozy-lab-backend@{DIGEST}"
@@ -80,8 +80,8 @@ class FailingReadinessRunner:
         return subprocess.CompletedProcess(command, 0, stdout="")
 
 
-def test_staging_compose_only_consumes_an_explicit_release_image() -> None:
-    compose = STAGING_COMPOSE.read_text()
+def test_test_compose_only_consumes_an_explicit_release_image() -> None:
+    compose = TEST_COMPOSE.read_text()
 
     assert "${MOMCOZY_BACKEND_IMAGE:?" in compose
     assert "build:" not in compose
@@ -105,33 +105,33 @@ def test_ci_publishes_one_sha_tagged_image_and_records_its_digest() -> None:
     assert "backend-image-manifest-${{ github.sha }}" in workflow
 
 
-def test_staging_delivery_is_manual_protected_serial_and_host_key_checked() -> None:
+def test_test_delivery_is_manual_protected_serial_and_host_key_checked() -> None:
     workflow = DELIVERY_WORKFLOW.read_text()
 
     assert "workflow_dispatch:" in workflow
     assert "environment:" in workflow
-    assert "name: staging" in workflow
-    assert "group: momcozy-lab-backend-staging" in workflow
+    assert "name: test" in workflow
+    assert "group: momcozy-lab-backend-test" in workflow
     assert "issues: read" in workflow
     assert "packages: read" in workflow
-    assert "Wait for independent staging approval" in workflow
-    assert "STAGING_APPROVERS" in workflow
-    assert "STAGING_APPROVAL_ISSUE" in workflow
-    assert "/approve-staging" in workflow
+    assert "Wait for independent test approval" in workflow
+    assert "TEST_APPROVERS" in workflow
+    assert "TEST_APPROVAL_ISSUE" in workflow
+    assert "/approve-test" in workflow
     assert "GITHUB_TRIGGERING_ACTOR" not in workflow
     assert "Ignoring self-approval" not in workflow
     assert "needs: approve" in workflow
     assert "ref: ${{ github.sha }}" in workflow
     assert "ref: main" not in workflow
     assert "timeout-minutes: 45" in workflow
-    assert "STAGING_SSH_KNOWN_HOSTS" in workflow
+    assert "TEST_SSH_KNOWN_HOSTS" in workflow
     assert "Authenticate the host to GHCR with an ephemeral token" in workflow
     assert "GHCR_TOKEN: ${{ github.token }}" in workflow
     assert "REMOTE_DOCKER_CONFIG:" in workflow
     assert "docker login ghcr.io" in workflow
     assert "docker logout ghcr.io" in workflow
     assert "git archive" in workflow
-    assert "scripts/staging_release.py" in workflow
+    assert "scripts/test_release.py" in workflow
     assert "--image-ref" in workflow
     assert "rollback" in workflow
     assert "image_ref:" not in workflow
@@ -141,12 +141,12 @@ def test_staging_delivery_is_manual_protected_serial_and_host_key_checked() -> N
     assert "gh run download" in workflow
     assert "backend-image-manifest-" in workflow
     assert "/usr/bin/flock" in workflow
-    assert "staging-release.lock" in workflow
+    assert "test-release.lock" in workflow
     for run_block in _literal_run_blocks(workflow):
         assert "${{ inputs." not in run_block
     assert "StrictHostKeyChecking=no" not in workflow
     assert "docker compose build" not in workflow
-    release_script = (ROOT / "scripts" / "staging_release.py").read_text()
+    release_script = (ROOT / "scripts" / "test_release.py").read_text()
     assert '"sport = :8001"' in release_script
 
 
@@ -181,7 +181,7 @@ def test_release_identifiers_reject_mutable_or_ambiguous_values() -> None:
         with pytest.raises(ValueError):
             validate_commit_sha(value)
     for value in (
-        "momcozy-lab-backend:staging",
+        "momcozy-lab-backend:test",
         "ghcr.io/hensonzh/momcozy-lab-backend:latest",
         "ghcr.io/hensonzh/momcozy-lab-backend@sha256:short",
     ):
@@ -191,7 +191,7 @@ def test_release_identifiers_reject_mutable_or_ambiguous_values() -> None:
         validate_release_root(Path("/opt/momcozy"))
 
 
-def test_collision_gate_rejects_an_existing_unowned_staging_network() -> None:
+def test_collision_gate_rejects_an_existing_unowned_test_network() -> None:
     runner = SequenceRunner(
         [
             subprocess.CompletedProcess([], 0, stdout=""),
@@ -214,7 +214,7 @@ def test_deploy_plan_never_reconciles_stateful_services(
         env_file=tmp_path / "backend.env",
         release_root=Path("/opt/momcozy-lab"),
         public_url="https://backend.example.test:8443",
-        ca_file=Path("/etc/ssl/staging-ca.pem"),
+        ca_file=Path("/etc/ssl/test-ca.pem"),
     )
 
     commands = build_deploy_commands(spec)
@@ -252,7 +252,7 @@ def test_release_manifest_contains_traceability_but_no_secret_values() -> None:
 def test_release_snapshot_retry_reuses_only_the_same_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(staging_release, "EXPECTED_RELEASE_ROOT", tmp_path)
+    monkeypatch.setattr(test_release, "EXPECTED_RELEASE_ROOT", tmp_path)
     source = tmp_path / "source"
     source.mkdir()
     (source / "release.txt").write_text("immutable\n")
@@ -348,26 +348,26 @@ def test_failed_backend_switch_restores_current_manifest_release(
     restored: list[BackendReleaseSpec | None] = []
     runner = FailingReadinessRunner()
 
-    monkeypatch.setattr(staging_release, "_validate_spec_files", lambda _spec: None)
-    monkeypatch.setattr(staging_release, "_validate_env_file", lambda _path: None)
-    monkeypatch.setattr(staging_release, "_check_collision_boundaries", lambda _runner: None)
-    monkeypatch.setattr(staging_release, "_verify_image_revision", lambda *_args: None)
+    monkeypatch.setattr(test_release, "_validate_spec_files", lambda _spec: None)
+    monkeypatch.setattr(test_release, "_validate_env_file", lambda _path: None)
+    monkeypatch.setattr(test_release, "_check_collision_boundaries", lambda _runner: None)
+    monkeypatch.setattr(test_release, "_verify_image_revision", lambda *_args: None)
     monkeypatch.setattr(
-        staging_release,
+        test_release,
         "_require_healthy_infrastructure",
         lambda *_args: {"postgres": "postgres-1"},
     )
-    monkeypatch.setattr(staging_release, "_read_image_migration_head", lambda *_args: "head")
-    monkeypatch.setattr(staging_release, "_read_database_revision", lambda **_kwargs: "head")
-    monkeypatch.setattr(staging_release, "_current_release_spec", lambda _spec: current)
+    monkeypatch.setattr(test_release, "_read_image_migration_head", lambda *_args: "head")
+    monkeypatch.setattr(test_release, "_read_database_revision", lambda **_kwargs: "head")
+    monkeypatch.setattr(test_release, "_current_release_spec", lambda _spec: current)
     monkeypatch.setattr(
-        staging_release,
+        test_release,
         "_restore_backend",
         lambda *, previous, failed, runner: restored.append(previous),
     )
 
     with pytest.raises(RuntimeError, match="not ready"):
-        staging_release.deploy(candidate, runner)  # type: ignore[arg-type]
+        test_release.deploy(candidate, runner)  # type: ignore[arg-type]
 
     assert restored == [current]
     assert not any("migrate" in command for command in runner.commands)

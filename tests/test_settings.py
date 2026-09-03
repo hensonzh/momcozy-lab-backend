@@ -71,11 +71,11 @@ def test_settings_use_sliding_agent_model_asset_defaults() -> None:
 
 
 def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "staging")
+    monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://example")
     monkeypatch.setenv("REDIS_URL", "redis://example:6379/1")
     monkeypatch.setenv("OBJECT_STORAGE_PROVIDER", "s3")
-    monkeypatch.setenv("OBJECT_STORAGE_BUCKET", "momcozy-staging")
+    monkeypatch.setenv("OBJECT_STORAGE_BUCKET", "momcozy-test")
     monkeypatch.setenv("OBJECT_STORAGE_REGION", "us-west-2")
     monkeypatch.setenv("OBJECT_STORAGE_ENDPOINT_URL", "https://s3.example.test")
     monkeypatch.setenv("OBJECT_STORAGE_PUBLIC_ENDPOINT_URL", "https://images.example.test")
@@ -86,11 +86,11 @@ def test_settings_from_env_reads_infrastructure_configuration(monkeypatch: pytes
 
     settings = Settings.from_env()
 
-    assert settings.app_env == "staging"
+    assert settings.app_env == "test"
     assert settings.database_url == "postgresql+psycopg://example"
     assert settings.redis_url == "redis://example:6379/1"
     assert settings.object_storage_provider == "s3"
-    assert settings.object_storage_bucket == "momcozy-staging"
+    assert settings.object_storage_bucket == "momcozy-test"
     assert settings.object_storage_endpoint_url == "https://s3.example.test"
     assert settings.object_storage_public_endpoint_url == "https://images.example.test"
     assert settings.product_asset_manifest_path == "/etc/momcozy/product-assets.manifest.json"

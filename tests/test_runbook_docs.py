@@ -21,10 +21,10 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "Idempotency-Key",
         "actor_user_id",
         "make backend-productization-status",
-        "make backend-staging-smoke",
-        "momcozy-lab-staging",
-        "agent_runtime_staging",
-        "agent-runtime-staging",
+        "make backend-test-smoke",
+        "momcozy-lab-test",
+        "agent_runtime_test",
+        "agent-runtime-test",
         "empty database",
         "upgrading an older Product Backend schema",
     ]:
@@ -58,7 +58,7 @@ def test_release_smoke_checklist_covers_product_and_runtime_boundary() -> None:
         "/v1/health/metrics",
         "make backend-productization-status",
         "make backend-smoke",
-        "make backend-staging-smoke",
+        "make backend-test-smoke",
         "OpenAPI snapshot",
     ]:
         assert phrase in text

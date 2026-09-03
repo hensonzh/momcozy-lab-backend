@@ -1,12 +1,12 @@
 COMPOSE_ENV_FILE ?= env/compose.local.env
-STAGING_COMPOSE_ENV_FILE ?= env/compose.staging.env
+TEST_COMPOSE_ENV_FILE ?= env/compose.test.env
 BACKEND_ENV_FILE ?= $(COMPOSE_ENV_FILE)
 PYTHON ?= .venv/bin/python
 BACKEND_BUILD_FLAGS ?=
 COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f docker-compose.local.yml
-STAGING_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE) docker compose --env-file $(STAGING_COMPOSE_ENV_FILE) -f docker-compose.staging.yml
+TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE) docker compose --env-file $(TEST_COMPOSE_ENV_FILE) -f docker-compose.test.yml
 
-.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-staging-pull backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset backend-staging-ps backend-staging-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-staging-smoke backend-env-print
+.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-test-pull backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset backend-test-ps backend-test-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-test-smoke backend-env-print
 
 backend-local-build:
 	$(MAKE) backend-build
@@ -36,15 +36,15 @@ backend-migrate:
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
 
-backend-staging-pull backend-staging-migrate backend-staging-up backend-staging-services backend-staging-down backend-staging-reset:
-	@echo "Direct staging mutation is disabled; use the protected backend-staging-delivery workflow or an approved maintenance runbook." >&2
+backend-test-pull backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset:
+	@echo "Direct test mutation is disabled; use the protected backend-test-delivery workflow or an approved maintenance runbook." >&2
 	@exit 2
 
-backend-staging-ps:
-	docker ps --filter label=com.docker.compose.project=momcozy-lab-backend-staging
+backend-test-ps:
+	docker ps --filter label=com.docker.compose.project=momcozy-lab-backend-test
 
-backend-staging-logs:
-	docker logs --follow $$(docker ps --quiet --filter label=com.docker.compose.project=momcozy-lab-backend-staging --filter label=com.docker.compose.service=api)
+backend-test-logs:
+	docker logs --follow $$(docker ps --quiet --filter label=com.docker.compose.project=momcozy-lab-backend-test --filter label=com.docker.compose.service=api)
 
 backend-export-contracts:
 	$(PYTHON) scripts/export_openapi.py --output docs/openapi.generated.json
@@ -64,13 +64,13 @@ backend-smoke:
 	$(PYTHON) scripts/check_productization_status.py
 	$(PYTHON) -m pytest -q tests/test_agent_diary_internal_api.py tests/test_agent_file_internal_api.py tests/test_agent_lactation_internal_api.py tests/test_agent_plans_internal_api.py tests/test_agent_profile_internal_api.py tests/test_auth_jwks.py
 
-backend-staging-smoke:
+backend-test-smoke:
 	$(MAKE) backend-productization-status
-	$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)
+	$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)
 
 backend-env-print:
 	@echo "BACKEND_ENV_FILE=$(BACKEND_ENV_FILE)"
 	@echo "COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE)"
-	@echo "STAGING_COMPOSE_ENV_FILE=$(STAGING_COMPOSE_ENV_FILE)"
+	@echo "TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)"
 	@echo "PYTHON=$(PYTHON)"
 	@echo "BACKEND_BUILD_FLAGS=$(BACKEND_BUILD_FLAGS)"

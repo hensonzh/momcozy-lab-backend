@@ -1,7 +1,7 @@
 # Product Object Storage Integration Profile
 
 Local development uses MinIO to exercise the same S3-compatible semantics as
-staging and production. Production selects a managed provider through
+test and production. Production selects a managed provider through
 environment variables.
 
 ## Ownership Boundary
