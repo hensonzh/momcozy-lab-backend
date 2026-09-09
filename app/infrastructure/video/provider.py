@@ -53,8 +53,8 @@ class SandboxVideoProvider:
 
 class LiveKitVideoProvider:
     name = "livekit"
-    def __init__(self, *, url: str, api_key: str, api_secret: str) -> None:
-        self.url, self._api_key, self._api_secret = url, api_key, api_secret
+    def __init__(self, *, url: str, api_key: str, api_secret: str, client_url: str | None = None) -> None:
+        self.url, self.client_url, self._api_key, self._api_secret = url, client_url or url, api_key, api_secret
 
     def _client(self) -> api.LiveKitAPI:
         return api.LiveKitAPI(self.url, self._api_key, self._api_secret)
@@ -87,7 +87,7 @@ class LiveKitVideoProvider:
             .with_grants(api.VideoGrants(room_join=True, room=room_name, can_publish=True, can_subscribe=True, can_publish_data=False,
                 can_publish_sources=["camera", "microphone"]))
             .to_jwt())
-        return VideoCredentials(server_url=self.url, token=token, expires_at=datetime.now(timezone.utc) + ttl)
+        return VideoCredentials(server_url=self.client_url, token=token, expires_at=datetime.now(timezone.utc) + ttl)
 
 
 def build_video_provider(settings: Settings) -> VideoProvider:
@@ -101,5 +101,5 @@ def build_video_provider(settings: Settings) -> VideoProvider:
         if not settings.consultation_livekit_url or not settings.consultation_livekit_api_key or not settings.consultation_livekit_api_secret:
             raise ValueError("LiveKit credentials are required")
         settings.validate_for_startup()
-        return LiveKitVideoProvider(url=settings.consultation_livekit_url, api_key=settings.consultation_livekit_api_key, api_secret=settings.consultation_livekit_api_secret)
+        return LiveKitVideoProvider(url=settings.consultation_livekit_url, client_url=settings.consultation_livekit_client_url or settings.consultation_livekit_url, api_key=settings.consultation_livekit_api_key, api_secret=settings.consultation_livekit_api_secret)
     raise ValueError("Unknown video provider")

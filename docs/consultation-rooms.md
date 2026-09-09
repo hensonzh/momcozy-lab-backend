@@ -8,7 +8,7 @@ Only the assigned IBCLC can start or end a consultation. Starting requires both 
 
 ## Configuration and worker
 
-`CONSULTATION_VIDEO_PROVIDER` defaults to `disabled`. Use `sandbox` for authenticated two-client workflow tests without media, or `livekit` with `CONSULTATION_LIVEKIT_URL`, `CONSULTATION_LIVEKIT_API_KEY` and `CONSULTATION_LIVEKIT_API_SECRET`. The URL must be reachable by both clients and the backend; production requires WSS. Production rejects sandbox video and `CONSULTATION_DEMO_EARLY_JOIN=true`.
+`CONSULTATION_VIDEO_PROVIDER` defaults to `disabled`. Use `sandbox` for authenticated two-client workflow tests without media, or `livekit` with `CONSULTATION_LIVEKIT_URL`, `CONSULTATION_LIVEKIT_CLIENT_URL`, `CONSULTATION_LIVEKIT_API_KEY` and `CONSULTATION_LIVEKIT_API_SECRET`. The server URL is used for LiveKit room-service calls; the client URL is returned in short-lived join credentials and must be reachable by both clients. Production requires WSS for both URLs and rejects sandbox video and `CONSULTATION_DEMO_EARLY_JOIN=true`.
 
 Apply migrations, then run the API and the durable room worker with the same database and video configuration:
 

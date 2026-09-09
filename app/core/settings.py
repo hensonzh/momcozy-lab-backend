@@ -99,6 +99,7 @@ class Settings:
     vision_request_timeout_seconds: float = 20.0
     consultation_video_provider: str = "disabled"
     consultation_livekit_url: str = ""
+    consultation_livekit_client_url: str = ""
     consultation_livekit_api_key: str = field(default="", repr=False)
     consultation_livekit_api_secret: str = field(default="", repr=False)
     consultation_demo_early_join: bool = False
@@ -196,6 +197,7 @@ class Settings:
             ),
             consultation_video_provider=_env("CONSULTATION_VIDEO_PROVIDER", cls.consultation_video_provider).lower(),
             consultation_livekit_url=_env("CONSULTATION_LIVEKIT_URL", cls.consultation_livekit_url),
+            consultation_livekit_client_url=_env("CONSULTATION_LIVEKIT_CLIENT_URL", cls.consultation_livekit_client_url),
             consultation_livekit_api_key=_env("CONSULTATION_LIVEKIT_API_KEY", cls.consultation_livekit_api_key),
             consultation_livekit_api_secret=_env("CONSULTATION_LIVEKIT_API_SECRET", cls.consultation_livekit_api_secret),
             consultation_demo_early_join=_env_bool("CONSULTATION_DEMO_EARLY_JOIN", cls.consultation_demo_early_join),
@@ -249,6 +251,11 @@ class Settings:
                 errors.append("CONSULTATION_LIVEKIT_URL must be a WebSocket origin")
             if self.is_production and video_url.scheme != "wss":
                 errors.append("Production LiveKit connections require WSS")
+            client_url = urlparse(self.consultation_livekit_client_url or self.consultation_livekit_url)
+            if client_url.scheme not in {"ws", "wss"} or not client_url.netloc or client_url.username or client_url.password or client_url.query or client_url.fragment:
+                errors.append("CONSULTATION_LIVEKIT_CLIENT_URL must be a WebSocket origin")
+            if self.is_production and client_url.scheme != "wss":
+                errors.append("Production LiveKit client connections require WSS")
 
         if not self.database_url:
             errors.append("DATABASE_URL is required")
