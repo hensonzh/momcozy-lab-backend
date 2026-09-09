@@ -31,9 +31,9 @@ class CareRepository:
             statement = statement.with_for_update()
         return cast(CareOrder | None, await self.session.scalar(statement.execution_options(populate_existing=True)))
 
-    async def existing_order(self, owner: UUID, package_id: str) -> CareOrder | None:
+    async def existing_order(self, owner: UUID, package_id: str, *, payment_mode: str = "sandbox") -> CareOrder | None:
         return cast(CareOrder | None, await self.session.scalar(select(CareOrder).outerjoin(CareEpisode, CareEpisode.order_id == CareOrder.id).where(
-            CareOrder.owner_user_id == owner, CareOrder.package_id == package_id,
+            CareOrder.owner_user_id == owner, CareOrder.package_id == package_id, CareOrder.payment_mode == payment_mode,
             or_(CareOrder.status.in_(["pending", "processing", "requires_action", "reconciling"]),
                 and_(CareOrder.status == "paid", CareEpisode.status.in_(["active", "paused", "provisioning_pending"])))).order_by(CareOrder.created_at.desc()).limit(1)))
 

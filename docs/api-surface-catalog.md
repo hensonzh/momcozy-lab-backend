@@ -65,9 +65,12 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/care/episodes/{episode_id}/holds` | care | flutter | stable | Hold Appointment |
 | POST | `/v1/care/orders` | care | flutter | stable | Create Order |
 | GET | `/v1/care/orders/{order_id}` | care | flutter | stable | Read Order |
+| POST | `/v1/care/orders/{order_id}/checkout` | care | flutter | stable | Create Checkout |
+| POST | `/v1/care/orders/{order_id}/reconcile` | care | flutter | stable | Reconcile Checkout |
 | POST | `/v1/care/orders/{order_id}/sandbox-payment` | care | flutter | stable | Simulate Payment |
 | GET | `/v1/care/overview` | care | flutter | stable | Get Overview |
 | PUT | `/v1/care/plan-publications/{publication_id}/tasks/{source_key}` | care | flutter, ibclc | stable | Update Task |
+| POST | `/v1/care/stripe/webhook` | care | flutter | stable | Stripe Webhook |
 | GET | `/v1/devices/pump-energy-target` | devices | flutter | stable | Get Pump Energy Target |
 | POST | `/v1/devices/pump-health` | devices | flutter | stable | Create Pump Health |
 | GET | `/v1/devices/pump-health/latest` | devices | flutter | stable | Get Latest Pump Health |

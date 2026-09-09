@@ -13,17 +13,20 @@ from .schemas import (CareEpisodeRead, CareOrderRead, CareOverview, CareProvider
 
 
 class CareService:
-    def __init__(self, repository: CareRepository, audit: AuditService, idempotency: IdempotencyService, *, sandbox_enabled: bool) -> None:
+    def __init__(self, repository: CareRepository, audit: AuditService, idempotency: IdempotencyService, *, sandbox_enabled: bool, stripe_enabled: bool = False, stripe_livemode: bool = False) -> None:
         self.repository = repository
         self.audit = audit
         self.idempotency = idempotency
-        self.sandbox_enabled = sandbox_enabled
+        self.sandbox_enabled = sandbox_enabled and not stripe_enabled
+        self.stripe_enabled = stripe_enabled
+        self.stripe_livemode = stripe_livemode
+        self.test_providers = not stripe_livemode
 
     async def catalog(self) -> ServiceCatalog:
-        providers = await self.repository.providers(sandbox=True) if self.sandbox_enabled else []
+        providers = await self.repository.providers(sandbox=self.test_providers) if self.sandbox_enabled or self.stripe_enabled else []
         return ServiceCatalog(packages=CATALOG, providers=[CareProviderRead.model_validate(value) for value in providers],
             available_regions=sorted({region for provider in providers for region in provider.regions}),
-            payment_mode="sandbox" if self.sandbox_enabled else "disabled")
+            payment_mode="stripe" if self.stripe_enabled else "sandbox" if self.sandbox_enabled else "disabled")
 
     async def overview(self, owner: UUID) -> CareOverview:
         return CareOverview(orders=[CareOrderRead.model_validate(value) for value in await self.repository.orders(owner)],
@@ -32,7 +35,7 @@ class CareService:
     async def check_eligibility(self, owner: UUID, body: EligibilityWrite, request_id: str) -> CareEligibility:
         self._package(body.package_id)
         catalog = await self.catalog()
-        eligible = self.sandbox_enabled and body.region in catalog.available_regions
+        eligible = (self.sandbox_enabled or self.stripe_enabled) and body.region in catalog.available_regions
         result = CareEligibility(owner_user_id=owner, package_id=body.package_id, region=body.region, eligible=eligible,
             reason="" if eligible else "region_unavailable", expires_at=datetime.now(timezone.utc) + timedelta(minutes=30))
         await self.repository.add(result)
@@ -41,7 +44,8 @@ class CareService:
         return result
 
     async def create_order(self, owner: UUID, eligibility_id: UUID, key: str, request_id: str) -> PurchaseRead:
-        self._require_sandbox()
+        if not (self.sandbox_enabled or self.stripe_enabled):
+            raise ApiError(code="payments_disabled", message="Purchases are unavailable.", status=403)
         await self.repository.lock_owner(owner)
         decision = await self.idempotency.reserve(actor_user_id=owner, scope="care.order.create", key=key,
             request_hash=request_hash({"eligibility_id": str(eligibility_id)}), expires_at=datetime.now(timezone.utc) + timedelta(days=1))
@@ -59,12 +63,13 @@ class CareService:
         if eligibility.region not in (await self.catalog()).available_regions:
             raise ApiError(code="region_unavailable", message="This region is currently unavailable.", status=409)
         package = self._package(eligibility.package_id)
-        order = await self.repository.existing_order(owner, package.id)
+        order = await self.repository.existing_order(owner, package.id, payment_mode="stripe" if self.stripe_enabled else "sandbox")
         if order is None:
             order = CareOrder(owner_user_id=owner, eligibility_id=eligibility.id, package_id=package.id,
                 price_minor=package.price_minor, currency=package.currency, region=eligibility.region,
                 duration_days=package.duration_days, total_sessions=package.sessions,
-                payment_mode="sandbox", status="pending", version=1)
+                payment_mode="stripe" if self.stripe_enabled else "sandbox",
+                stripe_livemode=self.stripe_livemode if self.stripe_enabled else None, status="pending", version=1)
             await self.repository.add(order)
             await self._audit(owner, order, "created", request_id)
         await self.idempotency.mark_completed(record=decision.record, response_ref=str(order.id))

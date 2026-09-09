@@ -31,7 +31,9 @@ class AppointmentRepository:
         return cast(CareEpisode | None, await self.session.scalar(query.execution_options(populate_existing=True)))
 
     async def sandbox_episode(self, episode: CareEpisode) -> bool:
-        return await self.session.scalar(select(CareOrder.payment_mode).where(CareOrder.id == episode.order_id)) == "sandbox"
+        order = await self.session.get(CareOrder, episode.order_id)
+        return order is not None and (order.payment_mode == "sandbox" or
+            (order.payment_mode == "stripe" and order.stripe_livemode is False))
 
     async def provider(self, provider_id: UUID, *, lock: bool = False) -> CareProvider | None:
         query = select(CareProvider).where(CareProvider.user_id == provider_id)

@@ -14,6 +14,7 @@ from ..auth import CurrentUser
 from .repository import CareRepository
 from .schemas import CareOverview, EligibilityRead, EligibilityWrite, OrderWrite, PurchaseRead, SandboxPaymentWrite, ServiceCatalog
 from .service import CareService
+from .stripe_checkout import StripeCheckoutService
 
 router = SurfaceAPIRouter(prefix="/care", tags=["care"], api_surface_metadata=api_surface("public_app_api", owner="care", clients=["flutter"]))
 
@@ -21,7 +22,8 @@ router = SurfaceAPIRouter(prefix="/care", tags=["care"], api_surface_metadata=ap
 def get_care_service(request: Request, session: AsyncSession = Depends(get_session)) -> CareService:
     audit = AuditRepository(session)
     return CareService(CareRepository(session), AuditService(repository=audit), IdempotencyService(repository=audit),
-        sandbox_enabled=not request.app.state.settings.is_production)
+        sandbox_enabled=not request.app.state.settings.is_production,
+        stripe_enabled=request.app.state.settings.stripe_checkout_enabled, stripe_livemode=request.app.state.settings.stripe_livemode)
 
 
 @router.get("/catalog", response_model=ServiceCatalog)
@@ -55,3 +57,22 @@ async def read_order(order_id: UUID, user: CurrentUser = Depends(require_current
 async def simulate_payment(order_id: UUID, body: SandboxPaymentWrite, request: Request, user: CurrentUser = Depends(require_current_user),
     service: CareService = Depends(get_care_service)) -> PurchaseRead:
     return await service.sandbox_payment(user.user_id, order_id, body, request.state.request_id)
+
+
+@router.post("/orders/{order_id}/checkout", response_model=dict[str, object])
+async def create_checkout(order_id: UUID, request: Request, user: CurrentUser = Depends(require_current_user), session: AsyncSession = Depends(get_session)) -> dict[str, object]:
+    care = StripeCheckoutService(session, request.app.state.settings, AuditService(repository=AuditRepository(session)))
+    purchase, url = await care.create(user.user_id, order_id, request.state.request_id)
+    return {"checkout_url": url, "purchase": purchase.model_dump(mode="json")}
+
+
+@router.post("/orders/{order_id}/reconcile", response_model=PurchaseRead)
+async def reconcile_checkout(order_id: UUID, request: Request, user: CurrentUser = Depends(require_current_user), session: AsyncSession = Depends(get_session)) -> PurchaseRead:
+    care = StripeCheckoutService(session, request.app.state.settings, AuditService(repository=AuditRepository(session)))
+    return await care.reconcile(user.user_id, order_id, request.state.request_id)
+
+
+@router.post("/stripe/webhook", status_code=204)
+async def stripe_webhook(request: Request, stripe_signature: str = Header(alias="Stripe-Signature"), session: AsyncSession = Depends(get_session)) -> None:
+    care = StripeCheckoutService(session, request.app.state.settings, AuditService(repository=AuditRepository(session)))
+    await care.webhook(await request.body(), stripe_signature, request.state.request_id)

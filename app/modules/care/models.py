@@ -48,6 +48,8 @@ class CareOrder(Base):
     total_sessions: Mapped[int] = mapped_column(Integer, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     payment_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="sandbox")
+    stripe_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    stripe_livemode: Mapped[bool | None] = mapped_column(Boolean)
     region: Mapped[str] = mapped_column(String(2), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

@@ -103,6 +103,10 @@ class Settings:
     consultation_livekit_api_key: str = field(default="", repr=False)
     consultation_livekit_api_secret: str = field(default="", repr=False)
     consultation_demo_early_join: bool = False
+    stripe_checkout_enabled: bool = False
+    stripe_secret_key: str = field(default="", repr=False)
+    stripe_webhook_secret: str = field(default="", repr=False)
+    stripe_checkout_return_origin: str = ""
     log_level: str = "INFO"
 
     @classmethod
@@ -205,6 +209,10 @@ class Settings:
             ibclc_session_hours=_env_int("IBCLC_SESSION_HOURS", cls.ibclc_session_hours),
             care_report_runtime_url=_env('CARE_REPORT_RUNTIME_URL', cls.care_report_runtime_url).rstrip('/'),
             care_report_service_key=_env('CARE_REPORT_SERVICE_KEY', cls.care_report_service_key),
+            stripe_checkout_enabled=_env_bool("STRIPE_CHECKOUT_ENABLED", cls.stripe_checkout_enabled),
+            stripe_secret_key=_env("STRIPE_SECRET_KEY", cls.stripe_secret_key),
+            stripe_webhook_secret=_env("STRIPE_WEBHOOK_SECRET", cls.stripe_webhook_secret),
+            stripe_checkout_return_origin=_env("STRIPE_CHECKOUT_RETURN_ORIGIN", cls.stripe_checkout_return_origin).rstrip("/"),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -212,8 +220,23 @@ class Settings:
     def is_production(self) -> bool:
         return self.app_env.lower() in PRODUCTION_ENVS
 
+    @property
+    def stripe_livemode(self) -> bool:
+        return self.stripe_secret_key.startswith(("sk_live_", "rk_live_"))
+
     def validate_for_startup(self) -> None:
         errors: list[str] = []
+        if self.stripe_checkout_enabled:
+            if not self.stripe_secret_key.startswith(("sk_test_", "sk_live_", "rk_test_", "rk_live_")):
+                errors.append("STRIPE_SECRET_KEY is required for Stripe Checkout")
+            if not self.stripe_webhook_secret.startswith("whsec_"):
+                errors.append("STRIPE_WEBHOOK_SECRET is required for Stripe Checkout")
+            if self.stripe_livemode != self.is_production:
+                errors.append("Stripe live keys require production; non-production requires Stripe test keys")
+            origin = urlparse(self.stripe_checkout_return_origin)
+            if (origin.scheme != "https" or not origin.hostname or origin.username is not None or
+                origin.password is not None or origin.path not in {"", "/"} or origin.query or origin.fragment):
+                errors.append("STRIPE_CHECKOUT_RETURN_ORIGIN must be the backend public HTTPS origin")
         if self.care_report_runtime_url:
             runtime = urlparse(self.care_report_runtime_url)
             try:

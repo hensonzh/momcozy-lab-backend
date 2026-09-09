@@ -44,7 +44,7 @@ class ServiceCatalog(BaseModel):
     packages: list[ServicePackageRead]
     providers: list[CareProviderRead]
     available_regions: list[str]
-    payment_mode: Literal["sandbox", "disabled"]
+    payment_mode: Literal["sandbox", "disabled", "stripe"]
 
 
 class EligibilityWrite(BaseModel):
@@ -81,7 +81,8 @@ class CareOrderRead(CareRead):
     duration_days: int
     total_sessions: int
     currency: Literal["USD"]
-    payment_mode: Literal["sandbox"]
+    payment_mode: Literal["sandbox", "stripe"]
+    stripe_livemode: bool | None = None
     region: str
     version: int
     created_at: AwareDatetime
@@ -117,3 +118,8 @@ class SandboxPaymentWrite(BaseModel):
 class PurchaseRead(BaseModel):
     order: CareOrderRead
     episode: CareEpisodeRead | None = None
+
+
+class CheckoutRead(BaseModel):
+    url: str | None
+    purchase: PurchaseRead

@@ -2929,7 +2929,10 @@
             "type": "string"
           },
           "payment_mode": {
-            "const": "sandbox",
+            "enum": [
+              "sandbox",
+              "stripe"
+            ],
             "title": "Payment Mode",
             "type": "string"
           },
@@ -2953,6 +2956,17 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "stripe_livemode": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripe Livemode"
           },
           "total_sessions": {
             "title": "Total Sessions",
@@ -11066,7 +11080,8 @@
           "payment_mode": {
             "enum": [
               "sandbox",
-              "disabled"
+              "disabled",
+              "stripe"
             ],
             "title": "Payment Mode",
             "type": "string"
@@ -15732,6 +15747,116 @@
         "x-momcozy-stability": "stable"
       }
     },
+    "/v1/care/orders/{order_id}/checkout": {
+      "post": {
+        "operationId": "create_checkout_v1_care_orders__order_id__checkout_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Checkout V1 Care Orders  Order Id  Checkout Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Checkout",
+        "tags": [
+          "care"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "care",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/care/orders/{order_id}/reconcile": {
+      "post": {
+        "operationId": "reconcile_checkout_v1_care_orders__order_id__reconcile_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PurchaseRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reconcile Checkout",
+        "tags": [
+          "care"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
+        ],
+        "x-momcozy-owner": "care",
+        "x-momcozy-stability": "stable"
+      }
+    },
     "/v1/care/orders/{order_id}/sandbox-payment": {
       "post": {
         "operationId": "simulate_payment_v1_care_orders__order_id__sandbox_payment_post",
@@ -15897,6 +16022,47 @@
         "x-momcozy-client": [
           "flutter",
           "ibclc"
+        ],
+        "x-momcozy-owner": "care",
+        "x-momcozy-stability": "stable"
+      }
+    },
+    "/v1/care/stripe/webhook": {
+      "post": {
+        "operationId": "stripe_webhook_v1_care_stripe_webhook_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Stripe-Signature",
+            "required": true,
+            "schema": {
+              "title": "Stripe-Signature",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stripe Webhook",
+        "tags": [
+          "care"
+        ],
+        "x-momcozy-api-surface": "public_app_api",
+        "x-momcozy-client": [
+          "flutter"
         ],
         "x-momcozy-owner": "care",
         "x-momcozy-stability": "stable"
