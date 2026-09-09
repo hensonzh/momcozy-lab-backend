@@ -7,7 +7,7 @@ from alembic.script import ScriptDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_BASE_REVISION = "20260727_0001"
-PRODUCT_HEAD_REVISION = "20260909_0015"
+PRODUCT_HEAD_REVISION = "20260909_0016"
 
 
 def test_alembic_has_one_linear_product_migration_chain() -> None:
