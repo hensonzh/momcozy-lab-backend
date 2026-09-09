@@ -21,6 +21,7 @@ RATE_LIMIT_EXEMPT_PATHS = {
     "/v1/health/ready",
     "/v1/health/metrics",
 }
+WORKBENCH_LOGIN_PATHS = {"/v1/ibclc/auth/login", "/v1/ibclc/auth/verify"}
 
 
 class RedisRateLimitClient(Protocol):
@@ -55,7 +56,7 @@ class InMemoryRateLimitStore:
 
 
 async def check_rate_limit(request: Request, settings: Settings) -> RateLimitDecision:
-    if not settings.rate_limit_enabled or request.url.path in RATE_LIMIT_EXEMPT_PATHS:
+    if (not settings.rate_limit_enabled and request.url.path not in WORKBENCH_LOGIN_PATHS) or request.url.path in RATE_LIMIT_EXEMPT_PATHS:
         return RateLimitDecision(
             allowed=True,
             limit=settings.rate_limit_requests,
@@ -108,6 +109,9 @@ def _rate_limit_profile(
     request: Request,
     settings: Settings,
 ) -> tuple[str, int, int]:
+    if request.url.path in WORKBENCH_LOGIN_PATHS:
+        client_host = request.client.host if request.client else "unknown"
+        return f"rate-limit:workbench-login:{client_host}", 20, 60
     service_key = request.headers.get("x-service-key", "")
     configured_key = settings.agent_runtime_service_api_key
     if (

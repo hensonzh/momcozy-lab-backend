@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from datetime import date
 from typing import Literal
 from uuid import UUID
@@ -19,7 +20,7 @@ from ..records.service import RecordsService
 from .agent_contracts import AgentBusinessActionResult, AgentProfileUpdateApply
 from .agent_service import AgentProfileUpdateService
 from .lactation_context import LactationContextService
-from .lactation_context_schema import MaternalInfantProfileReadOutput
+from .lactation_context_schema import MaternalBabyProfileReadOutput
 from .repository import ProfileRepository
 from .service import ProfileService
 
@@ -62,20 +63,20 @@ def get_agent_profile_update_service(
     )
 
 
-@router.get("/profile", response_model=MaternalInfantProfileReadOutput)
+@router.get("/profile", response_model=MaternalBabyProfileReadOutput)
 async def read_agent_profile(
     actor_user_id: UUID,
     infant_scope: Literal["current_delivery", "all"] = Query(default="current_delivery"),
     as_of_date: date | None = None,
     _service_client: ServiceClient = Depends(require_agent_runtime_client),
     service: LactationContextService = Depends(get_agent_profile_read_service),
-) -> MaternalInfantProfileReadOutput:
+) -> MaternalBabyProfileReadOutput:
     result = await service.read(
         owner_user_id=actor_user_id,
         as_of_date=as_of_date,
         infant_scope=infant_scope,
     )
-    return MaternalInfantProfileReadOutput.model_validate(result)
+    return MaternalBabyProfileReadOutput.model_validate(result)
 
 
 @router.post(

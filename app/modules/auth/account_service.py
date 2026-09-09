@@ -75,6 +75,10 @@ class AuthAccountService:
         password: str,
         device_context: DeviceContext | None = None,
     ) -> IssuedTokenPair:
+        user = await self.authenticate_email(email=email, password=password)
+        return await self._issue_pair(user=user, device_context=device_context)
+
+    async def authenticate_email(self, *, email: str, password: str) -> User:
         normalized_email = normalize_email(email)
         identity = await self.account_repository.get_identity(provider=EMAIL_PROVIDER, subject=normalized_email)
         if identity is None or not verify_password(password, identity.password_hash):
@@ -84,7 +88,7 @@ class AuthAccountService:
         if user is None or user.status != "active":
             raise ApiError(code="permission_denied", message="User account is not active.", status=403)
 
-        return await self._issue_pair(user=user, device_context=device_context)
+        return user
 
     async def invite_login(
         self,
@@ -148,7 +152,11 @@ class AuthAccountService:
         user = await self.account_repository.get_user(user_id=device_session.user_id)
         if user is None or user.status != "active":
             raise ApiError(code="permission_denied", message="User account is not active.", status=403)
-        return self._tokens_for(user=user, session_id=device_session.id, issued_refresh=issued_refresh)
+        roles = frozenset({"user"})
+        if device_session.mfa_verified_at is not None:
+            from .workbench_access import workbench_session_roles
+            roles = await workbench_session_roles(device_session, self.session_service.repository.session, self.settings)
+        return self._tokens_for(user=user, session_id=device_session.id, issued_refresh=issued_refresh, roles=roles)
 
     async def logout(self, *, session_id: UUID) -> None:
         await self.session_service.revoke_session(session_id=session_id)
@@ -172,12 +180,12 @@ class AuthAccountService:
             issued_refresh=created.refresh_token,
         )
 
-    def _tokens_for(self, *, user: User, session_id: UUID, issued_refresh: IssuedRefreshToken) -> IssuedTokenPair:
+    def _tokens_for(self, *, user: User, session_id: UUID, issued_refresh: IssuedRefreshToken, roles: frozenset[str] = frozenset({"user"})) -> IssuedTokenPair:
         access_token, expires_in = issue_access_token(
             user_id=user.id,
             session_id=session_id,
             settings=self.settings,
-            roles=frozenset({"user"}),
+            roles=roles,
             permissions=STANDARD_USER_PERMISSIONS,
         )
         return IssuedTokenPair(

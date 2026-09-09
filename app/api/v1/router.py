@@ -11,6 +11,8 @@ from ..surface import SurfaceAPIRouter, api_surface
 from ...modules.assets.router import router as assets_router
 from ...modules.auth import authenticate_service_key
 from ...modules.auth.router import router as auth_router
+from ...modules.auth.workbench_router import router as workbench_auth_router
+from ...modules.ibclc.router import router as workbench_router
 from ...modules.devices.router import router as devices_router
 from ...modules.diary.router import router as diary_router
 from ...modules.diary.agent_router import router as agent_diary_router
@@ -19,6 +21,17 @@ from ...modules.files.agent_router import router as agent_files_router
 from ...modules.files.model_asset_router import router as model_assets_router
 from ...modules.invites.router import router as invites_router
 from ...modules.notifications.router import router as notifications_router
+from ...modules.care.router import router as care_router
+from ...modules.appointments.router import router as appointments_router
+from ...modules.consultations.router import router as consultations_router
+from ...modules.consultations.room_router import router as consultation_rooms_router
+from ...modules.documentation.router import router as documentation_router
+from ...modules.reports.conversation_router import router as care_conversation_router
+from ...modules.reports.router import router as care_reports_router
+from ...modules.mother.router import router as mother_router
+from ...modules.lactation.router import router as lactation_router
+from ...modules.baby.router import router as baby_records_router
+from ...modules.baby.profile_router import router as baby_profiles_router
 from ...modules.plans.agent_router import router as agent_plans_router
 from ...modules.plans.router import router as plans_router
 from ...modules.profiles.agent_router import router as agent_profiles_router
@@ -27,6 +40,7 @@ from ...modules.records.agent_router import router as agent_records_router
 from ...modules.records.router import router as records_router
 from ...modules.support.router import router as support_router
 from ...modules.voice.router import router as voice_router
+from ...modules.schedule.router import router as schedule_router
 
 router = SurfaceAPIRouter(
     prefix="/v1",
@@ -34,6 +48,8 @@ router = SurfaceAPIRouter(
 )
 router.include_router(assets_router)
 router.include_router(auth_router)
+router.include_router(workbench_auth_router)
+router.include_router(workbench_router)
 router.include_router(devices_router)
 router.include_router(diary_router)
 router.include_router(agent_diary_router)
@@ -42,6 +58,17 @@ router.include_router(files_router)
 router.include_router(agent_files_router)
 router.include_router(invites_router)
 router.include_router(notifications_router)
+router.include_router(care_router)
+router.include_router(appointments_router)
+router.include_router(consultations_router)
+router.include_router(consultation_rooms_router)
+router.include_router(documentation_router)
+router.include_router(care_conversation_router)
+router.include_router(care_reports_router)
+router.include_router(mother_router)
+router.include_router(lactation_router)
+router.include_router(baby_records_router)
+router.include_router(baby_profiles_router)
 router.include_router(agent_plans_router)
 router.include_router(plans_router)
 router.include_router(agent_profiles_router)
@@ -50,6 +77,7 @@ router.include_router(agent_records_router)
 router.include_router(records_router)
 router.include_router(support_router)
 router.include_router(voice_router)
+router.include_router(schedule_router)
 
 
 @router.get("/health/live")

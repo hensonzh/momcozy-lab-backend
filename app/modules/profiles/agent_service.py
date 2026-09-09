@@ -23,7 +23,6 @@ AgentProfileActionType = Literal[
 
 _PROFILE_UPDATE_FIELDS = {
     "age",
-    "estimated_due_date",
     "preferred_name",
 }
 _MATERNAL_PROFILE_UPDATE_FIELDS = {
@@ -35,10 +34,9 @@ _MATERNAL_PROFILE_UPDATE_FIELDS = {
 }
 _INFANT_PROFILE_UPDATE_FIELDS = {
     "birth_date",
-    "birth_weight_kg",
-    "gestational_age_at_birth_days",
     "name",
-    "sex_at_birth",
+    "sex",
+    "feeding_mode",
 }
 
 
@@ -278,11 +276,7 @@ def _prepare_profile_update(
     ):
         raise _invalid("unsupported_mother_profile_updates")
     user_values = {
-        field: _date_value(
-            field=field,
-            value=raw_mother_values[field],
-            date_field="estimated_due_date",
-        )
+        field: raw_mother_values[field]
         for field in _PROFILE_UPDATE_FIELDS
         if isinstance(raw_mother_values, dict) and field in raw_mother_values
     }

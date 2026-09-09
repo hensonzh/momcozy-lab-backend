@@ -16,8 +16,6 @@ def test_user_profiles_are_unique_by_user() -> None:
     assert "uq_user_profiles_user_id" in constraint_names
     assert "preferred_name" in table.columns
     assert table.columns["preferred_name"].nullable is True
-    assert "estimated_due_date" in table.columns
-    assert "ix_user_profiles_estimated_due_date" in {index.name for index in table.indexes}
     assert {
         "display_name",
         "delivery_date",
@@ -28,19 +26,19 @@ def test_user_profiles_are_unique_by_user() -> None:
     }.isdisjoint(table.columns)
 
 
-def test_infant_profiles_are_owner_scoped() -> None:
-    table = Base.metadata.tables["infant_profiles"]
+def test_baby_profiles_are_owner_scoped() -> None:
+    table = Base.metadata.tables["baby_profiles"]
     index_names = {index.name for index in table.indexes}
 
     assert "owner_user_id" in table.columns
     assert table.columns["owner_user_id"].nullable is False
     assert "name" in table.columns
-    assert "sex_at_birth" in table.columns
-    assert table.columns["sex_at_birth"].nullable is True
-    assert table.columns["birth_weight_kg"].nullable is True
-    assert table.columns["gestational_age_at_birth_days"].nullable is True
-    assert {"infant_name", "sex", "status"}.isdisjoint(table.columns)
-    assert "ix_infant_profiles_owner_deleted_at" in index_names
+    assert "sex" in table.columns
+    assert table.columns["sex"].nullable is False
+    assert table.columns["feeding_mode"].nullable is False
+    assert table.columns["version"].nullable is False
+    assert {"infant_name", "sex_at_birth", "status", "birth_weight_kg", "gestational_age_at_birth_days"}.isdisjoint(table.columns)
+    assert "ix_baby_profiles_owner_deleted_at" in index_names
 
 
 def test_maternal_profiles_store_general_current_delivery_summary() -> None:

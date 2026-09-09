@@ -23,6 +23,51 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/auth/logout` | auth | flutter | stable | Logout |
 | POST | `/v1/auth/refresh` | auth | flutter | stable | Refresh |
 | POST | `/v1/auth/signup` | auth | flutter | stable | Signup |
+| GET | `/v1/babies` | baby | flutter | stable | List Profiles |
+| POST | `/v1/babies` | baby | flutter | stable | Create |
+| PUT | `/v1/babies/{baby_id}` | baby | flutter | stable | Update |
+| GET | `/v1/babies/{baby_id}/records` | baby | flutter | stable | List Records |
+| POST | `/v1/babies/{baby_id}/records` | baby | flutter | stable | Create |
+| POST | `/v1/babies/{baby_id}/records/batch` | baby | flutter | stable | Create Batch |
+| GET | `/v1/babies/{baby_id}/records/latest-growth` | baby | flutter | stable | Latest Growth |
+| DELETE | `/v1/babies/{baby_id}/records/{record_id}` | baby | flutter | stable | Delete |
+| PUT | `/v1/babies/{baby_id}/records/{record_id}` | baby | flutter | stable | Update |
+| POST | `/v1/babies/{baby_id}/records/{record_id}/restore` | baby | flutter | stable | Restore |
+| GET | `/v1/care/appointments/{appointment_id}` | care | flutter | stable | Get Appointment |
+| POST | `/v1/care/appointments/{appointment_id}/cancel` | care | flutter | stable | Cancel Appointment |
+| POST | `/v1/care/appointments/{appointment_id}/confirm` | care | flutter | stable | Confirm Appointment |
+| GET | `/v1/care/appointments/{appointment_id}/documentation` | care | flutter, ibclc | stable | Documentation |
+| GET | `/v1/care/appointments/{appointment_id}/intake` | care | flutter | stable | Intake Context |
+| PUT | `/v1/care/appointments/{appointment_id}/intake` | care | flutter | stable | Save Intake |
+| POST | `/v1/care/appointments/{appointment_id}/location-check` | care | flutter, ibclc | stable | Check Location |
+| PUT | `/v1/care/appointments/{appointment_id}/note` | care | flutter, ibclc | stable | Save Note |
+| POST | `/v1/care/appointments/{appointment_id}/note/amend` | care | flutter, ibclc | stable | Amend Note |
+| POST | `/v1/care/appointments/{appointment_id}/note/sign` | care | flutter, ibclc | stable | Sign Note |
+| GET | `/v1/care/appointments/{appointment_id}/notes/{note_id}` | care | flutter, ibclc | stable | Note Revision |
+| PUT | `/v1/care/appointments/{appointment_id}/plan` | care | flutter, ibclc | stable | Save Plan |
+| POST | `/v1/care/appointments/{appointment_id}/plan/publish` | care | flutter, ibclc | stable | Publish Plan |
+| GET | `/v1/care/appointments/{appointment_id}/room` | care | flutter, ibclc | stable | Room Context |
+| POST | `/v1/care/appointments/{appointment_id}/room` | care | flutter, ibclc | stable | Prepare Room |
+| POST | `/v1/care/appointments/{appointment_id}/room/end` | care | flutter, ibclc | stable | End Consultation |
+| POST | `/v1/care/appointments/{appointment_id}/room/join` | care | flutter, ibclc | stable | Join Room |
+| PUT | `/v1/care/appointments/{appointment_id}/room/presence` | care | flutter, ibclc | stable | Room Presence |
+| POST | `/v1/care/appointments/{appointment_id}/room/start` | care | flutter, ibclc | stable | Start Consultation |
+| GET | `/v1/care/appointments/{appointment_id}/summary` | care | flutter, ibclc | stable | Patient Summary |
+| GET | `/v1/care/catalog` | care | flutter | stable | Get Catalog |
+| POST | `/v1/care/eligibility` | care | flutter | stable | Check Eligibility |
+| GET | `/v1/care/episodes/{episode_id}/availability` | care | flutter | stable | Booking Availability |
+| GET | `/v1/care/episodes/{episode_id}/booking` | care | flutter | stable | Booking Context |
+| POST | `/v1/care/episodes/{episode_id}/booking-eligibility` | care | flutter | stable | Booking Precheck |
+| GET | `/v1/care/episodes/{episode_id}/consents` | care | flutter | stable | Get Consents |
+| POST | `/v1/care/episodes/{episode_id}/consents` | care | flutter | stable | Set Consent |
+| GET | `/v1/care/episodes/{episode_id}/conversations` | reports | flutter | stable | Conversations |
+| PUT | `/v1/care/episodes/{episode_id}/conversations/{thread_id}` | reports | flutter | stable | Link |
+| POST | `/v1/care/episodes/{episode_id}/holds` | care | flutter | stable | Hold Appointment |
+| POST | `/v1/care/orders` | care | flutter | stable | Create Order |
+| GET | `/v1/care/orders/{order_id}` | care | flutter | stable | Read Order |
+| POST | `/v1/care/orders/{order_id}/sandbox-payment` | care | flutter | stable | Simulate Payment |
+| GET | `/v1/care/overview` | care | flutter | stable | Get Overview |
+| PUT | `/v1/care/plan-publications/{publication_id}/tasks/{source_key}` | care | flutter, ibclc | stable | Update Task |
 | GET | `/v1/devices/pump-energy-target` | devices | flutter | stable | Get Pump Energy Target |
 | POST | `/v1/devices/pump-health` | devices | flutter | stable | Create Pump Health |
 | GET | `/v1/devices/pump-health/latest` | devices | flutter | stable | Get Latest Pump Health |
@@ -39,28 +84,32 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/files/{file_id}` | files | flutter | stable | Delete File |
 | GET | `/v1/files/{file_id}` | files | flutter | stable | Get File |
 | GET | `/v1/files/{file_id}/content` | files | flutter | stable | Get File Content |
+| GET | `/v1/ibclc/appointments` | ibclc | ibclc | stable | Appointments |
+| GET | `/v1/ibclc/appointments/{appointment_id}/intake` | care | flutter | stable | Expert Intake |
+| POST | `/v1/ibclc/auth/login` | auth | ibclc | stable | Begin Workbench Login |
+| POST | `/v1/ibclc/auth/verify` | auth | ibclc | stable | Verify Workbench Login |
+| GET | `/v1/ibclc/calendar` | ibclc | ibclc | stable | Calendar |
+| GET | `/v1/ibclc/clients` | ibclc | ibclc | stable | Clients |
+| GET | `/v1/ibclc/clients/{patient_ref}` | ibclc | ibclc | stable | Client Detail |
+| GET | `/v1/ibclc/episodes/{episode_id}/reports` | care-reports | ibclc | stable | Read |
+| POST | `/v1/ibclc/episodes/{episode_id}/reports` | care-reports | ibclc | stable | Generate |
+| GET | `/v1/ibclc/episodes/{episode_id}/reports/history` | care-reports | ibclc | stable | History |
+| GET | `/v1/ibclc/followups` | ibclc | ibclc | stable | Followups |
+| GET | `/v1/ibclc/me` | ibclc | ibclc | stable | Identity |
+| GET | `/v1/ibclc/reminders` | ibclc | ibclc | stable | Reminders |
+| PUT | `/v1/ibclc/reminders/{event_id}/read` | ibclc | ibclc | stable | Read Reminder |
+| POST | `/v1/ibclc/reports/{report_id}/reviews` | care-reports | ibclc | stable | Review |
+| GET | `/v1/lactation/records` | lactation | flutter | stable | List Records |
+| POST | `/v1/lactation/records` | lactation | flutter | stable | Create Record |
+| DELETE | `/v1/lactation/records/{record_id}` | lactation | flutter | stable | Delete Record |
+| PUT | `/v1/lactation/records/{record_id}` | lactation | flutter | stable | Update Record |
+| POST | `/v1/lactation/records/{record_id}/restore` | lactation | flutter | stable | Restore Record |
 | GET | `/v1/model-assets/{token}` | files | openai-responses | stable | Get Agent Model Asset Opaque bearer capability used only for model input fetches. |
+| GET | `/v1/mother/diary` | mother | flutter | stable | List Diary |
+| PUT | `/v1/mother/diary/{entry_date}` | mother | flutter | stable | Save Diary |
 | GET | `/v1/notifications` | notifications | flutter | stable | List Notifications |
 | DELETE | `/v1/notifications/{notification_id}` | notifications | flutter | stable | Archive Notification |
 | PATCH | `/v1/notifications/{notification_id}/read` | notifications | flutter | stable | Set Notification Read State |
-| GET | `/v1/plans` | plans | flutter | stable | List Plans |
-| POST | `/v1/plans` | plans | flutter | stable | Create Plan |
-| POST | `/v1/plans/tasks` | plans | flutter | stable | Create Task |
-| GET | `/v1/plans/tasks/list` | plans | flutter | stable | List Tasks |
-| DELETE | `/v1/plans/tasks/{task_id}` | plans | flutter | stable | Delete Task |
-| PATCH | `/v1/plans/tasks/{task_id}` | plans | flutter | stable | Update Task |
-| PATCH | `/v1/plans/tasks/{task_id}/completion` | plans | flutter | stable | Update Task Completion |
-| PATCH | `/v1/plans/tasks/{task_id}/state` | plans | flutter | stable | Update Task State |
-| DELETE | `/v1/plans/{plan_id}` | plans | flutter | stable | Delete Plan |
-| GET | `/v1/plans/{plan_id}` | plans | flutter | stable | Get Plan |
-| PATCH | `/v1/plans/{plan_id}/todos/{item_id}/completion` | plans | flutter | stable | Update Plan Todo Completion |
-| GET | `/v1/pregnancy-diary/entries` | pregnancy-diary | flutter | stable | List Entries |
-| POST | `/v1/pregnancy-diary/entries` | pregnancy-diary | flutter | stable | Create Entry |
-| DELETE | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Delete Entry |
-| GET | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Get Entry |
-| PATCH | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | flutter | stable | Update Entry |
-| GET | `/v1/profile/infants` | profiles | flutter | stable | List My Infants |
-| POST | `/v1/profile/infants` | profiles | flutter | stable | Create My Infant |
 | GET | `/v1/profile/lactation` | profiles | flutter | stable | Get My Maternal Lactation Profile |
 | PATCH | `/v1/profile/lactation` | profiles | flutter | stable | Update My Maternal Lactation Profile |
 | GET | `/v1/profile/me` | profiles | flutter | stable | Get My Profile |
@@ -76,6 +125,10 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/records/pumping` | records | flutter | stable | List Pumpings |
 | POST | `/v1/records/pumping` | records | flutter | stable | Create Pumping |
 | DELETE | `/v1/records/pumping/{record_id}` | records | flutter | stable | Delete Pumping |
+| GET | `/v1/schedule` | schedule | flutter, agent | stable | Read Schedule |
+| POST | `/v1/schedule/personal` | schedule | flutter, agent | stable | Create Personal |
+| DELETE | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Delete Personal |
+| PATCH | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Update Personal |
 | POST | `/v1/speech/transcribe-chunk` | voice | flutter | stable | Transcribe Speech Chunk |
 | GET | `/v1/support/tickets` | support | flutter | stable | List Support Tickets |
 | POST | `/v1/support/tickets` | support | flutter | stable | Create Support Ticket |
@@ -122,3 +175,24 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/health/live` | platform | load-balancer, monitoring | stable | Live |
 | GET | `/v1/health/metrics` | platform | load-balancer, monitoring | stable | Metrics |
 | GET | `/v1/health/ready` | platform | load-balancer, monitoring | stable | Ready |
+
+## deprecated_api
+
+| Method | Path | Owner | Clients | Stability | Summary |
+|---|---|---|---|---|---|
+| GET | `/v1/plans` | plans | legacy-flutter | deprecated | List Plans Use /v1/schedule and /v1/care plan publications for the current product. |
+| POST | `/v1/plans` | plans | legacy-flutter | deprecated | Create Plan Use /v1/schedule and /v1/care plan publications for the current product. |
+| POST | `/v1/plans/tasks` | plans | legacy-flutter | deprecated | Create Task Use /v1/schedule and /v1/care plan publications for the current product. |
+| GET | `/v1/plans/tasks/list` | plans | legacy-flutter | deprecated | List Tasks Use /v1/schedule and /v1/care plan publications for the current product. |
+| DELETE | `/v1/plans/tasks/{task_id}` | plans | legacy-flutter | deprecated | Delete Task Use /v1/schedule and /v1/care plan publications for the current product. |
+| PATCH | `/v1/plans/tasks/{task_id}` | plans | legacy-flutter | deprecated | Update Task Use /v1/schedule and /v1/care plan publications for the current product. |
+| PATCH | `/v1/plans/tasks/{task_id}/completion` | plans | legacy-flutter | deprecated | Update Task Completion Use /v1/schedule and /v1/care plan publications for the current product. |
+| PATCH | `/v1/plans/tasks/{task_id}/state` | plans | legacy-flutter | deprecated | Update Task State Use /v1/schedule and /v1/care plan publications for the current product. |
+| DELETE | `/v1/plans/{plan_id}` | plans | legacy-flutter | deprecated | Delete Plan Use /v1/schedule and /v1/care plan publications for the current product. |
+| GET | `/v1/plans/{plan_id}` | plans | legacy-flutter | deprecated | Get Plan Use /v1/schedule and /v1/care plan publications for the current product. |
+| PATCH | `/v1/plans/{plan_id}/todos/{item_id}/completion` | plans | legacy-flutter | deprecated | Update Plan Todo Completion Use /v1/schedule and /v1/care plan publications for the current product. |
+| GET | `/v1/pregnancy-diary/entries` | pregnancy-diary | legacy-flutter | deprecated | List Entries Use /v1/mother/diary for the current postpartum diary contract. |
+| POST | `/v1/pregnancy-diary/entries` | pregnancy-diary | legacy-flutter | deprecated | Create Entry Use /v1/mother/diary for the current postpartum diary contract. |
+| DELETE | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | legacy-flutter | deprecated | Delete Entry Use /v1/mother/diary for the current postpartum diary contract. |
+| GET | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | legacy-flutter | deprecated | Get Entry Use /v1/mother/diary for the current postpartum diary contract. |
+| PATCH | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | legacy-flutter | deprecated | Update Entry Use /v1/mother/diary for the current postpartum diary contract. |

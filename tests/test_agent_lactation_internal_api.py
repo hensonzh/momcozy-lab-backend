@@ -247,10 +247,10 @@ def test_agent_lactation_feeding_create_defaults_optional_infant_in_owner_scope(
 def test_agent_milk_analysis_snapshot_aggregates_all_owned_infant_records() -> None:
     actor_user_id = uuid4()
     records_service = AnalysisRecordsService(owner_user_id=actor_user_id)
-    profile_service = AnalysisProfileService(owner_user_id=actor_user_id)
+    baby_repository = AnalysisBabyRepository(owner_user_id=actor_user_id)
     service = AgentLactationReadService(
         records_service=records_service,
-        profile_service=profile_service,
+        baby_repository=baby_repository,
     )
 
     snapshot = asyncio.run(
@@ -275,7 +275,7 @@ def test_agent_milk_analysis_snapshot_aggregates_all_owned_infant_records() -> N
     assert snapshot.pumping_rhythm is not None
     assert snapshot.pumping_rhythm.timezone == "Asia/Shanghai"
     assert records_service.read_owner_ids == {actor_user_id}
-    assert profile_service.read_owner_ids == {actor_user_id}
+    assert baby_repository.read_owner_ids == {actor_user_id}
 
 
 class FakeAgentLactationReadService:
@@ -393,17 +393,17 @@ class AnalysisRecordsService:
         self.read_owner_ids.add(owner_user_id)
 
 
-class AnalysisProfileService:
+class AnalysisBabyRepository:
     def __init__(self, *, owner_user_id: UUID) -> None:
         self.owner_user_id = owner_user_id
         self.read_owner_ids: set[UUID] = set()
 
-    async def list_infants(self, **kwargs: object) -> list[object]:
+    async def profile_count(self, **kwargs: object) -> int:
         owner_user_id = kwargs["owner_user_id"]
         assert isinstance(owner_user_id, UUID)
         assert owner_user_id == self.owner_user_id
         self.read_owner_ids.add(owner_user_id)
-        return [SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())]
+        return 2
 
 
 class InMemoryIdempotencyService:

@@ -91,7 +91,7 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/files/upload",
         "/v1/files/{file_id}/vision/events/stream",
         "/v1/profile/me",
-        "/v1/profile/infants",
+        "/v1/babies",
         "/v1/records/feeding",
         "/v1/records/milk-trends",
         "/v1/plans",
@@ -170,7 +170,7 @@ def test_retryable_writes_declare_idempotency_header() -> None:
     for method, path in [
         ("post", "/v1/files/upload"),
         ("delete", "/v1/files/{file_id}"),
-        ("post", "/v1/profile/infants"),
+        ("post", "/v1/babies"),
         ("post", "/v1/records/feeding"),
         ("post", "/v1/plans"),
         ("post", "/v1/devices/pump-telemetry"),

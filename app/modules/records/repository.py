@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..baby.profile_models import BabyProfile
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -8,7 +10,6 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..profiles.models import InfantProfile
 from ..plans.models import PlanTask
 from .models import FeedingRecord, GrowthRecord, PumpingRecord
 
@@ -27,10 +28,10 @@ class RecordsRepository:
         self.session = session
 
     async def infant_belongs_to_owner(self, *, infant_id: UUID, owner_user_id: UUID) -> bool:
-        statement = select(InfantProfile.id).where(
-            InfantProfile.id == infant_id,
-            InfantProfile.owner_user_id == owner_user_id,
-            InfantProfile.deleted_at.is_(None),
+        statement = select(BabyProfile.id).where(
+            BabyProfile.id == infant_id,
+            BabyProfile.owner_user_id == owner_user_id,
+            BabyProfile.deleted_at.is_(None),
         )
         return await self.session.scalar(statement) is not None
 
@@ -382,14 +383,14 @@ class RecordsRepository:
                 )
                 .label("record_rank"),
             )
-            .join(InfantProfile, InfantProfile.id == GrowthRecord.infant_id)
+            .join(BabyProfile, BabyProfile.id == GrowthRecord.infant_id)
             .where(
                 GrowthRecord.owner_user_id == owner_user_id,
                 GrowthRecord.infant_id.in_(infant_ids),
                 GrowthRecord.status == "active",
                 GrowthRecord.deleted_at.is_(None),
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
+                BabyProfile.owner_user_id == owner_user_id,
+                BabyProfile.deleted_at.is_(None),
             )
             .subquery()
         )

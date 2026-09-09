@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from datetime import date
 from typing import Literal
 from uuid import UUID
@@ -7,7 +8,6 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-SexAtBirth = Literal["female", "male", "intersex", "unknown", "undisclosed"]
 DeliveryMethod = Literal[
     "vaginal",
     "cesarean",
@@ -27,7 +27,6 @@ FeedingMode = Literal[
 class UserProfileRead(BaseModel):
     preferred_name: str | None = None
     age: int | None = None
-    estimated_due_date: date | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -35,7 +34,6 @@ class UserProfileRead(BaseModel):
 class UserProfileUpdate(BaseModel):
     preferred_name: str | None = Field(default=None, max_length=120)
     age: int | None = Field(default=None, ge=12, le=70)
-    estimated_due_date: date | None = None
 
     model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
 
@@ -56,48 +54,10 @@ class UserProfileUpdate(BaseModel):
         return self
 
 
-class InfantProfileRead(BaseModel):
-    id: UUID
-    name: str
-    sex_at_birth: SexAtBirth | None = None
-    birth_date: date | None = None
-    birth_weight_kg: float | None = None
-    gestational_age_at_birth_days: int | None = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 
-class InfantProfileCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
-    sex_at_birth: SexAtBirth | None = None
-    birth_date: date | None = None
-    birth_weight_kg: float | None = Field(default=None, ge=0.2, le=10)
-    gestational_age_at_birth_days: int | None = Field(
-        default=None,
-        ge=140,
-        le=315,
-    )
-
-    model_config = ConfigDict(extra="forbid")
-
-    @field_validator("name")
-    @classmethod
-    def normalize_name(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("name must not be blank")
-        return normalized
-
-    @field_validator("birth_date")
-    @classmethod
-    def reject_future_birth_date(cls, value: date | None) -> date | None:
-        if value is not None and value > date.today():
-            raise ValueError("birth_date must not be in the future")
-        return value
 
 
-class InfantProfileListResponse(BaseModel):
-    items: list[InfantProfileRead]
 
 
 class MaternalLactationInfantLink(BaseModel):

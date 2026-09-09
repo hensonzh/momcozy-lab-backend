@@ -66,6 +66,30 @@ services:
       postgres:
         condition: service_healthy
 
+  care-report-worker:
+    <<: *backend-image
+    command: python -m app.workers.care_reports
+    profiles: [reports]
+    restart: unless-stopped
+    init: true
+    cpus: 0.5
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  care-video-worker:
+    <<: *backend-image
+    command: python -m app.workers.care_video
+    profiles: [consultations]
+    restart: unless-stopped
+    init: true
+    cpus: 0.5
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:16
     restart: unless-stopped

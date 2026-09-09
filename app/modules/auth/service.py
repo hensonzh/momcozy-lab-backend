@@ -15,6 +15,10 @@ from .repository import AuthSessionRepository
 REFRESH_TOKEN_TTL = timedelta(days=30)
 
 
+class RefreshTokenRevoked(ApiError):
+    """Rejection whose persisted revocation must commit before the HTTP response."""
+
+
 @dataclass(frozen=True)
 class IssuedRefreshToken:
     raw_token: str
@@ -65,11 +69,11 @@ class AuthSessionService:
         if refresh_token.status != "active":
             await self.repository.revoke_refresh_token_family(family_id=refresh_token.family_id, revoked_at=now)
             await self.repository.revoke_device_session(session_id=refresh_token.session_id, revoked_at=now)
-            raise ApiError(code="refresh_token_reuse_detected", message="Refresh token reuse detected.", status=401)
+            raise RefreshTokenRevoked(code="refresh_token_reuse_detected", message="Refresh token reuse detected.", status=401)
 
         if refresh_token.expires_at <= now:
             await self.repository.revoke_refresh_token(refresh_token=refresh_token, revoked_at=now)
-            raise ApiError(code="authentication_required", message="Refresh token expired.", status=401)
+            raise RefreshTokenRevoked(code="authentication_required", message="Refresh token expired.", status=401)
 
         new_raw_token = self.token_factory()
         replacement = await self.repository.rotate_refresh_token(

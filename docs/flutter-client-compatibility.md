@@ -49,13 +49,13 @@ window, or API version.
 - Treat `request_id` from the error envelope as the Product support/debug ID.
 - Never send `X-Service-Key` or call `/v1/internal/agent/*` from Flutter.
 - Keep the Product and Runtime base URLs and generated clients separate.
-- Keep Schedule task state authoritative through Product plan/task APIs and
-  refetch after writes.
-- A pumping or feeding record created for a task must send the stable
-  `plan_task_id` and reuse its idempotency key on retry.
-- Update pregnancy-card todo completion only through
-  `/v1/plans/{plan_id}/todos/{item_id}/completion`, sending the last observed
-  plan `version` as `expected_version`; reload on `version_conflict`.
+- Keep Schedule state authoritative through `GET /v1/schedule` and refetch
+  after personal-entry or Care Plan task writes.
+- Personal schedule writes use `Idempotency-Key` on create and
+  `expected_updated_at` on update/delete. Care Plan task feedback uses the
+  publication id, stable task source key, and `expected_version`.
+- The legacy `/v1/plans` and pregnancy-card operations are deprecated and are
+  not valid Flutter client dependencies.
 - Treat `voice_provider_disabled` and `vision_provider_disabled` as stable
   unavailable states. Do not fall back to retired endpoints.
 - Treat Product `file_id` as attachment identity. Signed object URLs are

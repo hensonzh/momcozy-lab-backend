@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ...core.errors import ApiError
 from ..audit import request_hash
+from ..baby.repository import BabyRecordRepository
 from .agent_contracts import (
     AgentLactationRecordApplyPayload,
     AgentMilkAnalysisSnapshot,
@@ -52,10 +53,10 @@ class AgentLactationReadService:
         self,
         *,
         records_service: Any,
-        profile_service: Any,
+        baby_repository: BabyRecordRepository,
     ) -> None:
         self.records_service = records_service
-        self.profile_service = profile_service
+        self.baby_repository = baby_repository
 
     async def read_milk_analysis_snapshot(
         self,
@@ -113,7 +114,7 @@ class AgentLactationReadService:
             days=days,
             include_today=True,
         )
-        infants = await self.profile_service.list_infants(
+        infant_count = await self.baby_repository.profile_count(
             owner_user_id=owner_user_id
         )
         trend_items = [
@@ -122,7 +123,7 @@ class AgentLactationReadService:
         ]
         status, counts, volumes, latest, flags = _milk_status(
             days=days,
-            infant_count=len(infants),
+            infant_count=infant_count,
             feedings=feedings,
             pumpings=pumpings,
             trend_items=trend_items,

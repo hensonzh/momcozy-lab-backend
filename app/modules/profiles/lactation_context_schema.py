@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+
 from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from ..baby.profile_schemas import BabySex, BabyFeedingMode
 
 
 DeliveryMethod = Literal["vaginal", "cesarean", "assisted_vaginal", "other", "unknown"]
@@ -15,7 +18,6 @@ FeedingMode = Literal[
     "formula_feeding",
     "unknown",
 ]
-SexAtBirth = Literal["female", "male", "intersex", "unknown", "undisclosed"]
 InfantScope = Literal["current_delivery", "all"]
 LactationMissingFieldCode = Literal[
     "mother_age_missing",
@@ -25,13 +27,11 @@ LactationMissingFieldCode = Literal[
     "mother_cesarean_history_missing",
     "mother_postpartum_days_unavailable",
     "mother_current_feeding_mode_missing",
-    "current_infant_profiles_missing",
-    "infant_sex_at_birth_missing",
+    "current_baby_profiles_missing",
+    "infant_sex_missing",
     "infant_age_days_unavailable",
     "infant_age_months_unavailable",
-    "infant_birth_weight_missing",
-    "infant_gestational_age_missing",
-    "infant_latest_measurement_missing",
+            "infant_latest_measurement_missing",
 ]
 LactationDataQualityIssueCode = Literal[
     "current_infants_not_selected",
@@ -56,13 +56,6 @@ class LactationMotherContextOutput(_StrictOutputModel):
         ge=12,
         le=70,
         description="妈妈登记的当前周岁，单位为岁；未知或未登记时为 null，不由分娩日期推算。",
-    )
-    estimated_due_date: date | None = Field(
-        description=(
-            "妈妈登记的预产期，格式为 YYYY-MM-DD；仅在尚无当前实际分娩日期和宝宝实际出生日期时返回。"
-            "一旦任一实际日期已存在，本字段固定投影为 null，避免产后奶量分析误用旧预产期；"
-            "这不会删除数据库中保留的原始值。"
-        ),
     )
     delivery_count: int | None = Field(
         ge=1,
@@ -96,27 +89,6 @@ class LactationMotherContextOutput(_StrictOutputModel):
     )
 
 
-class GestationalAgeAtBirthOutput(_StrictOutputModel):
-    """同一出生孕周的天数表示和便于模型理解的拆分表示。"""
-
-    total_days: int = Field(
-        ge=140,
-        le=315,
-        description="出生孕周的持久化标准值，单位为孕天，总范围为 140 至 315 天。",
-    )
-    weeks: int = Field(
-        ge=20,
-        le=45,
-        description="由 total_days 整除 7 派生的完整孕周数，单位为周。",
-    )
-    days: int = Field(
-        ge=0,
-        le=6,
-        description="由 total_days 对 7 取余派生的额外孕天，单位为天，范围为 0 至 6。",
-    )
-    is_preterm: bool = Field(
-        description="是否早产；由 total_days 是否小于 259 天（37 周）派生。",
-    )
 
 
 class LatestInfantMeasurementOutput(_StrictOutputModel):
@@ -161,10 +133,10 @@ class LactationInfantContextOutput(_StrictOutputModel):
             "不属于当前这次分娩时为 null。"
         ),
     )
-    sex_at_birth: SexAtBirth | None = Field(
+    feeding_mode: BabyFeedingMode
+    sex: BabySex = Field(
         description=(
-            "宝宝出生时登记的生理性别，不表示性别认同；female=女，male=男，intersex=间性，"
-            "unknown=已明确记录为未知，undisclosed=不披露；未登记时为 null。"
+            "宝宝出生时登记的性别；female=女，male=男，unspecified=未指定，仅用于选择生长参考。"
         ),
     )
     birth_date: date | None = Field(
@@ -184,14 +156,6 @@ class LactationInfantContextOutput(_StrictOutputModel):
             "优先由妈妈当前实际分娩日期派生，缺少可用日期或日期在未来时为 null。"
         ),
     )
-    birth_weight_kg: float | None = Field(
-        ge=0.2,
-        le=10,
-        description="宝宝出生体重，单位为 kg；未登记时为 null。",
-    )
-    gestational_age_at_birth: GestationalAgeAtBirthOutput | None = Field(
-        description="宝宝出生孕周的派生展示；底层总孕天未登记时为 null。",
-    )
     latest_measurement: LatestInfantMeasurementOutput | None = Field(
         description="宝宝最近一条有效身高、体重或头围测量；没有有效生长记录时为 null。",
     )
@@ -202,7 +166,7 @@ class LactationMissingFieldOutput(_StrictOutputModel):
 
     code: LactationMissingFieldCode = Field(
         description=(
-            "稳定、可机读的缺失字段代码；mother_* 表示妈妈字段，current_infant_profiles_missing 表示"
+            "稳定、可机读的缺失字段代码；mother_* 表示妈妈字段，current_baby_profiles_missing 表示"
             "没有可读取的当前宝宝档案，infant_* 表示 birth_order 指定宝宝的字段。"
         ),
     )
@@ -230,7 +194,7 @@ class LactationDataQualityIssueOutput(_StrictOutputModel):
     )
 
 
-class MaternalInfantProfileReadOutput(_StrictOutputModel):
+class MaternalBabyProfileReadOutput(_StrictOutputModel):
     """profile_read 返回给模型的紧凑妈妈与宝宝基础资料。"""
 
     as_of_date: date = Field(

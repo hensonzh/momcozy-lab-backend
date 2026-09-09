@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..baby.profile_models import BabyProfile
+
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, cast
@@ -10,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..users.models import User
 from .models import (
-    InfantProfile,
     LactationProfile,
     MaternalCurrentDeliveryInfant,
     MaternalProfile,
@@ -22,7 +23,6 @@ from .models import (
 class LactationMotherContext:
     preferred_name: str | None
     age: int | None
-    estimated_due_date: date | None
     delivery_count: int | None
     latest_delivery_method: str | None
     latest_delivery_date: date | None
@@ -34,10 +34,9 @@ class LactationMotherContext:
 class LactationInfantContext:
     infant_id: UUID
     name: str
-    sex_at_birth: str | None
-    birth_date: date | None
-    birth_weight_kg: float | None
-    gestational_age_at_birth_days: int | None
+    sex: str
+    feeding_mode: str = "unknown"
+    birth_date: date | None = None
 
 
 class ProfileRepository:
@@ -65,45 +64,6 @@ class ProfileRepository:
             setattr(profile, field, value)
         await self.session.flush()
         return profile
-
-    async def clear_estimated_due_date_if_postpartum(
-        self,
-        *,
-        owner_user_id: UUID,
-    ) -> bool:
-        delivery_date = await self.session.scalar(
-            select(MaternalProfile.latest_delivery_date).where(
-                MaternalProfile.owner_user_id == owner_user_id,
-                MaternalProfile.latest_delivery_date.is_not(None),
-            )
-        )
-        current_infant_with_birth_date = await self.session.scalar(
-            select(InfantProfile.id)
-            .join(
-                MaternalCurrentDeliveryInfant,
-                MaternalCurrentDeliveryInfant.infant_id == InfantProfile.id,
-            )
-            .join(
-                MaternalProfile,
-                MaternalProfile.id
-                == MaternalCurrentDeliveryInfant.maternal_profile_id,
-            )
-            .where(
-                MaternalProfile.owner_user_id == owner_user_id,
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
-                InfantProfile.birth_date.is_not(None),
-            )
-            .limit(1)
-        )
-        if delivery_date is None and current_infant_with_birth_date is None:
-            return False
-        profile = await self.get_user_profile(user_id=owner_user_id)
-        if profile is None or profile.estimated_due_date is None:
-            return False
-        profile.estimated_due_date = None
-        await self.session.flush()
-        return True
 
     async def get_maternal_profile(
         self,
@@ -161,21 +121,21 @@ class ProfileRepository:
         self,
         *,
         owner_user_id: UUID,
-    ) -> list[tuple[MaternalCurrentDeliveryInfant, InfantProfile]]:
+    ) -> list[tuple[MaternalCurrentDeliveryInfant, BabyProfile]]:
         statement = (
-            select(MaternalCurrentDeliveryInfant, InfantProfile)
+            select(MaternalCurrentDeliveryInfant, BabyProfile)
             .join(
                 MaternalProfile,
                 MaternalProfile.id == MaternalCurrentDeliveryInfant.maternal_profile_id,
             )
             .join(
-                InfantProfile,
-                InfantProfile.id == MaternalCurrentDeliveryInfant.infant_id,
+                BabyProfile,
+                BabyProfile.id == MaternalCurrentDeliveryInfant.infant_id,
             )
             .where(
                 MaternalProfile.owner_user_id == owner_user_id,
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
+                BabyProfile.owner_user_id == owner_user_id,
+                BabyProfile.deleted_at.is_(None),
             )
             .order_by(
                 MaternalCurrentDeliveryInfant.birth_order.asc(),
@@ -186,7 +146,7 @@ class ProfileRepository:
         return [
             (
                 cast(MaternalCurrentDeliveryInfant, row[0]),
-                cast(InfantProfile, row[1]),
+                cast(BabyProfile, row[1]),
             )
             for row in result.all()
         ]
@@ -240,7 +200,6 @@ class ProfileRepository:
             select(
                 UserProfile.preferred_name.label("preferred_name"),
                 UserProfile.age.label("age"),
-                UserProfile.estimated_due_date.label("estimated_due_date"),
                 MaternalProfile.delivery_count.label("delivery_count"),
                 MaternalProfile.latest_delivery_method.label("latest_delivery_method"),
                 MaternalProfile.latest_delivery_date.label("latest_delivery_date"),
@@ -258,7 +217,6 @@ class ProfileRepository:
             return LactationMotherContext(
                 preferred_name=None,
                 age=None,
-                estimated_due_date=None,
                 delivery_count=None,
                 latest_delivery_method=None,
                 latest_delivery_date=None,
@@ -268,7 +226,6 @@ class ProfileRepository:
         return LactationMotherContext(
             preferred_name=row.preferred_name,
             age=row.age,
-            estimated_due_date=row.estimated_due_date,
             delivery_count=row.delivery_count,
             latest_delivery_method=row.latest_delivery_method,
             latest_delivery_date=row.latest_delivery_date,
@@ -284,25 +241,24 @@ class ProfileRepository:
         statement = (
             select(
                 MaternalCurrentDeliveryInfant.birth_order.label("birth_order"),
-                InfantProfile.id.label("infant_id"),
-                InfantProfile.name.label("name"),
-                InfantProfile.sex_at_birth.label("sex_at_birth"),
-                InfantProfile.birth_date.label("birth_date"),
-                InfantProfile.birth_weight_kg.label("birth_weight_kg"),
-                InfantProfile.gestational_age_at_birth_days.label("gestational_age_at_birth_days"),
+                BabyProfile.id.label("infant_id"),
+                BabyProfile.name.label("name"),
+                BabyProfile.sex.label("sex"),
+                BabyProfile.feeding_mode.label("feeding_mode"),
+                BabyProfile.birth_date.label("birth_date"),
             )
             .join(
                 MaternalProfile,
                 MaternalProfile.id == MaternalCurrentDeliveryInfant.maternal_profile_id,
             )
             .join(
-                InfantProfile,
-                InfantProfile.id == MaternalCurrentDeliveryInfant.infant_id,
+                BabyProfile,
+                BabyProfile.id == MaternalCurrentDeliveryInfant.infant_id,
             )
             .where(
                 MaternalProfile.owner_user_id == owner_user_id,
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
+                BabyProfile.owner_user_id == owner_user_id,
+                BabyProfile.deleted_at.is_(None),
             )
             .order_by(MaternalCurrentDeliveryInfant.birth_order.asc())
         )
@@ -313,10 +269,9 @@ class ProfileRepository:
                 LactationInfantContext(
                     infant_id=row.infant_id,
                     name=row.name,
-                    sex_at_birth=row.sex_at_birth,
+                    sex=row.sex,
+                    feeding_mode=row.feeding_mode,
                     birth_date=row.birth_date,
-                    birth_weight_kg=row.birth_weight_kg,
-                    gestational_age_at_birth_days=(row.gestational_age_at_birth_days),
                 ),
             )
             for row in rows
@@ -330,18 +285,17 @@ class ProfileRepository:
     ) -> list[LactationInfantContext]:
         statement = (
             select(
-                InfantProfile.id.label("infant_id"),
-                InfantProfile.name.label("name"),
-                InfantProfile.sex_at_birth.label("sex_at_birth"),
-                InfantProfile.birth_date.label("birth_date"),
-                InfantProfile.birth_weight_kg.label("birth_weight_kg"),
-                InfantProfile.gestational_age_at_birth_days.label("gestational_age_at_birth_days"),
+                BabyProfile.id.label("infant_id"),
+                BabyProfile.name.label("name"),
+                BabyProfile.sex.label("sex"),
+                BabyProfile.feeding_mode.label("feeding_mode"),
+                BabyProfile.birth_date.label("birth_date"),
             )
             .where(
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
+                BabyProfile.owner_user_id == owner_user_id,
+                BabyProfile.deleted_at.is_(None),
             )
-            .order_by(InfantProfile.created_at.asc(), InfantProfile.id.asc())
+            .order_by(BabyProfile.created_at.asc(), BabyProfile.id.asc())
             .limit(limit)
         )
         rows = (await self.session.execute(statement)).all()
@@ -349,10 +303,9 @@ class ProfileRepository:
             LactationInfantContext(
                 infant_id=row.infant_id,
                 name=row.name,
-                sex_at_birth=row.sex_at_birth,
+                sex=row.sex,
+                    feeding_mode=row.feeding_mode,
                 birth_date=row.birth_date,
-                birth_weight_kg=row.birth_weight_kg,
-                gestational_age_at_birth_days=row.gestational_age_at_birth_days,
             )
             for row in rows
         ]
@@ -364,76 +317,43 @@ class ProfileRepository:
     ) -> list[LactationInfantContext]:
         statement = (
             select(
-                InfantProfile.id.label("infant_id"),
-                InfantProfile.name.label("name"),
-                InfantProfile.sex_at_birth.label("sex_at_birth"),
-                InfantProfile.birth_date.label("birth_date"),
-                InfantProfile.birth_weight_kg.label("birth_weight_kg"),
-                InfantProfile.gestational_age_at_birth_days.label("gestational_age_at_birth_days"),
+                BabyProfile.id.label("infant_id"),
+                BabyProfile.name.label("name"),
+                BabyProfile.sex.label("sex"),
+                BabyProfile.feeding_mode.label("feeding_mode"),
+                BabyProfile.birth_date.label("birth_date"),
             )
             .where(
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
+                BabyProfile.owner_user_id == owner_user_id,
+                BabyProfile.deleted_at.is_(None),
             )
-            .order_by(InfantProfile.created_at.asc(), InfantProfile.id.asc())
+            .order_by(BabyProfile.created_at.asc(), BabyProfile.id.asc())
         )
         rows = (await self.session.execute(statement)).all()
         return [
             LactationInfantContext(
                 infant_id=row.infant_id,
                 name=row.name,
-                sex_at_birth=row.sex_at_birth,
+                sex=row.sex,
+                    feeding_mode=row.feeding_mode,
                 birth_date=row.birth_date,
-                birth_weight_kg=row.birth_weight_kg,
-                gestational_age_at_birth_days=row.gestational_age_at_birth_days,
             )
             for row in rows
         ]
 
-    async def list_infants(self, *, owner_user_id: UUID) -> list[InfantProfile]:
-        statement = (
-            select(InfantProfile)
-            .where(
-                InfantProfile.owner_user_id == owner_user_id,
-                InfantProfile.deleted_at.is_(None),
-            )
-            .order_by(InfantProfile.created_at.asc(), InfantProfile.id.asc())
-        )
-        result = await self.session.scalars(statement)
-        return list(result.all())
 
-    async def get_infant_for_owner(self, *, infant_id: UUID, owner_user_id: UUID) -> InfantProfile | None:
-        statement = select(InfantProfile).where(
-            InfantProfile.id == infant_id,
-            InfantProfile.owner_user_id == owner_user_id,
-            InfantProfile.deleted_at.is_(None),
+    async def get_infant_for_owner(self, *, infant_id: UUID, owner_user_id: UUID) -> BabyProfile | None:
+        statement = select(BabyProfile).where(
+            BabyProfile.id == infant_id,
+            BabyProfile.owner_user_id == owner_user_id,
+            BabyProfile.deleted_at.is_(None),
         )
-        return cast(InfantProfile | None, await self.session.scalar(statement))
+        return cast(BabyProfile | None, await self.session.scalar(statement))
 
-    async def create_infant(
-        self,
-        *,
-        owner_user_id: UUID,
-        name: str,
-        sex_at_birth: str | None,
-        birth_date: date | None,
-        birth_weight_kg: float | None,
-        gestational_age_at_birth_days: int | None,
-    ) -> InfantProfile:
-        infant = InfantProfile(
-            owner_user_id=owner_user_id,
-            name=name,
-            sex_at_birth=sex_at_birth,
-            birth_date=birth_date,
-            birth_weight_kg=birth_weight_kg,
-            gestational_age_at_birth_days=gestational_age_at_birth_days,
-        )
-        self.session.add(infant)
-        await self.session.flush()
-        return infant
 
-    async def update_infant(self, *, infant: InfantProfile, values: dict[str, Any]) -> InfantProfile:
+    async def update_infant(self, *, infant: BabyProfile, values: dict[str, Any]) -> BabyProfile:
         for field, value in values.items():
             setattr(infant, field, value)
+        infant.version += 1
         await self.session.flush()
         return infant

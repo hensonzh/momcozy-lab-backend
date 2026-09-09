@@ -57,7 +57,7 @@ def test_records_repository_batches_latest_growth_for_multiple_infants() -> None
     assert result == {}
     assert "row_number() OVER" in sql
     assert "PARTITION BY growth_records.infant_id" in sql
-    assert "infant_profiles.owner_user_id" in sql
+    assert "baby_profiles.owner_user_id" in sql
     assert "growth_records.name" not in sql
 
 

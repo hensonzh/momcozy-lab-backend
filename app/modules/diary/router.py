@@ -25,7 +25,13 @@ from .service import DiaryService
 router = SurfaceAPIRouter(
     prefix="/pregnancy-diary",
     tags=["pregnancy-diary"],
-    api_surface_metadata=api_surface("public_app_api", owner="pregnancy-diary", clients=["flutter"]),
+    api_surface_metadata=api_surface(
+        "deprecated_api",
+        owner="pregnancy-diary",
+        clients=["legacy-flutter"],
+        stability="deprecated",
+        notes="Use /v1/mother/diary for the current postpartum diary contract.",
+    ),
 )
 
 def get_diary_service(session: AsyncSession = Depends(get_session)) -> DiaryService:

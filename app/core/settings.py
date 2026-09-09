@@ -55,9 +55,13 @@ class Settings:
     auth_jwt_product_audience: str = ""
     auth_jwt_runtime_audience: str = ""
     auth_require_active_session: bool = False
+    ibclc_mfa_encryption_key: str = field(default="", repr=False)
+    ibclc_session_hours: int = 12
     auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)
     service_api_key: str = ""
     agent_runtime_service_api_key: str = ""
+    care_report_runtime_url: str = ''
+    care_report_service_key: str = field(default='', repr=False)
     readiness_check_infrastructure: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
     trusted_hosts: tuple[str, ...] = ()
@@ -93,6 +97,11 @@ class Settings:
     vision_provider: str = "disabled"
     vision_openai_model: str = "gpt-5.4-mini"
     vision_request_timeout_seconds: float = 20.0
+    consultation_video_provider: str = "disabled"
+    consultation_livekit_url: str = ""
+    consultation_livekit_api_key: str = field(default="", repr=False)
+    consultation_livekit_api_secret: str = field(default="", repr=False)
+    consultation_demo_early_join: bool = False
     log_level: str = "INFO"
 
     @classmethod
@@ -185,6 +194,15 @@ class Settings:
                 "VISION_REQUEST_TIMEOUT_SECONDS",
                 cls.vision_request_timeout_seconds,
             ),
+            consultation_video_provider=_env("CONSULTATION_VIDEO_PROVIDER", cls.consultation_video_provider).lower(),
+            consultation_livekit_url=_env("CONSULTATION_LIVEKIT_URL", cls.consultation_livekit_url),
+            consultation_livekit_api_key=_env("CONSULTATION_LIVEKIT_API_KEY", cls.consultation_livekit_api_key),
+            consultation_livekit_api_secret=_env("CONSULTATION_LIVEKIT_API_SECRET", cls.consultation_livekit_api_secret),
+            consultation_demo_early_join=_env_bool("CONSULTATION_DEMO_EARLY_JOIN", cls.consultation_demo_early_join),
+            ibclc_mfa_encryption_key=_env("IBCLC_MFA_ENCRYPTION_KEY", cls.ibclc_mfa_encryption_key),
+            ibclc_session_hours=_env_int("IBCLC_SESSION_HOURS", cls.ibclc_session_hours),
+            care_report_runtime_url=_env('CARE_REPORT_RUNTIME_URL', cls.care_report_runtime_url).rstrip('/'),
+            care_report_service_key=_env('CARE_REPORT_SERVICE_KEY', cls.care_report_service_key),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -194,7 +212,43 @@ class Settings:
 
     def validate_for_startup(self) -> None:
         errors: list[str] = []
+        if self.care_report_runtime_url:
+            runtime = urlparse(self.care_report_runtime_url)
+            try:
+                valid_port = runtime.port is None or 1 <= runtime.port <= 65535
+            except ValueError:
+                valid_port = False
+            if (not valid_port or not runtime.hostname or runtime.scheme not in {'http', 'https'} or
+                runtime.username is not None or runtime.password is not None or runtime.path not in {'', '/'} or runtime.query or runtime.fragment):
+                errors.append('CARE_REPORT_RUNTIME_URL must be an HTTP(S) origin without credentials')
+            if self.is_production and runtime.scheme != 'https':
+                errors.append('CARE_REPORT_RUNTIME_URL must use HTTPS in production')
+        if self.care_report_service_key:
+            if len(self.care_report_service_key.encode('utf-8')) < 32:
+                errors.append('CARE_REPORT_SERVICE_KEY must be at least 32 bytes')
+            if self.care_report_service_key in {self.service_api_key, self.agent_runtime_service_api_key}:
+                errors.append('CARE_REPORT_SERVICE_KEY must be distinct from other service credentials')
+        if not 1 <= self.ibclc_session_hours <= 24:
+            errors.append("IBCLC_SESSION_HOURS must be between 1 and 24")
+        if self.ibclc_mfa_encryption_key:
+            from cryptography.fernet import Fernet
+            try:
+                Fernet(self.ibclc_mfa_encryption_key.encode("ascii"))
+            except (ValueError, UnicodeError):
+                errors.append("IBCLC_MFA_ENCRYPTION_KEY must be a valid Fernet key")
         provider = self.object_storage_provider.lower()
+        if self.consultation_video_provider not in {"disabled", "sandbox", "livekit"}:
+            errors.append("CONSULTATION_VIDEO_PROVIDER must be disabled, sandbox or livekit")
+        if self.is_production and (self.consultation_video_provider == "sandbox" or self.consultation_demo_early_join):
+            errors.append("Production consultations cannot use sandbox video or bypass the join window")
+        if self.consultation_video_provider == "livekit":
+            if not self.consultation_livekit_api_key or not self.consultation_livekit_api_secret:
+                errors.append("LiveKit credentials are required")
+            video_url = urlparse(self.consultation_livekit_url)
+            if video_url.scheme not in {"ws", "wss"} or not video_url.netloc or video_url.username or video_url.password or video_url.query or video_url.fragment:
+                errors.append("CONSULTATION_LIVEKIT_URL must be a WebSocket origin")
+            if self.is_production and video_url.scheme != "wss":
+                errors.append("Production LiveKit connections require WSS")
 
         if not self.database_url:
             errors.append("DATABASE_URL is required")

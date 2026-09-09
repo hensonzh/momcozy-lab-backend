@@ -204,7 +204,8 @@ def _check_retired_runtime_absent(root: Path) -> list[CheckResult]:
     retired = [
         "app/agent_runtime",
         "app/agents",
-        "app/workers",
+        "app/workers/agent.py",
+        "app/workers/registry.py",
         "evals",
         "fixtures/agent_eval_cases",
         "assets/agent-references",

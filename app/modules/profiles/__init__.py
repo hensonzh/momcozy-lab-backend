@@ -1,5 +1,4 @@
 from .models import (
-    InfantProfile,
     LactationProfile,
     MaternalCurrentDeliveryInfant,
     MaternalProfile,
@@ -8,7 +7,6 @@ from .models import (
 from .service import ProfileService
 
 __all__ = [
-    "InfantProfile",
     "LactationProfile",
     "MaternalCurrentDeliveryInfant",
     "MaternalProfile",

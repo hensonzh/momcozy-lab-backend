@@ -21,7 +21,7 @@ class FeedingRecord(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     plan_task_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("plan_tasks.id"), nullable=True)
-    infant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("infant_profiles.id"), nullable=True)
+    infant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("baby_profiles.id"), nullable=True)
     feed_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     feed_type: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
     feed_action: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
@@ -77,7 +77,7 @@ class GrowthRecord(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    infant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("infant_profiles.id"), nullable=True)
+    infant_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("baby_profiles.id"), nullable=True)
     measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     height_cm: Mapped[float | None] = mapped_column(Float, default=None)
     weight_kg: Mapped[float | None] = mapped_column(Float, default=None)

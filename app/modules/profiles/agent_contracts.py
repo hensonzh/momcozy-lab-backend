@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+
 from datetime import date
 from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .schemas import DeliveryMethod, FeedingMode, SexAtBirth
+from .schemas import DeliveryMethod, FeedingMode
+from ..baby.profile_schemas import BabySex, BabyFeedingMode
 
 
 MotherProfileField = Literal[
@@ -15,16 +17,14 @@ MotherProfileField = Literal[
     "current_delivery_method",
     "current_feeding_mode",
     "delivery_count",
-    "estimated_due_date",
     "has_cesarean_history",
     "preferred_name",
 ]
-InfantProfileField = Literal[
+BabyProfileField = Literal[
     "birth_date",
-    "birth_weight_kg",
-    "gestational_age_at_birth_days",
     "name",
-    "sex_at_birth",
+    "sex",
+    "feeding_mode",
 ]
 AgentProfileActionType = Literal[
     "profile.update",
@@ -37,7 +37,6 @@ class AgentMotherProfileUpdate(BaseModel):
 
     preferred_name: str | None = Field(default=None, min_length=1, max_length=120)
     age: int | None = Field(default=None, ge=12, le=70)
-    estimated_due_date: date | None = None
     delivery_count: int | None = Field(default=None, ge=1, le=20)
     current_delivery_method: DeliveryMethod | None = None
     actual_delivery_date: date | None = None
@@ -51,18 +50,17 @@ class AgentMotherProfileUpdate(BaseModel):
         return self
 
 
-class AgentInfantProfileUpdate(BaseModel):
+class AgentBabyProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     infant_id: UUID
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    sex_at_birth: SexAtBirth | None = None
+    sex: BabySex | None = None
+    feeding_mode: BabyFeedingMode | None = None
     birth_date: date | None = None
-    birth_weight_kg: float | None = Field(default=None, ge=0.2, le=10)
-    gestational_age_at_birth_days: int | None = Field(default=None, ge=140, le=315)
 
     @model_validator(mode="after")
-    def require_update(self) -> AgentInfantProfileUpdate:
+    def require_update(self) -> AgentBabyProfileUpdate:
         if self.model_fields_set == {"infant_id"}:
             raise ValueError("at least one infant field is required")
         return self
@@ -79,7 +77,7 @@ class AgentProfileUpdatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mother: AgentMotherProfileUpdate | None = None
-    infants: list[AgentInfantProfileUpdate] | None = Field(default=None, min_length=1, max_length=10)
+    infants: list[AgentBabyProfileUpdate] | None = Field(default=None, min_length=1, max_length=10)
     current_infants: list[AgentCurrentInfantLink] | None = Field(default=None, max_length=10)
     expected_current_infants: list[AgentCurrentInfantLink] | None = Field(
         default=None,
@@ -147,7 +145,7 @@ class AgentProfileInfantUpdateSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     infant_id: UUID
-    fields: list[InfantProfileField]
+    fields: list[BabyProfileField]
 
 
 class AgentProfileUpdateDetails(BaseModel):

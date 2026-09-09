@@ -162,28 +162,26 @@ File upload uses multipart form data at `POST /v1/files/upload`. File metadata
 is owner-scoped and object bytes are stored through the configured object
 storage provider.
 
-## Schedule And Plan Progress
+## Schedule Projection And Care Plan Progress
 
 Schedule resources are owner-scoped and never accept a mobile-provided
-`user_id` as authority:
+`user_id` as authority. The mobile app reads one projection that combines
+personal entries, appointments, episodes, and the latest published Care Plan:
 
-- `GET /v1/plans?plan_type=milk_management&status=active` loads plan context.
-- `GET /v1/plans/tasks/list?task_date=YYYY-MM-DD` loads the selected day.
-- `POST /v1/plans/tasks`, `PATCH/DELETE /v1/plans/tasks/{task_id}` implement
-  task creation and editing.
-- `PATCH /v1/plans/tasks/{task_id}/state` accepts the typed states `pending`,
-  `completed`, and `skipped`.
-- Pumping and feeding creates accept optional `plan_task_id`. When present,
-  record creation and task completion happen in the same database transaction;
-  the record create remains retry-safe through `Idempotency-Key`.
+- `GET /v1/schedule?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&timezone=...`
+  returns the bounded calendar window and a `has_more` cursor hint.
+- `POST /v1/schedule/personal` creates an idempotent personal entry.
+- `PATCH /v1/schedule/personal/{task_id}` uses `expected_updated_at` for
+  optimistic concurrency; `DELETE` uses the same timestamp in the query.
+- `PUT /v1/care/plan-publications/{publication_id}/tasks/{source_key}` accepts
+  the typed task state and `expected_version`, then returns the complete
+  authoritative publication. A stale write returns `version_conflict` and the
+  client reloads the schedule.
 
-Pregnancy-card todos are not `PlanTask` rows. New pregnancy plan payloads
-persist a stable `item_id` on every structured todo. Clients update one item via
-`PATCH /v1/plans/{plan_id}/todos/{item_id}/completion` with
-`{completed, expected_version}` and an `Idempotency-Key`. The response is the
-complete authoritative `PlanRead` with an incremented `version`. A stale write
-returns `version_conflict`; an old item without `item_id` remains read-only and
-returns `todo_item_not_found`. Clients must never match todo items by title.
+The old `/v1/plans` and pregnancy-card surfaces remain only as deprecated
+server compatibility modules for existing data migrations. New Flutter and
+Agent consumers must use `/v1/schedule` and `/v1/care` and must not create or
+update legacy plan or pregnancy records.
 
 ## Product Assets
 

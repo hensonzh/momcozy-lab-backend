@@ -16,8 +16,7 @@ from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import ServiceClient
-from ..profiles.repository import ProfileRepository
-from ..profiles.service import ProfileService
+from ..baby.repository import BabyRecordRepository
 from .agent_contracts import (
     AgentLactationRecordApplyRequest,
     AgentLactationRecordApplyResponse,
@@ -48,9 +47,7 @@ def get_agent_lactation_read_service(
     records_service = RecordsService(repository=RecordsRepository(session))
     return AgentLactationReadService(
         records_service=records_service,
-        profile_service=ProfileService(
-            repository=ProfileRepository(session),
-        ),
+        baby_repository=BabyRecordRepository(session),
     )
 
 

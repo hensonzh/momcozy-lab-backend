@@ -18,9 +18,8 @@ def test_lactation_context_projection_does_not_select_unneeded_profile_fields() 
 
     assert "user_profiles.age" in mother_sql
     assert "user_profiles.preferred_name" in mother_sql
-    assert "user_profiles.estimated_due_date" in mother_sql
-    assert "infant_profiles.sex_at_birth" in infant_sql
-    assert "infant_profiles.name" in infant_sql
+    assert "baby_profiles.sex" in infant_sql
+    assert "baby_profiles.name" in infant_sql
 
 
 class CapturingSession:

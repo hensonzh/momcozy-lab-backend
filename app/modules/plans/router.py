@@ -31,7 +31,13 @@ from .service import PlansService
 router = SurfaceAPIRouter(
     prefix="/plans",
     tags=["plans"],
-    api_surface_metadata=api_surface("public_app_api", owner="plans", clients=["flutter"]),
+    api_surface_metadata=api_surface(
+        "deprecated_api",
+        owner="plans",
+        clients=["legacy-flutter"],
+        stability="deprecated",
+        notes="Use /v1/schedule and /v1/care plan publications for the current product.",
+    ),
 )
 
 

@@ -111,7 +111,15 @@ class AuthSessionRepository:
         return refresh_token
 
     async def get_refresh_token_by_hash(self, *, token_hash: str) -> RefreshToken | None:
-        statement = select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        session_id = await self.session.scalar(select(RefreshToken.session_id).where(RefreshToken.token_hash == token_hash))
+        if session_id is None:
+            return None
+        # All refreshes in a session, including different generations, share this
+        # lock with logout. Re-read token state after the preceding transaction.
+        await self.session.scalar(select(DeviceSession).where(DeviceSession.id == session_id)
+            .with_for_update().execution_options(populate_existing=True))
+        statement = (select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            .with_for_update().execution_options(populate_existing=True))
         return cast(RefreshToken | None, await self.session.scalar(statement))
 
     async def get_device_session(self, *, session_id: UUID) -> DeviceSession | None:
@@ -152,7 +160,8 @@ class AuthSessionRepository:
         await self.session.flush()
 
     async def revoke_device_session(self, *, session_id: UUID, revoked_at: datetime) -> DeviceSession | None:
-        device_session = await self.session.get(DeviceSession, session_id)
+        device_session = await self.session.scalar(select(DeviceSession).where(DeviceSession.id == session_id)
+            .with_for_update().execution_options(populate_existing=True))
         if device_session is None:
             return None
         device_session.status = "revoked"

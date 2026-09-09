@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ..baby.profile_models import BabyProfile
+
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal
@@ -9,11 +11,10 @@ from ...core.errors import ApiError
 from ..audit import AuditService
 from ..records.service import RecordsService
 from .models import (
-    InfantProfile,
     LactationProfile,
     MaternalProfile,
 )
-from .lactation_context_schema import MaternalInfantProfileReadOutput
+from .lactation_context_schema import MaternalBabyProfileReadOutput
 from .repository import (
     LactationInfantContext,
     ProfileRepository,
@@ -123,10 +124,6 @@ class LactationContextService:
             ]
 
         delivery_date = maternal.latest_delivery_date
-        has_actual_birth_date = any(
-            infant.birth_date is not None
-            for _, infant in current_infants
-        )
         postpartum_days = _elapsed_days(delivery_date, today=today)
         infant_contexts: list[dict[str, Any]] = []
         issues = list(infant_issues)
@@ -156,7 +153,8 @@ class LactationContextService:
                     "name": infant.name,
                     "is_current_delivery": is_current_delivery,
                     "birth_order": birth_order,
-                    "sex_at_birth": infant.sex_at_birth,
+                    "sex": infant.sex,
+                    "feeding_mode": infant.feeding_mode,
                     "birth_date": (
                         infant_birth_date.isoformat()
                         if infant_birth_date is not None
@@ -167,8 +165,6 @@ class LactationContextService:
                         infant_age_reference,
                         today=today,
                     ),
-                    "birth_weight_kg": infant.birth_weight_kg,
-                    "gestational_age_at_birth": _gestational_age(infant.gestational_age_at_birth_days),
                     "latest_measurement": _latest_measurement(latest_growth),
                 }
             )
@@ -195,15 +191,6 @@ class LactationContextService:
         mother = {
             "preferred_name": maternal.preferred_name,
             "age": maternal.age,
-            "estimated_due_date": (
-                maternal.estimated_due_date.isoformat()
-                if (
-                    delivery_date is None
-                    and not has_actual_birth_date
-                    and maternal.estimated_due_date is not None
-                )
-                else None
-            ),
             "delivery_count": maternal.delivery_count,
             "current_delivery_method": maternal.latest_delivery_method,
             "actual_delivery_date": (delivery_date.isoformat() if delivery_date is not None else None),
@@ -219,7 +206,7 @@ class LactationContextService:
                 }
             )
 
-        return MaternalInfantProfileReadOutput.model_validate(
+        return MaternalBabyProfileReadOutput.model_validate(
             {
                 "as_of_date": today,
                 "infant_scope": infant_scope,
@@ -281,7 +268,7 @@ class LactationContextService:
             )
         else:
             current_infants = existing_current_links
-        resolved_infants: list[InfantProfile] = []
+        resolved_infants: list[BabyProfile] = []
         for current_infant in current_infants:
             infant_id = current_infant.get("infant_id")
             if not isinstance(infant_id, UUID):
@@ -372,9 +359,6 @@ class LactationContextService:
                     profile=maternal_profile,
                     current_infants=current_infants,
                 )
-        await self.profile_repository.clear_estimated_due_date_if_postpartum(
-            owner_user_id=owner_user_id,
-        )
         if self.audit_service is not None:
             await self.audit_service.record(
                 actor_user_id=owner_user_id,
@@ -565,15 +549,6 @@ def _elapsed_calendar_months(value: date | None, *, today: date) -> int | None:
     return months
 
 
-def _gestational_age(total_days: int | None) -> dict[str, Any] | None:
-    if total_days is None:
-        return None
-    return {
-        "total_days": total_days,
-        "weeks": total_days // 7,
-        "days": total_days % 7,
-        "is_preterm": total_days < 37 * 7,
-    }
 
 
 def _latest_measurement(record: Any | None) -> dict[str, Any] | None:
@@ -602,11 +577,9 @@ def _missing_fields(
         "current_feeding_mode": "mother_current_feeding_mode_missing",
     }
     infant_codes = {
-        "sex_at_birth": "infant_sex_at_birth_missing",
+        "sex": "infant_sex_missing",
         "age_days": "infant_age_days_unavailable",
         "age_months": "infant_age_months_unavailable",
-        "birth_weight_kg": "infant_birth_weight_missing",
-        "gestational_age_at_birth": "infant_gestational_age_missing",
         "latest_measurement": "infant_latest_measurement_missing",
     }
     missing = [
@@ -620,14 +593,14 @@ def _missing_fields(
     if not infants:
         missing.append(
             {
-                "code": "current_infant_profiles_missing",
+                "code": "current_baby_profiles_missing",
                 "birth_order": None,
             }
         )
     for infant in infants:
         birth_order = infant["birth_order"]
         for field, code in infant_codes.items():
-            if infant[field] is None:
+            if infant[field] is None or (field == "sex" and infant[field] == "unspecified"):
                 missing.append(
                     {
                         "code": code,

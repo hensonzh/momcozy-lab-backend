@@ -21,7 +21,7 @@ def test_flutter_smoke_flows_cover_public_product_contracts() -> None:
     payload = json.loads(SMOKE_FLOWS.read_text())
     flow_names = {flow["name"] for flow in payload["flows"]}
 
-    assert flow_names == {"auth_session", "core_records_plans_files", "voice_contract"}
+    assert flow_names == {"auth_session", "core_records_schedule_files", "voice_contract"}
 
 
 def test_flutter_smoke_flows_do_not_put_tokens_in_urls() -> None:

@@ -9,3 +9,6 @@ PyJWT[crypto]==2.13.0
 boto3==1.43.44
 python-multipart==0.0.30
 websockets>=12,<17
+livekit-api==1.2.1
+pyotp==2.10.0
+cryptography==49.0.0

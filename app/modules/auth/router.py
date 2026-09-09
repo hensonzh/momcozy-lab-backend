@@ -3,18 +3,19 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import Depends, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
-from ...core.errors import ApiError
+from ...core.errors import ApiError, ErrorEnvelope
 from ...infrastructure.db.session import get_session
 from ..invites.repository import InviteCodeRepository
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair
 from .current_user import CurrentUser
 from .repository import AuthAccountRepository, AuthSessionRepository
 from .schemas import InviteLoginRequest, LoginRequest, LogoutResponse, RefreshRequest, SignupRequest, TokenResponse, TokenUser
-from .service import AuthSessionService
+from .service import AuthSessionService, RefreshTokenRevoked
 
 
 router = SurfaceAPIRouter(
@@ -77,9 +78,18 @@ async def invite_login(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(
     body: RefreshRequest,
+    request: Request,
     service: AuthAccountService = Depends(get_auth_account_service),
-) -> TokenResponse:
-    issued = await service.refresh(refresh_token=body.refresh_token)
+) -> TokenResponse | JSONResponse:
+    try:
+        issued = await service.refresh(refresh_token=body.refresh_token)
+    except RefreshTokenRevoked as error:
+        # Returning normally lets get_session commit the family/session
+        # revocations. Raising through that dependency would roll them back.
+        envelope = ErrorEnvelope(code=error.code, message=error.message, status=error.status,
+            request_id=getattr(request.state, "request_id", None))
+        return JSONResponse(envelope.to_response_body(), status_code=error.status,
+            headers={"Cache-Control": "private, no-store"})
     return _token_response(issued)
 
 

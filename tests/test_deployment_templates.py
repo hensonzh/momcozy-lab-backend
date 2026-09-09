@@ -50,7 +50,7 @@ def test_project_metadata_uses_backend_name() -> None:
     assert test_compose.startswith("name: momcozy-lab-backend-test\n")
     assert ci_compose.count("image: momcozy-lab-backend:ci") == 2
     assert ci_compose.count("APP_ENV: test") == 2
-    assert local_compose.count("image: momcozy-lab-backend:local") == 2
+    assert local_compose.count("image: momcozy-lab-backend:local") == 4
     assert "${MOMCOZY_BACKEND_IMAGE:?" in test_compose
     assert "build:" not in test_compose
     assert not (ROOT / "docker-compose.production.yml").exists()

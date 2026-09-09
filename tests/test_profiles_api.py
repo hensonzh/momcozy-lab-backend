@@ -1,3 +1,5 @@
+
+from app.modules.baby.profile_models import BabyProfile
 from datetime import date
 from uuid import UUID, uuid4
 
@@ -8,7 +10,7 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.auth import CurrentUser
 from app.modules.profiles.lactation_context import MaternalLactationProfileView
-from app.modules.profiles.models import InfantProfile, UserProfile
+from app.modules.profiles.models import UserProfile
 from app.modules.profiles.router import (
     get_lactation_context_service,
     get_profile_service,
@@ -35,7 +37,6 @@ def test_get_my_profile_uses_current_user_scope() -> None:
     assert response.json() == {
         "preferred_name": "Mia",
         "age": 32,
-        "estimated_due_date": "2026-09-20",
     }
     assert fake_service.get_profile_kwargs["user_id"] == user_id
 
@@ -53,7 +54,6 @@ def test_patch_my_profile_normalizes_and_passes_all_user_editable_fields() -> No
         json={
             "preferred_name": " Mia ",
             "age": 32,
-            "estimated_due_date": "2026-09-20",
         },
     )
 
@@ -62,7 +62,6 @@ def test_patch_my_profile_normalizes_and_passes_all_user_editable_fields() -> No
     assert fake_service.update_profile_kwargs["values"] == {
         "preferred_name": "Mia",
         "age": 32,
-        "estimated_due_date": date(2026, 9, 20),
     }
     assert fake_service.update_profile_kwargs["request_id"] == "req_profile"
 
@@ -103,78 +102,10 @@ def test_update_my_profile_rejects_retired_fields(field: str, value: str) -> Non
     assert fake_service.update_profile_kwargs == {}
 
 
-def test_create_my_infant_uses_current_user_and_idempotency_key() -> None:
-    user_id = uuid4()
-    fake_service = FakeProfileService(user_id=user_id)
-    app = create_app(Settings(app_env="test"))
-    _override_current_user(app, user_id)
-    app.dependency_overrides[get_profile_service] = lambda: fake_service
-
-    response = TestClient(app).post(
-        "/v1/profile/infants",
-        headers={"X-Request-ID": "req_infant", "Idempotency-Key": " idem-infant "},
-        json={
-            "name": " Baby ",
-            "sex_at_birth": "female",
-            "birth_date": "2026-06-01",
-            "birth_weight_kg": 3.2,
-            "gestational_age_at_birth_days": 258,
-        },
-    )
-
-    assert response.status_code == 201
-    assert fake_service.create_infant_kwargs["owner_user_id"] == user_id
-    assert fake_service.create_infant_kwargs["request_id"] == "req_infant"
-    assert fake_service.create_infant_kwargs["idempotency_key"] == "idem-infant"
-    assert fake_service.create_infant_kwargs["name"] == "Baby"
-    assert fake_service.create_infant_kwargs["sex_at_birth"] == "female"
-    assert fake_service.create_infant_kwargs["birth_weight_kg"] == 3.2
-    assert fake_service.create_infant_kwargs["gestational_age_at_birth_days"] == 258
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"infant_name": "Baby"},
-        {"name": "Baby", "sex": "female"},
-        {"name": "Baby", "sex_at_birth": "unsupported"},
-        {"name": "Baby", "birth_date": "2999-01-01"},
-    ],
-)
-def test_create_my_infant_rejects_legacy_or_invalid_fields(payload: dict[str, str]) -> None:
-    user_id = uuid4()
-    fake_service = FakeProfileService(user_id=user_id)
-    app = create_app(Settings(app_env="test"))
-    _override_current_user(app, user_id)
-    app.dependency_overrides[get_profile_service] = lambda: fake_service
-
-    response = TestClient(app).post("/v1/profile/infants", json=payload)
-
-    assert response.status_code == 422
-    assert fake_service.create_infant_kwargs == {}
 
 
-def test_list_my_infants_uses_current_user_scope() -> None:
-    user_id = uuid4()
-    fake_service = FakeProfileService(user_id=user_id)
-    app = create_app(Settings(app_env="test"))
-    _override_current_user(app, user_id)
-    app.dependency_overrides[get_profile_service] = lambda: fake_service
-
-    response = TestClient(app).get("/v1/profile/infants")
-
-    assert response.status_code == 200
-    assert response.json()["items"] == [
-        {
-            "id": str(fake_service.infant_id),
-            "name": "Baby",
-            "sex_at_birth": "female",
-            "birth_date": "2026-06-01",
-            "birth_weight_kg": None,
-            "gestational_age_at_birth_days": None,
-        }
-    ]
-    assert fake_service.list_infants_kwargs["owner_user_id"] == user_id
 
 
 def test_patch_maternal_lactation_profile_persists_only_current_summary() -> None:
@@ -254,57 +185,35 @@ class FakeProfileService:
         self.update_profile_kwargs = kwargs
         return self._profile(
             preferred_name=kwargs["values"].get("preferred_name", "Mia"),
-            estimated_due_date=kwargs["values"].get(
-                "estimated_due_date",
-                date(2026, 9, 20),
-            ),
         )
 
-    async def list_infants(self, **kwargs):
-        self.list_infants_kwargs = kwargs
-        return [self._infant()]
 
-    async def create_infant(self, **kwargs):
-        self.create_infant_kwargs = kwargs
-        return self._infant(
-            name=kwargs["name"],
-            sex_at_birth=kwargs["sex_at_birth"],
-            birth_date=kwargs["birth_date"],
-            birth_weight_kg=kwargs["birth_weight_kg"],
-            gestational_age_at_birth_days=kwargs["gestational_age_at_birth_days"],
-        )
 
     def _profile(
         self,
         *,
         preferred_name: str | None = "Mia",
-        estimated_due_date: date | None = date(2026, 9, 20),
     ) -> UserProfile:
         return UserProfile(
             id=uuid4(),
             user_id=self.user_id,
             preferred_name=preferred_name,
             age=32,
-            estimated_due_date=estimated_due_date,
         )
 
     def _infant(
         self,
         *,
         name: str = "Baby",
-        sex_at_birth: str | None = "female",
+        sex: str | None = "female",
         birth_date: date | None = date(2026, 6, 1),
-        birth_weight_kg: float | None = None,
-        gestational_age_at_birth_days: int | None = None,
-    ) -> InfantProfile:
-        return InfantProfile(
+    ) -> BabyProfile:
+        return BabyProfile(
             id=self.infant_id,
             owner_user_id=self.user_id,
             name=name,
-            sex_at_birth=sex_at_birth,
+            sex=sex,
             birth_date=birth_date,
-            birth_weight_kg=birth_weight_kg,
-            gestational_age_at_birth_days=gestational_age_at_birth_days,
         )
 
 

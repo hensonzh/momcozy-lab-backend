@@ -1,0 +1,3 @@
+-r requirements-dev.txt
+# Optional local LiveKit media integration test client; not used by the API process.
+livekit==1.1.18

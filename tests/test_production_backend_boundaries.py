@@ -59,7 +59,6 @@ def test_embedded_agent_runtime_is_absent_and_internal_product_adapters_remain()
     for retired_path in (
         APP_ROOT / "agent_runtime",
         APP_ROOT / "agents",
-        APP_ROOT / "workers",
         APP_ROOT / "modules" / "agent_runtime",
     ):
         assert not retired_path.exists() or not any(retired_path.rglob("*.py"))
@@ -87,9 +86,14 @@ def test_business_modules_do_not_own_agent_adapters_or_depend_on_agent_layers() 
     assert violations == []
 
 
-def test_product_backend_has_no_worker_package() -> None:
+def test_product_workers_dispatch_business_jobs_without_embedding_a_model_runtime() -> None:
     workers = APP_ROOT / "workers"
-    assert not workers.exists() or not any(workers.rglob("*.py"))
+    for path in workers.rglob('*.py'):
+        source = path.read_text()
+        assert all(token not in source for token in (
+            'from openai', 'import openai', 'from agents', 'from langgraph',
+            'app.agent_runtime', 'app.agents',
+        )), str(path.relative_to(APP_ROOT))
 
 
 def test_records_module_keeps_domain_rules_out_of_service_or_infrastructure() -> None:
