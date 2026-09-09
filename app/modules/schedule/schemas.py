@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, time
-from typing import Any
+from datetime import date
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator

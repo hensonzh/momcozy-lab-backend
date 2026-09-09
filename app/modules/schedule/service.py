@@ -82,7 +82,7 @@ class ScheduleService:
         appointments = await self.repository.appointments(owner, lower, upper, batch)
         episodes = await self.repository.episodes(owner, batch)
         plans = []
-        for publication, appointment_id, episode_id, _ in await self.repository.published_rows(owner, batch):
+        for _publication, appointment_id, episode_id, _ in await self.repository.published_rows(owner, batch):
             if self.documentation is None:
                 continue
             public = await self.documentation.patient_plan(owner, appointment_id)
