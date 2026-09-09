@@ -63,7 +63,6 @@ jobs:
           app migrations --exclude-dir=__pycache__
           test ! -d app/agent_runtime
           test ! -d app/agents
-          test ! -d app/workers
 
   container:
     runs-on: ubuntu-latest
