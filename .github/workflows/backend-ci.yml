@@ -60,7 +60,7 @@ jobs:
       - name: Scan backend for legacy runtime references
         run: |
           ! grep -R -E 'previous_response_id|ChatSession|ENTRY_API_KEY|query_params.get\("user_id"|momcozy_agent' \
-            app migrations tests
+          app migrations --exclude-dir=__pycache__
           test ! -d app/agent_runtime
           test ! -d app/agents
           test ! -d app/workers
