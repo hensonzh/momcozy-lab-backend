@@ -64,7 +64,7 @@ class ScheduleRepository:
                 previous.revision > CarePlanPublication.revision,
             ).exists(),
         ).order_by(CareAppointment.starts_at.desc(), CarePlanPublication.revision.desc()).limit(limit)
-        return list((await self.session.execute(statement)).all())
+        return cast(list[tuple[CarePlanPublication, UUID, UUID, dict[str, Any]]], (await self.session.execute(statement)).all())
 
     async def flush(self) -> None:
         await self.session.flush()

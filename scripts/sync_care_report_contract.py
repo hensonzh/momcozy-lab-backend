@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--check', action='store_true')
@@ -21,7 +21,7 @@ def main():
             continue
         value = document['components']['schemas'][name]
         schemas[name] = value
-        def refs(item):
+        def refs(item: object) -> None:
             if isinstance(item, dict):
                 if '$ref' in item:
                     pending.append(item['$ref'].rsplit('/', 1)[-1])

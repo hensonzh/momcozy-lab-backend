@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from ..appointments.schemas import AppointmentRead
 from ..care.schemas import CareEpisodeRead
@@ -19,7 +19,7 @@ class PersonalScheduleWrite(BaseModel):
 
     @field_validator("title", "note")
     @classmethod
-    def no_blank_strings(cls, value: str, info):
+    def no_blank_strings(cls, value: str, info: ValidationInfo) -> str:
         if info.field_name == "title" and not value:
             raise ValueError("title must not be blank")
         return value
