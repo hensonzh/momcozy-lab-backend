@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..users.models import AuthIdentity, User
-from .models import DeviceSession, RefreshToken
+from .models import AuthEmailDelivery, AccountDeletionRequest, DeviceSession, EmailChallenge, RefreshToken
+from .workbench_models import WorkbenchLoginChallenge
 
 
 class AuthAccountRepository:
@@ -33,10 +34,81 @@ class AuthAccountRepository:
         return cast(AuthIdentity | None, await self.session.scalar(statement))
 
     async def get_user(self, *, user_id: UUID) -> User | None:
-        return await self.session.get(User, user_id)
+        statement = select(User).options(selectinload(User.identities)).where(User.id == user_id)
+        return cast(User | None, await self.session.scalar(statement))
+
+    async def lock_email(self, email: str) -> None:
+        # PostgreSQL transaction locks also serialize absent rows during first signup.
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            await self.session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:email, 0))"), {"email": email})
+
+    async def lock_user(self, user_id: UUID) -> User | None:
+        return cast(User | None, await self.session.scalar(
+            select(User).options(selectinload(User.identities)).where(User.id == user_id)
+            .with_for_update().execution_options(populate_existing=True)))
+
+    async def get_user_by_email(self, *, email: str) -> User | None:
+        return cast(User | None, await self.session.scalar(select(User).where(User.email == email)))
+
+    async def get_google_identity(self, *, subject: str) -> AuthIdentity | None:
+        return await self.get_identity(provider="google", subject=subject)
+
+    async def create_google_user(self, *, subject: str, email: str, display_name: str = "", avatar_url: str = "") -> tuple[User, AuthIdentity]:
+        user = User(email=email, email_verified_at=datetime.now(timezone.utc))
+        identity = AuthIdentity(user=user, provider="google", subject=subject, email=email, display_name=display_name, avatar_url=avatar_url)
+        self.session.add(user)
+        self.session.add(identity)
+        await self.session.flush()
+        return user, identity
+
+    async def add_google_identity(self, *, user_id: UUID, subject: str, email: str) -> AuthIdentity:
+        identity = AuthIdentity(user_id=user_id, provider="google", subject=subject, email=email)
+        self.session.add(identity)
+        await self.session.flush()
+        return identity
+
+    async def save_email_challenge(self, *, user_id: UUID, purpose: str, token_hash: str, expires_at: datetime, sent_at: datetime) -> EmailChallenge:
+        existing = await self.session.scalar(
+            select(EmailChallenge).where(EmailChallenge.user_id == user_id, EmailChallenge.purpose == purpose).with_for_update()
+        )
+        if existing is None:
+            existing = EmailChallenge(user_id=user_id, purpose=purpose, token_hash=token_hash, expires_at=expires_at, sent_at=sent_at)
+            self.session.add(existing)
+        else:
+            existing.token_hash, existing.expires_at, existing.sent_at = token_hash, expires_at, sent_at
+            existing.attempts, existing.consumed_at = 0, None
+        await self.session.flush()
+        return existing
+
+    async def get_email_challenge(self, *, user_id: UUID, purpose: str) -> EmailChallenge | None:
+        return cast(EmailChallenge | None, await self.session.scalar(
+            select(EmailChallenge).where(EmailChallenge.user_id == user_id, EmailChallenge.purpose == purpose).with_for_update()
+        ))
+
+    async def create_deletion_request(self, *, user_id: UUID) -> AccountDeletionRequest:
+        request = AccountDeletionRequest(user_id=user_id)
+        self.session.add(request)
+        await self.session.flush()
+        return request
+
+    async def invalidate_challenges(self, *, user_id: UUID, now: datetime) -> None:
+        await self.session.execute(update(EmailChallenge).where(EmailChallenge.user_id == user_id).values(consumed_at=now))
+        await self.session.execute(update(WorkbenchLoginChallenge).where(
+            WorkbenchLoginChallenge.provider_id == user_id, WorkbenchLoginChallenge.consumed_at.is_(None)
+        ).values(consumed_at=now))
+
+    async def anonymize_user(self, *, user: User, marker: str, now: datetime) -> None:
+        await self.session.execute(update(AuthEmailDelivery).where(AuthEmailDelivery.user_id == user.id, AuthEmailDelivery.status == "pending").values(status="cancelled", encrypted_message=None))
+        user.status, user.email, user.deleted_at = "deleted", None, now
+        user.email_verified_at, user.last_login_at = None, None
+        for identity in list(user.identities):
+            identity.subject = f"deleted:{marker}:{identity.id}"
+            identity.email, identity.phone, identity.device_id, identity.password_hash = "", "", "", ""
+            identity.display_name, identity.avatar_url = "", ""
+        await self.session.flush()
 
     async def create_email_user(self, *, email: str, password_hash: str) -> tuple[User, AuthIdentity]:
-        user = User()
+        user = User(email=email)
         identity = AuthIdentity(
             user=user,
             provider="email",
@@ -48,6 +120,13 @@ class AuthAccountRepository:
         self.session.add(identity)
         await self.session.flush()
         return user, identity
+
+    async def create_pending_email_user(self, *, email: str, password_hash: str) -> User:
+        user = User(email=email, status="email_unverified")
+        self.session.add(user)
+        self.session.add(AuthIdentity(user=user, provider="email", subject=email, email=email, password_hash=password_hash))
+        await self.session.flush()
+        return user
 
     async def create_invite_user(self, *, invite_code: str, device_id: str) -> tuple[User, AuthIdentity]:
         user = User()
@@ -110,6 +189,12 @@ class AuthSessionRepository:
         await self.session.flush()
         return refresh_token
 
+    async def lock_refresh_user(self, token_hash: str) -> User | None:
+        user_id = await self.session.scalar(select(DeviceSession.user_id).join(RefreshToken, RefreshToken.session_id == DeviceSession.id).where(RefreshToken.token_hash == token_hash))
+        if user_id is None:
+            return None
+        return await AuthAccountRepository(self.session).lock_user(user_id)
+
     async def get_refresh_token_by_hash(self, *, token_hash: str) -> RefreshToken | None:
         session_id = await self.session.scalar(select(RefreshToken.session_id).where(RefreshToken.token_hash == token_hash))
         if session_id is None:
@@ -166,6 +251,7 @@ class AuthSessionRepository:
             return None
         device_session.status = "revoked"
         device_session.revoked_at = revoked_at
+        await self.session.execute(update(RefreshToken).where(RefreshToken.session_id == session_id).values(status="revoked", revoked_at=revoked_at))
         await self.session.flush()
         return device_session
 

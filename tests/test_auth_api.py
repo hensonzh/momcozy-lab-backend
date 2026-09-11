@@ -8,11 +8,11 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.auth.account_service import IssuedTokenPair
 from app.modules.auth.current_user import CurrentUser
-from app.modules.auth.router import get_auth_account_service
+from app.modules.auth.router import get_auth_account_service, get_account_lifecycle_service
 from app.modules.users.models import User
 
 
-def test_signup_returns_token_pair_and_user_contract() -> None:
+def test_signup_requires_mailbox_proof_without_issuing_tokens() -> None:
     fake_service = FakeAuthAccountService()
     client = TestClient(_app(fake_service=fake_service))
 
@@ -21,13 +21,9 @@ def test_signup_returns_token_pair_and_user_contract() -> None:
         json={"email": "test@example.com", "password": "secret123", "device_id": "ios"},
     )
 
-    assert response.status_code == 201
-    assert response.json()["token_type"] == "bearer"
-    assert response.json()["access_token"] == "access-token"
-    assert response.json()["refresh_token"] == "refresh-token"
-    assert response.json()["user"] == {"id": str(fake_service.user.id)}
+    assert response.status_code == 202
+    assert response.json() == {"status": "verification_required"}
     assert fake_service.signup_kwargs["email"] == "test@example.com"
-    assert fake_service.signup_kwargs["device_context"].device_id == "ios"
 
 
 def test_signup_rejects_legacy_display_name() -> None:
@@ -139,6 +135,7 @@ def _app(*, fake_service: "FakeAuthAccountService"):
         Settings(app_env="test")
     )
     app.dependency_overrides[get_auth_account_service] = lambda: fake_service
+    app.dependency_overrides[get_account_lifecycle_service] = lambda: fake_service
     return app
 
 
@@ -152,7 +149,7 @@ class FakeAuthAccountService:
         self.refresh_kwargs = None
         self.logout_session_id = None
 
-    async def signup(self, **kwargs):
+    async def register(self, **kwargs):
         self.signup_kwargs = kwargs
         return self._issued()
 

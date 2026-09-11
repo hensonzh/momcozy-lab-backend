@@ -3,7 +3,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import secrets
+from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
+
+_PASSWORD_HASH = PasswordHash.recommended()
 
 
 PBKDF2_ALGORITHM = "pbkdf2_sha256"
@@ -12,19 +15,15 @@ SALT_BYTES = 16
 
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(SALT_BYTES)
-    digest = _pbkdf2(password=password, salt=salt, iterations=PBKDF2_ITERATIONS)
-    return "$".join(
-        [
-            PBKDF2_ALGORITHM,
-            str(PBKDF2_ITERATIONS),
-            _b64(salt),
-            _b64(digest),
-        ]
-    )
+    return _PASSWORD_HASH.hash(password)
 
 
 def verify_password(password: str, encoded_hash: str) -> bool:
+    if encoded_hash and encoded_hash.startswith("$argon2"):
+        try:
+            return _PASSWORD_HASH.verify(password, encoded_hash)
+        except (ValueError, TypeError, UnknownHashError):
+            return False
     try:
         algorithm, iterations_raw, salt_raw, digest_raw = encoded_hash.split("$", 3)
         iterations = int(iterations_raw)
@@ -33,7 +32,7 @@ def verify_password(password: str, encoded_hash: str) -> bool:
     except (TypeError, ValueError):
         return False
 
-    if algorithm != PBKDF2_ALGORITHM or iterations <= 0:
+    if algorithm != PBKDF2_ALGORITHM or not 1 <= iterations <= 2_000_000:
         return False
 
     actual = _pbkdf2(password=password, salt=salt, iterations=iterations)
@@ -51,3 +50,7 @@ def _b64(value: bytes) -> str:
 def _b64decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(f"{value}{padding}".encode("ascii"))
+
+
+# Comparable work for unknown identities prevents a fast account-existence oracle.
+DUMMY_PASSWORD_HASH = hash_password("non-user-dummy-password")

@@ -78,6 +78,11 @@ class FakeNotificationsService:
         self.list_kwargs = kwargs
         return [self._notification()]
 
+    async def list_page(self, **kwargs):
+        from app.modules.notifications.schemas import NotificationListResponse, NotificationRead
+        self.list_kwargs = kwargs
+        return NotificationListResponse(items=[NotificationRead.model_validate(self._notification())], unread_count=1)
+
     async def set_read_state(self, **kwargs):
         self.read_kwargs = kwargs
         notification = self._notification()

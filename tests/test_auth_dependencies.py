@@ -368,6 +368,9 @@ def _session_factory(device_session: DeviceSession):
             return None
 
         async def get(self, model, session_id):
+            from app.modules.users.models import User
+            if model is User and session_id == device_session.user_id:
+                return User(id=session_id, status="active")
             if model is DeviceSession and session_id == device_session.id:
                 return device_session
             return None

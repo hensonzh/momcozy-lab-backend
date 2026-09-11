@@ -13,3 +13,7 @@ livekit-api==1.2.1
 stripe==15.6.1
 pyotp==2.10.0
 cryptography==49.0.0
+pwdlib[argon2]==0.3.0
+email-validator==2.3.0
+httpx==0.28.1
+google-auth[requests]==2.57.1

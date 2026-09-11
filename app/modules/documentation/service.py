@@ -194,6 +194,11 @@ class DocumentationService:
             episode.starts_at, episode.ends_at = self.now(), self.now() + timedelta(days=order.duration_days)
             episode.stage = "active_care"
             episode.version += 1
+            from ..care.events import record_care_event
+            await self.repository.flush()
+            await record_care_event(self.repository.session, episode_id=episode.id, kind="service_progress_changed",
+                aggregate_id=episode.id, aggregate_version=episode.version, actor_user_id=actor.user_id,
+                recipient_id=None, occurred_at=self.now())
         await self._complete(decision, publication.id)
         await self._audit(actor.user_id, appointment.id, "plan_published", request_id, revision=publication.revision)
         from ..care.events import record_care_event

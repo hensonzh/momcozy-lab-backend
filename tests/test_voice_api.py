@@ -97,7 +97,7 @@ def test_realtime_voice_stream_prefetches_before_sending_pcm_headers() -> None:
 
 def test_realtime_voice_session_sends_disabled_error_frame() -> None:
     user_id = uuid4()
-    settings = auth_settings(voice_provider="disabled")
+    settings = auth_settings(voice_provider="disabled", auth_require_active_session=False)
     token, _expires_in = issue_access_token(user_id=user_id, session_id=uuid4(), settings=settings)
     client = TestClient(create_app(settings))
 

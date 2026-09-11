@@ -10,54 +10,21 @@ from app.modules.auth.account_service import AuthAccountService, DeviceContext
 from app.modules.auth.jwt import authenticate_access_token
 from app.modules.auth.models import DeviceSession, RefreshToken
 from app.modules.auth.permissions import STANDARD_USER_PERMISSIONS
-from app.modules.auth.passwords import hash_password, verify_password
+from app.modules.auth.passwords import hash_password
 from app.modules.auth.service import CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
 from app.modules.invites.models import InviteCode
 from app.modules.users.models import AuthIdentity, User
 from tests.auth_key_material import auth_settings
 
 
-def test_signup_creates_email_identity_hashes_password_and_issues_tokens() -> None:
-    account_repository = FakeAccountRepository()
-    session_service = FakeSessionService()
-    service = AuthAccountService(
-        account_repository=account_repository,
-        session_service=session_service,
-        settings=_settings(),
-    )
-
-    issued = asyncio.run(
-        service.signup(
-            email=" Test@Example.COM ",
-            password="super-secret",
-            device_context=DeviceContext(device_id="ios", user_agent="agent", ip_address="127.0.0.1"),
-        )
-    )
-
-    assert account_repository.created_identity.subject == "test@example.com"
-    assert account_repository.created_identity.password_hash != "super-secret"
-    assert verify_password("super-secret", account_repository.created_identity.password_hash)
-    assert session_service.created_user_id == account_repository.created_user.id
-    assert session_service.created_user_agent_hash
-    assert session_service.created_ip_hash
-    assert issued.access_token
-    assert issued.refresh_token == "refresh-token"
-
-    current_user = authenticate_access_token(issued.access_token, service.settings)
-    assert current_user.roles == frozenset({"user"})
-    assert current_user.permissions == STANDARD_USER_PERMISSIONS
-
-
-def test_signup_rejects_duplicate_email() -> None:
-    existing = AuthIdentity(provider="email", subject="test@example.com", password_hash=hash_password("secret"))
-    service = AuthAccountService(
-        account_repository=FakeAccountRepository(existing_identity=existing),
-        session_service=FakeSessionService(),
-        settings=_settings(),
-    )
-
-    with pytest.raises(ApiError, match="already registered"):
-        asyncio.run(service.signup(email="test@example.com", password="secret123"))
+def test_verified_login_issues_standard_user_permissions() -> None:
+    user = User(id=uuid4(), status="active")
+    identity = AuthIdentity(user_id=user.id, user=user, provider="email", subject="test@example.com", password_hash=hash_password("secret123"))
+    service = AuthAccountService(account_repository=FakeAccountRepository(existing_identity=identity), session_service=FakeSessionService(), settings=_settings())
+    issued = asyncio.run(service.login(email=" Test@Example.COM ", password="secret123"))
+    principal = authenticate_access_token(issued.access_token, service.settings)
+    assert principal.permissions == STANDARD_USER_PERMISSIONS
+    assert principal.user_id == user.id
 
 
 def test_invite_login_creates_invite_identity_and_issues_tokens() -> None:
@@ -281,6 +248,9 @@ class FakeAccountRepository:
                 return self.existing_identity
         return None
 
+    async def lock_user(self, user_id):
+        return self.existing_identity.user if self.existing_identity else self.existing_user or self.created_user
+
     async def get_user(self, *, user_id):
         if self.existing_user and self.existing_user.id == user_id:
             return self.existing_user
@@ -377,6 +347,9 @@ class FakeSessionRepository:
     def __init__(self, *, device_session=None) -> None:
         self.device_session = device_session
         self.revoked_session_id = None
+
+    async def lock_refresh_user(self, token_hash):
+        return User(id=self.device_session.user_id, status="active") if self.device_session else None
 
     async def get_device_session(self, *, session_id):
         if self.device_session and self.device_session.id == session_id:

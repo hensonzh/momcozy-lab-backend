@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Notification
@@ -13,6 +13,31 @@ from .models import Notification
 class NotificationsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def page_for_owner(self, *, owner_user_id: UUID, limit: int, status: str | None,
+                             notification_type: str | None, before: tuple[datetime, UUID] | None) -> list[Notification]:
+        conditions = [Notification.owner_user_id == owner_user_id,
+            or_(Notification.trigger_at.is_(None), Notification.trigger_at <= datetime.now(timezone.utc)),
+            Notification.send_status != "canceled"]
+        conditions.append(Notification.status == status if status else Notification.status != "archived")
+        if notification_type:
+            conditions.append(Notification.notification_type == notification_type)
+        if before:
+            at, identifier = before
+            conditions.append(or_(Notification.created_at < at, and_(Notification.created_at == at, Notification.id < identifier)))
+        return list(await self.session.scalars(select(Notification).where(*conditions)
+            .order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit)))
+
+    async def unread_count(self, *, owner_user_id: UUID) -> int:
+        return int(await self.session.scalar(select(func.count()).select_from(Notification).where(
+            Notification.owner_user_id == owner_user_id, Notification.status == "unread", Notification.send_status != "canceled",
+            or_(Notification.trigger_at.is_(None), Notification.trigger_at <= datetime.now(timezone.utc)))) or 0)
+
+    async def mark_all_read(self, *, owner_user_id: UUID, now: datetime) -> int:
+        result = await self.session.execute(update(Notification).where(Notification.owner_user_id == owner_user_id,
+            Notification.status == "unread", Notification.send_status != "canceled",
+            or_(Notification.trigger_at.is_(None), Notification.trigger_at <= now)).values(status="read", read_at=now))
+        return cast(CursorResult[Any], result).rowcount
 
     async def create_notification(
         self,
@@ -73,6 +98,9 @@ class NotificationsRepository:
         read: bool,
         read_at: datetime | None,
     ) -> Notification | None:
+        # Match the worker's User -> Notification order before mutation/audit FKs.
+        from ..users.models import User
+        await self.session.scalar(select(User).where(User.id == owner_user_id).with_for_update())
         notification = await self.get_for_owner(notification_id=notification_id, owner_user_id=owner_user_id)
         if notification is None:
             return None
@@ -82,6 +110,9 @@ class NotificationsRepository:
         return notification
 
     async def archive(self, *, notification_id: UUID, owner_user_id: UUID) -> Notification | None:
+        # Match the worker's User -> Notification order before mutation/audit FKs.
+        from ..users.models import User
+        await self.session.scalar(select(User).where(User.id == owner_user_id).with_for_update())
         notification = await self.get_for_owner(notification_id=notification_id, owner_user_id=owner_user_id)
         if notification is None:
             return None

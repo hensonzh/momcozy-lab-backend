@@ -54,10 +54,21 @@ class Settings:
     auth_jwt_issuer: str = ""
     auth_jwt_product_audience: str = ""
     auth_jwt_runtime_audience: str = ""
-    auth_require_active_session: bool = False
+    auth_require_active_session: bool = True
     ibclc_mfa_encryption_key: str = field(default="", repr=False)
     ibclc_session_hours: int = 12
     auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)
+    auth_email_token_key: str = field(default="", repr=False)
+    push_token_key: str = field(default="", repr=False)
+    push_provider: str = "disabled"
+    push_fcm_project_id: str = ""
+    push_fcm_credentials_file: str = field(default="", repr=False)
+    auth_email_from: str = ""
+    auth_smtp_host: str = ""
+    auth_smtp_port: int = 587
+    auth_smtp_username: str = field(default="", repr=False)
+    auth_smtp_password: str = field(default="", repr=False)
+    auth_google_client_id: str = ""
     service_api_key: str = ""
     agent_runtime_service_api_key: str = ""
     care_report_runtime_url: str = ''
@@ -137,6 +148,17 @@ class Settings:
             auth_jwt_runtime_audience=_env("AUTH_JWT_RUNTIME_AUDIENCE", cls.auth_jwt_runtime_audience),
             auth_require_active_session=_env_bool("AUTH_REQUIRE_ACTIVE_SESSION", cls.auth_require_active_session),
             auth_invite_codes=_env_csv("AUTH_INVITE_CODES", cls.auth_invite_codes),
+            auth_email_token_key=_env("AUTH_EMAIL_TOKEN_KEY", cls.auth_email_token_key),
+            push_token_key=_env("PUSH_TOKEN_KEY", cls.push_token_key),
+            push_provider=_env("PUSH_PROVIDER", cls.push_provider),
+            push_fcm_project_id=_env("PUSH_FCM_PROJECT_ID", cls.push_fcm_project_id),
+            push_fcm_credentials_file=_env("PUSH_FCM_CREDENTIALS_FILE", cls.push_fcm_credentials_file),
+            auth_email_from=_env("AUTH_EMAIL_FROM", cls.auth_email_from),
+            auth_smtp_host=_env("AUTH_SMTP_HOST", cls.auth_smtp_host),
+            auth_smtp_port=_env_int("AUTH_SMTP_PORT", cls.auth_smtp_port),
+            auth_smtp_username=_env("AUTH_SMTP_USERNAME", cls.auth_smtp_username),
+            auth_smtp_password=_env("AUTH_SMTP_PASSWORD", cls.auth_smtp_password),
+            auth_google_client_id=_env("AUTH_GOOGLE_CLIENT_ID", cls.auth_google_client_id),
             service_api_key=_env("SERVICE_API_KEY", cls.service_api_key),
             agent_runtime_service_api_key=_env(
                 "AGENT_RUNTIME_SERVICE_API_KEY",
@@ -226,6 +248,13 @@ class Settings:
 
     def validate_for_startup(self) -> None:
         errors: list[str] = []
+        if self.push_provider not in {"disabled", "fcm"}:
+            errors.append("PUSH_PROVIDER must be disabled or fcm")
+        if self.push_provider == "fcm":
+            if len(self.push_token_key.encode()) < 32:
+                errors.append("PUSH_TOKEN_KEY must be at least 32 bytes when FCM is enabled")
+            if not self.push_fcm_project_id or not self.push_fcm_credentials_file:
+                errors.append("PUSH_FCM_PROJECT_ID and PUSH_FCM_CREDENTIALS_FILE are required when FCM is enabled")
         if self.stripe_checkout_enabled:
             if not self.stripe_secret_key.startswith(("sk_test_", "sk_live_", "rk_test_", "rk_live_")):
                 errors.append("STRIPE_SECRET_KEY is required for Stripe Checkout")
@@ -426,6 +455,12 @@ class Settings:
                 errors.append("AUTH_JWT_PRODUCT_AUDIENCE is required in production")
             if not self.auth_jwt_runtime_audience:
                 errors.append("AUTH_JWT_RUNTIME_AUDIENCE is required in production")
+            if len(self.auth_email_token_key.encode("utf-8")) < 32:
+                errors.append("AUTH_EMAIL_TOKEN_KEY must be at least 32 bytes in production")
+            if not self.auth_email_from or not self.auth_smtp_host:
+                errors.append("AUTH_EMAIL_FROM and AUTH_SMTP_HOST are required in production")
+            if not self.auth_google_client_id:
+                errors.append("AUTH_GOOGLE_CLIENT_ID is required in production")
             if not self.service_api_key:
                 errors.append("SERVICE_API_KEY is required in production for protected operational endpoints")
             if not self.agent_runtime_service_api_key:

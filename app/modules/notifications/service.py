@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -8,6 +10,7 @@ from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import Notification
 from .repository import NotificationsRepository
+from .schemas import NotificationListResponse, NotificationRead
 
 
 NOTIFICATION_CREATE_IDEMPOTENCY_SCOPE = "notifications.create"
@@ -24,6 +27,34 @@ class NotificationsService:
         self.repository = repository
         self.audit_service = audit_service
         self.idempotency_service = idempotency_service
+
+    async def list_page(self, *, owner_user_id: UUID, limit: int = 50, cursor: str | None = None,
+                        status: str | None = None, notification_type: str | None = None) -> NotificationListResponse:
+        self._validate_limit(limit)
+        before = None
+        if cursor:
+            try:
+                if len(cursor) > 256:
+                    raise ValueError("Invalid cursor")
+                timestamp, identifier = base64.urlsafe_b64decode(cursor.encode()).decode().split("|")
+                at = datetime.fromisoformat(timestamp)
+                if at.tzinfo is None:
+                    raise ValueError("Cursor timestamp must have a timezone")
+                before = (at, UUID(identifier))
+            except (ValueError, UnicodeError, binascii.Error) as exc:
+                raise ApiError(code="validation_failed", message="Invalid notification cursor.", status=422) from exc
+        rows = await self.repository.page_for_owner(owner_user_id=owner_user_id, limit=limit + 1,
+            status=status, notification_type=notification_type, before=before)
+        visible = rows[:limit]
+        next_cursor = None
+        if len(rows) > limit:
+            last = visible[-1]
+            next_cursor = base64.urlsafe_b64encode(f"{last.created_at.isoformat()}|{last.id}".encode()).decode()
+        return NotificationListResponse(items=[NotificationRead.model_validate(value) for value in visible], next_cursor=next_cursor,
+            unread_count=await self.repository.unread_count(owner_user_id=owner_user_id))
+
+    async def mark_all_read(self, *, owner_user_id: UUID) -> int:
+        return await self.repository.mark_all_read(owner_user_id=owner_user_id, now=_utcnow())
 
     async def create_notification(
         self,

@@ -5,6 +5,34 @@ from app.factory import create_app
 from tests.auth_key_material import auth_settings
 
 
+def test_account_limit_uses_authentication_email_normalization_across_ips() -> None:
+    import asyncio
+    import json
+    from starlette.requests import Request
+    from app.core.rate_limit import check_rate_limit
+
+    async def run():
+        settings = Settings(app_env='test', rate_limit_enabled=False)
+        app = create_app(settings)
+        app.state.redis_client = FakeRedis()
+
+        async def attempt(email, index):
+            async def receive():
+                return {'type': 'http.request', 'body': json.dumps({'email': email}).encode()}
+            request = Request({'type': 'http', 'method': 'POST', 'path': '/v1/auth/login',
+                'headers': [], 'scheme': 'http', 'server': ('test', 80),
+                'client': (f'192.0.2.{index}', 1234), 'app': app}, receive)
+            return await check_rate_limit(request, settings)
+
+        for index in range(30):
+            assert (await attempt('mia@example.com', index)).allowed
+        assert not (await attempt('mia@example.com', 30)).allowed
+        for index, email in enumerate(['mia@ｅxample.com', ' Mia@EXAMPLE.COM ', 'mia@ｅｘａｍｐｌｅ.com'], 31):
+            assert not (await attempt(email, index)).allowed
+        assert (await attempt('other@example.com', 40)).allowed
+    asyncio.run(run())
+
+
 def test_rate_limit_returns_stable_error_envelope() -> None:
     app = create_app(
         Settings(
@@ -69,7 +97,7 @@ def test_rate_limit_exempts_jwks_endpoint() -> None:
     assert "X-RateLimit-Limit" not in second.headers
 
 
-def test_rate_limit_uses_hashed_credentials_as_identity() -> None:
+def test_auth_rate_limit_cannot_be_bypassed_by_arbitrary_bearer_headers() -> None:
     app = create_app(
         Settings(
             app_env="test",
@@ -85,7 +113,7 @@ def test_rate_limit_uses_hashed_credentials_as_identity() -> None:
         client.post("/v1/auth/login", json={}, headers={"Authorization": "Bearer token-a"})
         client.post("/v1/auth/login", json={}, headers={"Authorization": "Bearer token-b"})
 
-    assert len(fake_redis.values) == 2
+    assert len(fake_redis.values) == 1
     assert all("token-a" not in key and "token-b" not in key for key in fake_redis.values)
 
 
@@ -165,6 +193,12 @@ def test_invalid_runtime_service_key_does_not_receive_internal_capacity() -> Non
 class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, int] = {}
+
+    async def eval(self, script, numkeys, key, window):
+        assert "EXPIRE" in script and numkeys == 1
+        count = await self.incr(key)
+        await self.expire(key, window)
+        return count
 
     async def incr(self, name: str) -> int:
         self.values[name] = self.values.get(name, 0) + 1

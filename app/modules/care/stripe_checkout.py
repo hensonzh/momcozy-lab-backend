@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 from typing import Any, cast
 from uuid import UUID
@@ -99,8 +100,14 @@ class StripeCheckoutService:
         order.version += 1
         existing = await self.session.scalar(select(CareEpisode).where(CareEpisode.order_id == order.id))
         if existing is None:
-            self.session.add(CareEpisode(owner_user_id=order.owner_user_id, order_id=order.id, package_id=order.package_id,
-                status="active", stage="preparation", total_sessions=order.total_sessions, remaining_sessions=order.total_sessions))
+            episode = CareEpisode(owner_user_id=order.owner_user_id, order_id=order.id, package_id=order.package_id,
+                status="active", stage="preparation", total_sessions=order.total_sessions, remaining_sessions=order.total_sessions)
+            self.session.add(episode)
+            await self.session.flush()
+            from .events import record_care_event
+            await record_care_event(self.session, episode_id=episode.id, kind="service_progress_changed",
+                aggregate_id=episode.id, aggregate_version=episode.version, actor_user_id=None,
+                recipient_id=None, occurred_at=datetime.now(timezone.utc))
         await self.session.flush()
         await self.audit.record(actor_user_id=order.owner_user_id, action="care.order.stripe_checkout.paid", resource_type="care_order",
             resource_id=str(order.id), request_id=request_id, details={"stripe_livemode": order.stripe_livemode})

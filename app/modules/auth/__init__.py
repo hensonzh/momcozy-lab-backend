@@ -1,6 +1,6 @@
 from .current_user import CurrentUser
 from .jwt import authenticate_access_token, issue_access_token
-from .models import DeviceSession, RefreshToken
+from .models import AccountDeletionRequest, DeviceSession, EmailChallenge, RefreshToken
 from .permissions import AGENT_RUN_PERMISSION, STANDARD_USER_PERMISSIONS
 from .repository import AuthAccountRepository, AuthSessionRepository
 from .service import AuthSessionService, CreatedAuthSession, IssuedRefreshToken, refresh_token_hash
@@ -14,6 +14,8 @@ __all__ = [
     "CreatedAuthSession",
     "CurrentUser",
     "DeviceSession",
+    "EmailChallenge",
+    "AccountDeletionRequest",
     "IssuedRefreshToken",
     "RefreshToken",
     "ServiceClient",

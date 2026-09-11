@@ -14,6 +14,7 @@ CareEventKind = Literal[
     'appointment_confirmed', 'appointment_cancelled', 'intake_submitted',
     'case_consent_revoked', 'consultation_completed', 'consultation_user_no_show',
     'consultation_technical_failure', 'plan_published', 'report_generated', 'report_reviewed',
+    'consultation_started', 'service_progress_changed',
 ]
 
 WORK_REMINDER_KINDS = (

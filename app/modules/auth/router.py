@@ -11,11 +11,15 @@ from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError, ErrorEnvelope
 from ...infrastructure.db.session import get_session
 from ..invites.repository import InviteCodeRepository
+from ..users.models import AccountStatus, User
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair
+from .account_lifecycle import AccountLifecycleService, ChallengeRejected
 from .current_user import CurrentUser
+from .email import QueuedAuthEmailSender
+from .google import GoogleOidcTokenVerifier
 from .repository import AuthAccountRepository, AuthSessionRepository
-from .schemas import InviteLoginRequest, LoginRequest, LogoutResponse, RefreshRequest, SignupRequest, TokenResponse, TokenUser
-from .service import AuthSessionService, RefreshTokenRevoked
+from .schemas import AccountOperationResponse, AccountProfile, EmailChallengeRequest, EmailRegisterRequest, GoogleLinkRequest, GoogleLoginRequest, InviteLoginRequest, LoginRequest, LogoutResponse, PasswordResetConfirmRequest, PasswordResetRequest, RefreshRequest, SignupRequest, TokenResponse, TokenUser
+from .service import refresh_token_hash, AuthSessionService, RefreshTokenRevoked
 
 
 router = SurfaceAPIRouter(
@@ -34,18 +38,90 @@ def get_auth_account_service(request: Request, session: AsyncSession = Depends(g
     )
 
 
-@router.post("/signup", response_model=TokenResponse, status_code=201)
-async def signup(
-    body: SignupRequest,
-    request: Request,
-    service: AuthAccountService = Depends(get_auth_account_service),
-) -> TokenResponse:
-    issued = await service.signup(
-        email=body.email,
-        password=body.password,
-        device_context=_device_context(request=request, device_id=body.device_id),
+def get_account_lifecycle_service(request: Request, session: AsyncSession = Depends(get_session)) -> AccountLifecycleService:
+    settings = request.app.state.settings
+    return AccountLifecycleService(
+        accounts=AuthAccountRepository(session),
+        auth=AuthAccountService(account_repository=AuthAccountRepository(session), session_service=AuthSessionService(repository=AuthSessionRepository(session)), settings=settings),
+        email_sender=QueuedAuthEmailSender(session, settings),
+        token_key=settings.auth_email_token_key,
+        google_verifier=GoogleOidcTokenVerifier() if settings.auth_google_client_id else None,
     )
+
+
+@router.post("/register", response_model=AccountOperationResponse, status_code=202)
+async def register(body: EmailRegisterRequest, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    await service.register(email=body.email, password=body.password)
+    return AccountOperationResponse(status="verification_required")
+
+
+@router.post("/verify-email", response_model=TokenResponse)
+async def verify_email(body: EmailChallengeRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> TokenResponse | JSONResponse:
+    try:
+        issued = await service.verify_email(email=body.email, token=body.token, password=body.password, device=_device_context(request=request, device_id=body.device_id))
+    except ChallengeRejected as error:
+        return _challenge_response(error, request)
     return _token_response(issued)
+
+
+@router.post("/resend-verification", response_model=AccountOperationResponse, status_code=202)
+async def resend_verification(body: PasswordResetRequest, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    await service.resend_verification(email=body.email)
+    return AccountOperationResponse(status="verification_if_required")
+
+
+@router.post("/forgot-password", response_model=AccountOperationResponse, status_code=202)
+async def forgot_password(body: PasswordResetRequest, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    await service.request_password_reset(email=body.email)
+    return AccountOperationResponse(status="reset_if_available")
+
+
+@router.post("/reset-password", response_model=AccountOperationResponse)
+async def reset_password(body: PasswordResetConfirmRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse | JSONResponse:
+    try:
+        await service.reset_password(email=body.email, token=body.token, new_password=body.new_password)
+    except ChallengeRejected as error:
+        return _challenge_response(error, request)
+    return AccountOperationResponse(status="password_reset")
+
+
+@router.post("/google", response_model=TokenResponse)
+async def google_login(body: GoogleLoginRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> TokenResponse:
+    return _token_response(await service.google_login(id_token=body.id_token, device=_device_context(request=request, device_id=body.device_id)))
+
+
+@router.post("/google/link", response_model=AccountOperationResponse)
+async def link_google(body: GoogleLinkRequest, current_user: CurrentUser = Depends(require_current_user), service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    user = await service.accounts.get_user(user_id=current_user.user_id)
+    if user is None:
+        raise ApiError(code="authentication_required", message="Account is unavailable.", status=401)
+    await service.link_google(current_user=user, password=body.password, id_token=body.id_token)
+    return AccountOperationResponse(status="google_linked")
+
+
+@router.get("/me", response_model=AccountProfile)
+async def account_me(current_user: CurrentUser = Depends(require_current_user), service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountProfile:
+    user = await service.accounts.get_user(user_id=current_user.user_id)
+    if user is None:
+        raise ApiError(code="authentication_required", message="Account is unavailable.", status=401)
+    return AccountProfile(id=str(user.id), email=user.email, email_verified=user.email_verified_at is not None, account_status=AccountStatus(user.status),
+        auth_providers=sorted({identity.provider for identity in user.identities}),
+        created_at=user.created_at, updated_at=user.updated_at, last_login_at=user.last_login_at)
+
+
+@router.delete("/me", response_model=AccountOperationResponse)
+async def delete_account(current_user: CurrentUser = Depends(require_current_user), service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    user = await service.accounts.get_user(user_id=current_user.user_id)
+    if user is None:
+        raise ApiError(code="authentication_required", message="Account is unavailable.", status=401)
+    await service.delete_account(user=user)
+    return AccountOperationResponse(status="deletion_pending")
+
+
+@router.post("/signup", response_model=AccountOperationResponse, status_code=202)
+async def signup(body: SignupRequest, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    await service.register(email=body.email, password=body.password)
+    return AccountOperationResponse(status="verification_required")
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -93,6 +169,16 @@ async def refresh(
     return _token_response(issued)
 
 
+@router.post("/logout-session", response_model=LogoutResponse)
+async def logout_session(body: RefreshRequest, service: AuthAccountService = Depends(get_auth_account_service)) -> LogoutResponse:
+    repository = service.session_service.repository
+    await repository.lock_refresh_user(refresh_token_hash(body.refresh_token))
+    record = await repository.get_refresh_token_by_hash(token_hash=refresh_token_hash(body.refresh_token))
+    if record is not None:
+        await service.logout(session_id=record.session_id)
+    return LogoutResponse()
+
+
 @router.post("/logout", response_model=LogoutResponse)
 async def logout(
     current_user: CurrentUser = Depends(require_current_user),
@@ -107,9 +193,8 @@ async def logout(
 
 
 def _device_context(*, request: Request, device_id: str) -> DeviceContext:
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
     client_host = request.client.host if request.client else ""
-    ip_address = forwarded_for.split(",", 1)[0].strip() or client_host
+    ip_address = client_host
     return DeviceContext(
         device_id=device_id,
         user_agent=request.headers.get("User-Agent", ""),
@@ -122,5 +207,17 @@ def _token_response(issued: IssuedTokenPair) -> TokenResponse:
         access_token=issued.access_token,
         refresh_token=issued.refresh_token,
         expires_in=issued.expires_in,
-        user=TokenUser(id=str(issued.user.id)),
+        user=_user_response(issued.user),
     )
+
+
+def _user_response(user: User) -> TokenUser:
+    return TokenUser(id=str(user.id))
+
+
+def _challenge_response(error: ChallengeRejected, request: Request) -> JSONResponse:
+    # Normal dependency exit commits the failed-attempt counter; raising rolls it back.
+    envelope = ErrorEnvelope(code=error.code, message=error.message, status=error.status,
+                             request_id=getattr(request.state, "request_id", None))
+    return JSONResponse(envelope.to_response_body(), status_code=error.status,
+                        headers={"Cache-Control": "private, no-store"})

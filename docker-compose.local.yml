@@ -8,6 +8,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    environment:
+      AUTH_REQUIRE_ACTIVE_SESSION: "true"
     ports:
       - "${MOMCOZY_BACKEND_API_BIND:-127.0.0.1:8769}:8000"
     depends_on:
@@ -38,6 +40,36 @@ services:
       - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
     profiles:
       - tools
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-worker:
+    image: momcozy-lab-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.workers.notifications
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    volumes:
+      - ${MOMCOZY_PUSH_SECRETS_DIR:-./.local/push-secrets}:/run/momcozy-push:ro
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth-email-worker:
+    image: momcozy-lab-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m scripts.deliver_auth_emails
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+    init: true
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy

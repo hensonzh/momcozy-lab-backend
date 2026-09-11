@@ -35,6 +35,9 @@ async def enroll(email: str, *, rotate: bool, settings: Settings) -> str:
             identity = await AuthAccountRepository(session).get_identity(provider="email", subject=normalize_email(email))
             if identity is None:
                 raise ValueError("Create the email account and provider profile first.")
+            user = await AuthAccountRepository(session).lock_user(identity.user_id)
+            if user is None or user.status != "active":
+                raise ValueError("The account must be active before enrolling MFA.")
             repository = WorkbenchAuthRepository(session)
             credential = await repository.credential(identity.user_id)
             if await repository.provider(identity.user_id) is None:

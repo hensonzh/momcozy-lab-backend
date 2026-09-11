@@ -79,7 +79,7 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
             "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@postgres",
             "REDIS_URL=redis://redis",
             "OBJECT_STORAGE_PROVIDER=minio",
-            "AUTH_JWT_PRIVATE_KEY_B64=${AUTH_JWT_PRIVATE_KEY_B64}",
+            "AUTH_JWT_PRIVATE_KEY_B64=",
             "AUTH_JWT_ISSUER=momcozy-local",
         ],
         "env/compose.test.env.example": [

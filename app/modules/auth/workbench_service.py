@@ -73,6 +73,9 @@ class WorkbenchAuthService:
         challenge = await self.repository.challenge(_hash(challenge_token))
         if challenge is None:
             raise ApiError(code="mfa_challenge_expired", message="Start a new sign-in attempt.", status=401)
+        # Match login/reset/rotation: account first, then MFA credential. Re-read
+        # the challenge below after waiting so password reset can invalidate it.
+        user = await self.accounts.account_repository.lock_user(challenge.provider_id)
         credential = await self.repository.credential(challenge.provider_id)
         provider = await self.repository.provider(challenge.provider_id)
         # All OTP verification for a provider shares the same credential row lock.
@@ -104,7 +107,6 @@ class WorkbenchAuthService:
             # Raising here would roll back lockout state in the session dependency.
             return WorkbenchVerification(error=ErrorEnvelope(code="mfa_locked" if locked else "mfa_invalid",
                 message="Try again later." if locked else "The code is invalid or was already used.", status=429 if locked else 401, request_id=request_id))
-        user = await self.accounts.account_repository.get_user(user_id=provider.user_id)
         if user is None or user.status != "active":
             raise ApiError(code="permission_denied", message="User account is not active.", status=403)
         credential.last_counter, credential.failed_attempts, credential.locked_until = matched, 0, None

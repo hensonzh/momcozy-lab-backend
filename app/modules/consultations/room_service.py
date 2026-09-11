@@ -180,6 +180,10 @@ class RoomService:
         appointment.version += 1
         await self.repository.flush()
         await self._audit(actor, room, "started", request_id)
+        from ..care.events import record_care_event
+        await record_care_event(self.repository.session, episode_id=episode.id, kind="consultation_started",
+            aggregate_id=room.id, aggregate_version=room.version, appointment_id=appointment.id,
+            actor_user_id=actor.user_id, recipient_id=None, occurred_at=self.now())
         return await self._context(appointment, role)
 
     async def end(self, actor: CurrentUser, appointment_id: UUID, body: EndWrite, request_id: str) -> RoomContextRead:
@@ -233,6 +237,9 @@ class RoomService:
         await record_care_event(self.repository.session, episode_id=episode.id, kind=event_kind,
             aggregate_id=room.id, aggregate_version=room.version, appointment_id=appointment.id,
             actor_user_id=actor.user_id, recipient_id=appointment.provider_id, occurred_at=self.now())
+        if body.reason == "completed":
+            await record_care_event(self.repository.session, episode_id=episode.id, kind="service_progress_changed",
+                aggregate_id=episode.id, aggregate_version=episode.version, actor_user_id=actor.user_id, recipient_id=None, occurred_at=self.now())
         return await self._context(appointment, role)
 
     async def _new_room(self, appointment: CareAppointment, *, create_media: bool) -> CareConsultation:

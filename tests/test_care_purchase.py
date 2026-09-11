@@ -3,6 +3,7 @@ from app.modules.baby.profile_models import BabyProfile
 import asyncio
 from unittest.mock import AsyncMock
 from uuid import uuid4
+from app.modules.care.event_models import CareServiceEvent
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,7 +41,7 @@ def test_purchase_persists_recoverable_state_and_creates_exactly_one_owned_episo
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with engine.begin() as connection:
             await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__, BabyProfile.__table__,
-                IdempotencyKey.__table__, CareProvider.__table__, CareEligibility.__table__, CareOrder.__table__, CareEpisode.__table__]))
+                IdempotencyKey.__table__, CareProvider.__table__, CareEligibility.__table__, CareOrder.__table__, CareEpisode.__table__, CareServiceEvent.__table__]))
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         owner, other, provider = uuid4(), uuid4(), uuid4()
         audit = AsyncMock()

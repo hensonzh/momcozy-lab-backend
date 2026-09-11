@@ -18,11 +18,21 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 |---|---|---|---|---|---|
 | GET | `/v1/assets` | product-assets | flutter | stable | List Product Assets |
 | GET | `/v1/assets/{asset_id}` | product-assets | flutter | stable | Get Product Asset |
+| POST | `/v1/auth/forgot-password` | auth | flutter | stable | Forgot Password |
+| POST | `/v1/auth/google` | auth | flutter | stable | Google Login |
+| POST | `/v1/auth/google/link` | auth | flutter | stable | Link Google |
 | POST | `/v1/auth/invite-login` | auth | flutter | stable | Invite Login |
 | POST | `/v1/auth/login` | auth | flutter | stable | Login |
 | POST | `/v1/auth/logout` | auth | flutter | stable | Logout |
+| POST | `/v1/auth/logout-session` | auth | flutter | stable | Logout Session |
+| DELETE | `/v1/auth/me` | auth | flutter | stable | Delete Account |
+| GET | `/v1/auth/me` | auth | flutter | stable | Account Me |
 | POST | `/v1/auth/refresh` | auth | flutter | stable | Refresh |
+| POST | `/v1/auth/register` | auth | flutter | stable | Register |
+| POST | `/v1/auth/resend-verification` | auth | flutter | stable | Resend Verification |
+| POST | `/v1/auth/reset-password` | auth | flutter | stable | Reset Password |
 | POST | `/v1/auth/signup` | auth | flutter | stable | Signup |
+| POST | `/v1/auth/verify-email` | auth | flutter | stable | Verify Email |
 | GET | `/v1/babies` | baby | flutter | stable | List Profiles |
 | POST | `/v1/babies` | baby | flutter | stable | Create |
 | PUT | `/v1/babies/{baby_id}` | baby | flutter | stable | Update |
@@ -111,7 +121,15 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/mother/diary` | mother | flutter | stable | List Diary |
 | PUT | `/v1/mother/diary/{entry_date}` | mother | flutter | stable | Save Diary |
 | GET | `/v1/notifications` | notifications | flutter | stable | List Notifications |
+| GET | `/v1/notifications/appointments/{appointment_id}/reminder` | notifications | flutter | stable | Read Appointment Reminder |
+| PUT | `/v1/notifications/appointments/{appointment_id}/reminder` | notifications | flutter | stable | Update Appointment Reminder |
+| POST | `/v1/notifications/installations` | notifications | flutter | stable | Register Push Installation |
+| POST | `/v1/notifications/installations/{installation_id}/detach` | notifications | flutter | stable | Detach Push Installation |
+| GET | `/v1/notifications/preferences` | notifications | flutter | stable | Notification Preferences |
+| PATCH | `/v1/notifications/preferences/{category}` | notifications | flutter | stable | Update Notification Preference |
+| POST | `/v1/notifications/read-all` | notifications | flutter | stable | Mark All Notifications Read |
 | DELETE | `/v1/notifications/{notification_id}` | notifications | flutter | stable | Archive Notification |
+| POST | `/v1/notifications/{notification_id}/open` | notifications | flutter | stable | Open Notification |
 | PATCH | `/v1/notifications/{notification_id}/read` | notifications | flutter | stable | Set Notification Read State |
 | GET | `/v1/profile/lactation` | profiles | flutter | stable | Get My Maternal Lactation Profile |
 | PATCH | `/v1/profile/lactation` | profiles | flutter | stable | Update My Maternal Lactation Profile |

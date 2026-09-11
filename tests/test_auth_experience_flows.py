@@ -8,7 +8,7 @@ from app.core.errors import ApiError
 from app.modules.auth import authenticate_access_token
 from app.modules.auth.account_service import AuthAccountService, DeviceContext
 from app.modules.auth.models import DeviceSession, RefreshToken
-from app.modules.auth.passwords import verify_password
+from app.modules.auth.passwords import hash_password, verify_password
 from app.modules.auth.service import AuthSessionService, refresh_token_hash
 from app.modules.users.models import AuthIdentity, User
 from tests.auth_key_material import auth_settings
@@ -37,15 +37,15 @@ async def _run_email_auth_main_flow() -> None:
         settings=settings,
     )
 
-    signup = await service.signup(
+    # Mailbox proof is covered with the real lifecycle repository; this suite
+    # starts with a provisioned account to characterize refresh-family behavior.
+    await account_repository.create_email_user(email="mia@example.com", password_hash=hash_password("right-password"))
+    signup = await service.login(
         email=" Mia@Example.COM ",
         password="right-password",
         device_context=DeviceContext(device_id="ios-1", user_agent="MomCozy iOS", ip_address="127.0.0.1"),
     )
     signed_up_user = authenticate_access_token(signup.access_token, settings)
-
-    with pytest.raises(ApiError) as duplicate_signup:
-        await service.signup(email="mia@example.com", password="right-password")
 
     refreshed = await service.refresh(refresh_token=signup.refresh_token)
     refreshed_user = authenticate_access_token(refreshed.access_token, settings)
@@ -71,7 +71,6 @@ async def _run_email_auth_main_flow() -> None:
     assert signed_up_user.user_id == signup.user.id
     assert refreshed_user.session_id == signed_up_user.session_id
     assert refreshed.refresh_token == "refresh-2"
-    assert duplicate_signup.value.code == "conflict"
     assert reuse_detected.value.code == "refresh_token_reuse_detected"
     assert first_session.status == "revoked"
     assert second_session.status == "revoked"
@@ -168,6 +167,9 @@ class InMemoryAuthAccountRepository:
             None,
         )
 
+    async def lock_user(self, user_id):
+        return self.users.get(user_id)
+
     async def get_user(self, *, user_id: UUID):
         return self.users.get(user_id)
 
@@ -238,6 +240,10 @@ class InMemoryAuthSessionRepository:
 
     async def get_refresh_token_by_hash(self, *, token_hash: str):
         return next((token for token in self.refresh_tokens if token.token_hash == token_hash), None)
+
+    async def lock_refresh_user(self, token_hash):
+        token = await self.get_refresh_token_by_hash(token_hash=token_hash)
+        return User(id=self.sessions[token.session_id].user_id, status="active") if token else None
 
     async def get_device_session(self, *, session_id: UUID):
         return self.sessions.get(session_id)

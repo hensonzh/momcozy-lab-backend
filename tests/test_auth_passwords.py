@@ -13,3 +13,7 @@ def test_password_hash_is_salted_and_verifiable() -> None:
 
 def test_password_verifier_rejects_malformed_hash() -> None:
     assert not verify_password("password", "not-a-valid-hash")
+
+
+def test_invalid_argon2_hash_fails_closed():
+    assert verify_password("password", "$argon2bad") is False

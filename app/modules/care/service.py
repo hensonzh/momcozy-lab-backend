@@ -97,6 +97,10 @@ class CareService:
             episode = CareEpisode(owner_user_id=owner, order_id=order.id, package_id=order.package_id,
                 status="active", stage="preparation", total_sessions=order.total_sessions, remaining_sessions=order.total_sessions)
             await self.repository.add(episode)
+            from .events import record_care_event
+            await record_care_event(self.repository.session, episode_id=episode.id, kind="service_progress_changed",
+                aggregate_id=episode.id, aggregate_version=episode.version, actor_user_id=owner,
+                recipient_id=None, occurred_at=order.updated_at)
         await self.repository.flush()
         await self._audit(owner, order, f"sandbox_payment.{target}", request_id)
         return await self.purchase(owner, order_id)

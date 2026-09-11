@@ -409,7 +409,11 @@ def test_settings_require_openai_vision_credentials_model_and_finite_positive_ti
 
 
 def test_production_settings_reject_local_object_storage() -> None:
-    settings = Settings(app_env="production", object_storage_provider="local")
+    settings = Settings(app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+ object_storage_provider="local")
 
     with pytest.raises(ValueError, match="OBJECT_STORAGE_PROVIDER cannot be local"):
         settings.validate_for_startup()
@@ -418,6 +422,10 @@ def test_production_settings_reject_local_object_storage() -> None:
 def test_production_settings_reject_wildcard_cors_origin() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -439,6 +447,10 @@ def test_production_settings_reject_wildcard_cors_origin() -> None:
 def test_production_settings_require_trusted_hosts() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -458,6 +470,10 @@ def test_production_settings_require_trusted_hosts() -> None:
 def test_production_settings_require_service_key_for_operational_endpoints() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -479,6 +495,10 @@ def test_production_settings_require_service_key_for_operational_endpoints() -> 
 def test_production_settings_require_agent_runtime_service_key() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -500,6 +520,10 @@ def test_production_settings_require_agent_runtime_service_key() -> None:
 def test_production_settings_reject_wildcard_trusted_hosts() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -518,7 +542,11 @@ def test_production_settings_reject_wildcard_trusted_hosts() -> None:
 
 
 def test_production_managed_object_storage_requires_bucket_and_credentials() -> None:
-    settings = Settings(app_env="production", object_storage_provider="oss")
+    settings = Settings(app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+ object_storage_provider="oss")
 
     with pytest.raises(ValueError, match="OBJECT_STORAGE_BUCKET"):
         settings.validate_for_startup()
@@ -527,6 +555,10 @@ def test_production_managed_object_storage_requires_bucket_and_credentials() -> 
 def test_production_rejects_implicit_local_database_and_redis_urls() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         object_storage_provider="s3",
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",
@@ -544,6 +576,10 @@ def test_production_rejects_implicit_local_database_and_redis_urls() -> None:
 def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -566,6 +602,10 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
 def test_production_accepts_configured_openai_vision_provider() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -591,6 +631,10 @@ def test_production_accepts_configured_openai_vision_provider() -> None:
 def test_production_rejects_local_stub_voice_provider() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",
@@ -612,6 +656,10 @@ def test_production_rejects_local_stub_voice_provider() -> None:
 def test_production_rejects_local_stub_vision_provider() -> None:
     settings = Settings(
         app_env="production",
+        auth_email_token_key="test-only-auth-mail-key-32-characters",
+        auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
+        auth_google_client_id="test-google-client",
+
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",
         object_storage_provider="s3",

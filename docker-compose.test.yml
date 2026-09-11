@@ -5,6 +5,7 @@ x-backend-image: &backend-image
   env_file:
     - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.test.env}
   environment:
+    AUTH_REQUIRE_ACTIVE_SESSION: "true"
     DATABASE_URL: postgresql+asyncpg://momcozy_test:${MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD}@test-postgres:5432/momcozy_test
     REDIS_URL: redis://product-backend:${MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD}@test-redis:6379/0
     OBJECT_STORAGE_ACCESS_KEY_ID: ${MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY:?Set MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY}
@@ -62,6 +63,30 @@ services:
       - tools
     cpus: 0.5
     mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-worker:
+    <<: *backend-image
+    command: python -m app.workers.notifications
+    volumes:
+      - ${MOMCOZY_PUSH_SECRETS_DIR:-./.local/push-secrets}:/run/momcozy-push:ro
+    init: true
+    restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth-email-worker:
+    <<: *backend-image
+    command: python -m scripts.deliver_auth_emails
+    restart: unless-stopped
+    init: true
+    cpus: 0.25
+    mem_limit: 256m
     depends_on:
       postgres:
         condition: service_healthy

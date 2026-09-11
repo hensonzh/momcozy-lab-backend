@@ -19,6 +19,7 @@ from ..modules.auth import (
     authenticate_service_key,
 )
 from ..modules.auth.repository import AuthSessionRepository
+from ..modules.users.models import AccountStatus, User
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -67,6 +68,9 @@ async def _require_active_device_session(
         device_session = await AuthSessionRepository(session).get_device_session(session_id=session_id)
         if device_session is None or device_session.status != "active" or device_session.user_id != current_user.user_id:
             raise ApiError(code="authentication_required", message="Session is no longer active.", status=401)
+        user = await session.get(User, current_user.user_id)
+        if user is None or user.status != AccountStatus.ACTIVE:
+            raise ApiError(code="account_inactive", message="Account is not active.", status=403)
         if "ibclc" in current_user.roles:
             from ..modules.auth.workbench_access import workbench_session_roles
             await workbench_session_roles(device_session, session, settings)

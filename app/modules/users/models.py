@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, func
@@ -10,10 +11,21 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from ...infrastructure.db.base import Base
 
 
+class AccountStatus(StrEnum):
+    ACTIVE = "active"
+    EMAIL_UNVERIFIED = "email_unverified"
+    DISABLED = "disabled"
+    SUSPENDED = "suspended"
+    DELETED = "deleted"
+
+
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     status: Mapped[str] = mapped_column(String(32), default="active", server_default="active", nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -37,9 +49,11 @@ class AuthIdentity(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
-    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(320), nullable=False)
     email: Mapped[str] = mapped_column(String(320), default="", server_default="", nullable=False)
     phone: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
+    display_name: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
+    avatar_url: Mapped[str] = mapped_column(String(1024), default="", server_default="", nullable=False)
     device_id: Mapped[str] = mapped_column(String(120), default="", server_default="", nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), default="", server_default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
