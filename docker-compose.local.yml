@@ -9,7 +9,7 @@ services:
     env_file:
       - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
     ports:
-      - "8000:8000"
+      - "${MOMCOZY_BACKEND_API_BIND:-127.0.0.1:8769}:8000"
     depends_on:
       postgres:
         condition: service_healthy
