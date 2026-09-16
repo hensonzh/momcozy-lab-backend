@@ -36,6 +36,10 @@ backend-migrate:
 backend-local-minio:
 	$(COMPOSE) up -d minio minio-init
 
+.PHONY: backend-local-account
+backend-local-account:
+	$(COMPOSE) exec -T api python < scripts/seed_local_test_account.py
+
 backend-test-pull backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset:
 	@echo "Direct test mutation is disabled; use the protected backend-test-delivery workflow or an approved maintenance runbook." >&2
 	@exit 2
