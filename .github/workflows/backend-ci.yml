@@ -198,23 +198,8 @@ jobs:
           test -n "${digest}"
           printf 'digest=%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: Write the immutable image manifest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          python scripts/test_release.py image-manifest \
-            --image-ref "ghcr.io/${GITHUB_REPOSITORY}@${IMAGE_DIGEST}" \
-            --commit-sha "${GITHUB_SHA}" \
-            --output backend-image-manifest.json
-
-      - name: Upload the image manifest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-image-manifest-${{ github.sha }}
-          path: backend-image-manifest.json
-          retention-days: 30
+      # The image digest is published by GHCR under the immutable commit tag.
+      # Delivery resolves that tag directly, avoiding quota-bound artifacts.
 
   postgres-migration:
     runs-on: ubuntu-latest

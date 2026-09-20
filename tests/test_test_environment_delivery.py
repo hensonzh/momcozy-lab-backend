@@ -110,8 +110,7 @@ def test_ci_publishes_one_sha_tagged_image_and_records_its_digest() -> None:
         in workflow
     )
     assert r'\"org.opencontainers.image.revision\"' not in workflow
-    assert "steps.push.outputs.digest" in workflow
-    assert "backend-image-manifest-${{ github.sha }}" in workflow
+    assert "printf 'digest=%s\\n'" in workflow
 
 
 def test_test_delivery_is_manual_protected_serial_and_host_key_checked() -> None:
@@ -147,8 +146,9 @@ def test_test_delivery_is_manual_protected_serial_and_host_key_checked() -> None
     assert "REQUESTED_COMMIT_SHA: ${{ inputs.commit_sha }}" in workflow
     assert 'github.ref == \'refs/heads/main\'' in workflow
     assert "git merge-base --is-ancestor" in workflow
-    assert "gh run download" in workflow
-    assert "backend-image-manifest-" in workflow
+    assert "gh api --paginate" in workflow
+    assert "users/${GITHUB_REPOSITORY_OWNER}/packages/container/momcozy-lab-backend/versions" in workflow
+    assert "backend-image-manifest-" not in workflow
     assert "/usr/bin/flock" in workflow
     assert "test-release.lock" in workflow
     for run_block in _literal_run_blocks(workflow):
