@@ -149,7 +149,13 @@ def test_ci_compose_is_a_secret_safe_runtime_override() -> None:
     assert "BEGIN PRIVATE KEY" not in compose
     assert "\n  postgres:" not in compose
     assert "\n  redis:" not in compose
-    assert "\n  minio:" not in compose
+    # The CI infrastructure override only pins the verified upstream images.
+    for service, image in {
+        "minio": "quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z",
+        "minio-init": "quay.io/minio/mc:RELEASE.2025-07-21T05-28-08Z",
+    }.items():
+        block = compose.split(f"\n  {service}:\n", 1)[1].split("\n\n", 1)[0]
+        assert block.strip() == f"image: {image}"
 
 
 def test_ci_container_job_builds_migrates_smokes_and_cleans_up() -> None:

@@ -90,7 +90,16 @@ def test_test_compose_only_consumes_an_explicit_release_image() -> None:
 def test_ci_publishes_one_sha_tagged_image_and_records_its_digest() -> None:
     workflow = CI_WORKFLOW.read_text()
 
-    assert "publish-image:" in workflow
+    assert "      - name: Push the immutable commit tag" in workflow
+    container = workflow.split("  container:\n", 1)[1]
+    prerequisites = container.split("    permissions:", 1)[0]
+    assert "      - test" in prerequisites
+    assert "      - postgres-migration" in prerequisites
+    assert "      - redis-product-profile" in prerequisites
+    assert "      - object-storage-integration" in prerequisites
+    assert "docker save" not in workflow
+    assert "docker load" not in workflow
+    assert "Download the already verified image" not in workflow
     assert "packages: write" in workflow
     assert "docker/login-action@" in workflow
     assert "docker/build-push-action@" in workflow
