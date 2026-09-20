@@ -51,12 +51,8 @@ jobs:
           python scripts/export_api_surface_catalog.py --openapi-input /tmp/openapi.generated.json --output /tmp/api-surface-catalog.md
           diff -u docs/api-surface-catalog.md /tmp/api-surface-catalog.md
 
-      - name: Publish Product OpenAPI contract
-        uses: actions/upload-artifact@v4
-        with:
-          name: momcozy-product-openapi
-          path: docs/openapi.generated.json
-
+      # The checked-in OpenAPI snapshot remains the contract. Do not upload it as
+      # a second artifact: GitHub artifact quota can block an otherwise verified release.
       - name: Scan backend for legacy runtime references
         run: |
           ! grep -R -E 'previous_response_id|ChatSession|ENTRY_API_KEY|query_params.get\("user_id"|momcozy_agent' \
