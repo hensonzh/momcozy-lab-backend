@@ -173,6 +173,7 @@ def test_ci_container_job_builds_migrates_smokes_and_cleans_up() -> None:
     assert "--profile tools run --rm migrate" in container_job
     assert "--wait-timeout 90" in container_job
     assert "http://127.0.0.1:8000/v1/health/ready" in container_job
+    assert "127.0.0.1:8000:8000" in (ROOT / "docker-compose.ci.yml").read_text()
     assert "if: failure()" in container_job
     assert "if: always()" in container_job
     assert "down --volumes" in container_job

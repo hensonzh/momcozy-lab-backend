@@ -4,6 +4,8 @@ name: momcozy-lab-backend-ci
 services:
   api:
     image: momcozy-lab-backend:ci
+    ports:
+      - "127.0.0.1:8000:8000"
     environment:
       AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64:?Set AUTH_JWT_PRIVATE_KEY_B64}
       APP_ENV: test
