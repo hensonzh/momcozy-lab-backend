@@ -135,6 +135,11 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | PATCH | `/v1/profile/lactation` | profiles | flutter | stable | Update My Maternal Lactation Profile |
 | GET | `/v1/profile/me` | profiles | flutter | stable | Get My Profile |
 | PATCH | `/v1/profile/me` | profiles | flutter | stable | Update My Profile |
+| GET | `/v1/profile/me-experience` | profiles | flutter | stable | Read Me |
+| PUT | `/v1/profile/me-experience/concerns/{concern_id}` | profiles | flutter | stable | Put Concern |
+| PUT | `/v1/profile/me-experience/order` | profiles | flutter | stable | Put Order |
+| PATCH | `/v1/profile/me-experience/profile` | profiles | flutter | stable | Update Profile |
+| PUT | `/v1/profile/me-experience/records/{record_id}` | profiles | flutter | stable | Put Record |
 | GET | `/v1/records/feeding` | records | flutter | stable | List Feedings |
 | POST | `/v1/records/feeding` | records | flutter | stable | Create Feeding |
 | DELETE | `/v1/records/feeding/{record_id}` | records | flutter | stable | Delete Feeding |

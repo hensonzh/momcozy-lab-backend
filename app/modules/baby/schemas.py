@@ -81,6 +81,7 @@ class DiaperObservation(NotedObservation):
 
 
 class GrowthObservation(DatedObservation):
+    measurement_source: Literal["home", "clinic", "other"] | None = None
     kind: Literal['growth']
     metric: Literal['weight', 'length', 'head_circumference']
     value: float = Field(gt=0, le=150)

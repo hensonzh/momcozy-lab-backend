@@ -51,3 +51,5 @@ __all__ = [
     "support_models",
     "users_models",
 ]
+
+from ...modules.profiles.me_models import MePreferences, MotherObservation  # noqa: F401

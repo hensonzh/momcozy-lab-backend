@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ...modules.profiles.me_router import router as me_experience_router
 
 from typing import Any, cast
 
@@ -136,3 +137,5 @@ async def _check_redis(request: Request) -> str:
             status=503,
         ) from exc
     return "ok"
+
+router.include_router(me_experience_router)
