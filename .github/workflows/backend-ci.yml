@@ -156,7 +156,12 @@ jobs:
             --wait \
             --wait-timeout 90 \
             api
-          curl --fail --silent http://127.0.0.1:8000/v1/health/ready >/dev/null
+          docker compose \
+            -f docker-compose.local.yml \
+            -f docker-compose.ci.yml \
+            exec --no-TTY api \
+            python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/ready', timeout=5)" \
+            >/dev/null
 
       - name: Show Compose logs on failure
         if: failure()
