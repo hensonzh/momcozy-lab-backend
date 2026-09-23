@@ -5,6 +5,9 @@ Agent Runtime is deployed from a separate repository and has its own database,
 workers, model configuration, evals, and run-recovery procedures, while sharing
 the same PostgreSQL, Redis, and MinIO service instances.
 
+The superseded three-repository design and server snapshot is retained only for
+historical audit at [`archive/DEPLOYMENT_AUDIT_2026-09-04.md`](archive/DEPLOYMENT_AUDIT_2026-09-04.md).
+
 The current shared server profile is `test`; automated CI uses a separate,
 ephemeral `momcozy-lab-backend-ci` Compose project and is not a deployable
 environment. Build release images under the environment-neutral
