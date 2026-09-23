@@ -14,7 +14,6 @@ from app.modules.documentation.schemas import NoteWrite, NoteVersionWrite, PlanW
 from app.modules.ibclc.repository import WorkbenchRepository
 from app.modules.ibclc.service import WorkbenchService
 from app.modules.lactation.models import LactationRecord
-from app.modules.mother.models import MotherDiaryEntry
 from app.modules.profiles.models import UserProfile, MaternalProfile
 from app.modules.reports.models import CareConversationLink
 from app.modules.reports.workflow import CareReportWorkflow
@@ -35,8 +34,6 @@ async def ready_report_case(*, include_context=False):
             session.add(CareConversationLink(thread_id=thread, episode_id=appointment.episode_id, shared_since=at[0]-timedelta(hours=1)))
             session.add(LactationRecord(owner_user_id=mom.user_id, method='pump', side='left', occurred_at=at[0]-timedelta(minutes=30), volume_ml=60,
                 note='先记录今天的感受。', version=1, created_at=at[0], updated_at=at[0]))
-            session.add(MotherDiaryEntry(owner_user_id=mom.user_id, entry_date=at[0].date(),
-                diary={'rest': {'total': '4-5h', 'recovery': 'managing'}, 'body': {'energy': 'managing'}, 'mood': {'tone': 'steady'}}, version=1, updated_at=at[0]))
             service = documentation(session)
             await service.save_note(expert, appointment.id, NoteWrite(expected_revision=0, expected_version=0, content=NOTE), 'fixture-note', 'fixture-note')
             await service.sign_note(expert, appointment.id, NoteVersionWrite(expected_revision=1, expected_version=1), 'fixture-sign', 'fixture-sign')

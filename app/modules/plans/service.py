@@ -8,14 +8,12 @@ from uuid import UUID
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyKey, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import Plan, PlanTask
-from .pregnancy_plan_todos import normalize_pregnancy_plan_payload
 from .repository import PlansRepository, ScheduleTimelineTaskRow
 from .schedule_domain import normalize_schedule_domains
 
 
 PLAN_CREATE_IDEMPOTENCY_SCOPE = "plans.create"
 PLAN_TASK_CREATE_IDEMPOTENCY_SCOPE = "plans.tasks.create"
-PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE = "plans.todos.completion"
 PLAN_TASK_STATES = frozenset({"pending", "completed", "skipped"})
 MAX_MILK_SCHEDULE_RESCHEDULE_TASKS = 100
 
@@ -44,10 +42,10 @@ class PlansService:
         request_id: str = "",
         idempotency_key: str | None = None,
     ) -> Plan:
-        if plan_type.strip().lower() == "milk_management":
+        if plan_type.strip().lower() in {"milk_management", "pregnancy", "birth_prep", "birth_journey"}:
             raise ApiError(
                 code="unsupported_plan_type",
-                message="Creating milk-management plans is no longer supported.",
+                message="Creating this plan type is no longer supported.",
                 status=422,
             )
         normalized_payload = _normalize_plan_payload(plan_type=plan_type, payload=payload or {})
@@ -61,27 +59,6 @@ class PlansService:
         if idempotency_record is not None and idempotency_record.response_ref:
             return await self._replay_plan(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
 
-        if plan_type.strip().lower() == "pregnancy":
-            lock_plan_type = getattr(self.repository, "lock_plan_type", None)
-            if callable(lock_plan_type):
-                await lock_plan_type(
-                    owner_user_id=owner_user_id,
-                    plan_type="pregnancy",
-                )
-            active_plan = await self.repository.get_active_plan_by_type_for_update(
-                owner_user_id=owner_user_id,
-                plan_type="pregnancy",
-            )
-            if active_plan is not None:
-                raise ApiError(
-                    code="active_pregnancy_plan_exists",
-                    message="An active pregnancy plan already exists. Update or delete it before creating another.",
-                    status=409,
-                    details={
-                        "plan_id": str(active_plan.id),
-                        "version": active_plan.version,
-                    },
-                )
         plan = await self.repository.create_plan(
             owner_user_id=owner_user_id,
             plan_type=plan_type,
@@ -468,11 +445,7 @@ class PlansService:
         return applied
 
     async def set_task_completed(self, *, owner_user_id: UUID, task_id: UUID, completed: bool, request_id: str = "") -> PlanTask:
-        existing = await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
-        pregnancy_plan = await self._lock_linked_pregnancy_plan(
-            owner_user_id=owner_user_id,
-            task=existing,
-        )
+        await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
         task = await self.repository.set_task_completed(
             task_id=task_id,
             owner_user_id=owner_user_id,
@@ -481,13 +454,6 @@ class PlansService:
         )
         if task is None:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
-        if pregnancy_plan is not None:
-            await self._sync_pregnancy_todo_from_task(
-                owner_user_id=owner_user_id,
-                plan=pregnancy_plan,
-                task=task,
-                state="completed" if completed else "pending",
-            )
         await self._audit(
             owner_user_id=owner_user_id,
             action="plans.tasks.complete",
@@ -512,11 +478,7 @@ class PlansService:
                 message="state must be pending, completed, or skipped.",
                 status=422,
             )
-        existing = await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
-        pregnancy_plan = await self._lock_linked_pregnancy_plan(
-            owner_user_id=owner_user_id,
-            task=existing,
-        )
+        await self.get_task(owner_user_id=owner_user_id, task_id=task_id)
         task = await self.repository.set_task_state(
             task_id=task_id,
             owner_user_id=owner_user_id,
@@ -525,13 +487,6 @@ class PlansService:
         )
         if task is None:
             raise ApiError(code="not_found", message="Plan task not found.", status=404)
-        if pregnancy_plan is not None:
-            await self._sync_pregnancy_todo_from_task(
-                owner_user_id=owner_user_id,
-                plan=pregnancy_plan,
-                task=task,
-                state=normalized_state,
-            )
         await self._audit(
             owner_user_id=owner_user_id,
             action="plans.tasks.state",
@@ -541,103 +496,6 @@ class PlansService:
         )
         return task
 
-    async def update_plan_todo_completion(
-        self,
-        *,
-        owner_user_id: UUID,
-        plan_id: UUID,
-        item_id: str,
-        completed: bool,
-        expected_version: int,
-        request_id: str = "",
-        idempotency_key: str | None = None,
-    ) -> Plan:
-        normalized_item_id = item_id.strip()
-        if not normalized_item_id:
-            raise ApiError(code="validation_failed", message="item_id is required.", status=422)
-        idempotency_record = await self._reserve_idempotency(
-            owner_user_id=owner_user_id,
-            scope=PLAN_TODO_COMPLETION_IDEMPOTENCY_SCOPE,
-            key=idempotency_key,
-            payload={
-                "plan_id": str(plan_id),
-                "item_id": normalized_item_id,
-                "completed": completed,
-                "expected_version": expected_version,
-            },
-        )
-        if idempotency_record is not None and idempotency_record.response_ref:
-            return await self._replay_plan(owner_user_id=owner_user_id, response_ref=idempotency_record.response_ref)
-
-        plan = await self.repository.get_plan_for_owner_for_update(
-            plan_id=plan_id,
-            owner_user_id=owner_user_id,
-        )
-        if plan is None:
-            raise ApiError(code="not_found", message="Plan not found.", status=404)
-        if plan.plan_type != "pregnancy":
-            raise ApiError(code="validation_failed", message="Plan is not a pregnancy plan.", status=422)
-        if plan.version != expected_version:
-            raise ApiError(
-                code="version_conflict",
-                message="Plan was updated by another request.",
-                status=409,
-                details={"expected_version": expected_version, "current_version": plan.version},
-            )
-
-        next_payload = deepcopy(plan.payload)
-        item = _find_todo_item_by_item_id(next_payload, normalized_item_id)
-        if item is None:
-            raise ApiError(
-                code="todo_item_not_found",
-                message="Plan todo item was not found or does not have a stable item_id.",
-                status=404,
-            )
-        item["completed"] = completed
-        item["status"] = "completed" if completed else "pending"
-        updated = await self.repository.update_plan_payload_and_version(
-            plan_id=plan_id,
-            owner_user_id=owner_user_id,
-            expected_version=expected_version,
-            payload=next_payload,
-        )
-        if updated is None:
-            raise ApiError(code="version_conflict", message="Plan was updated by another request.", status=409)
-        linked_tasks = await self.repository.list_tasks_for_plan(
-            owner_user_id=owner_user_id,
-            plan_id=plan_id,
-            task_dates=None,
-            status=None,
-            limit=500,
-        )
-        completed_at = _utcnow() if completed else None
-        synced_task_count = 0
-        for task in linked_tasks:
-            if not _task_links_to_pregnancy_todo(task, item_id=normalized_item_id):
-                continue
-            synced = await self.repository.set_task_state(
-                task_id=task.id,
-                owner_user_id=owner_user_id,
-                state="completed" if completed else "pending",
-                completed_at=completed_at,
-            )
-            if synced is None:
-                raise ApiError(
-                    code="plan_task_sync_conflict",
-                    message="A linked plan task changed during todo update.",
-                    status=409,
-                )
-            synced_task_count += 1
-        await self._complete_idempotency(idempotency_record=idempotency_record, response_ref=str(plan_id))
-        await self._audit(
-            owner_user_id=owner_user_id,
-            action="plans.todos.completion",
-            resource_type="plan",
-            resource_id=str(plan_id),
-            request_id=request_id,
-            details={"synced_task_count": synced_task_count, "version": updated.version},
-        )
-        return updated
 
     async def update_task(
         self,
@@ -731,76 +589,7 @@ class PlansService:
             request_id=request_id,
         )
 
-    async def _lock_linked_pregnancy_plan(
-        self,
-        *,
-        owner_user_id: UUID,
-        task: PlanTask,
-    ) -> Plan | None:
-        if not _is_pregnancy_plan_task(task):
-            return None
-        if task.plan_id is None:
-            raise ApiError(
-                code="plan_task_sync_conflict",
-                message="Pregnancy plan task is missing its parent plan.",
-                status=409,
-            )
-        plan = await self.repository.get_plan_for_owner_for_update(
-            plan_id=task.plan_id,
-            owner_user_id=owner_user_id,
-        )
-        if plan is None:
-            raise ApiError(code="not_found", message="Linked pregnancy plan not found.", status=404)
-        if plan.plan_type != "pregnancy":
-            raise ApiError(
-                code="plan_task_sync_conflict",
-                message="Plan task is linked to an incompatible plan type.",
-                status=409,
-            )
-        return plan
 
-    async def _sync_pregnancy_todo_from_task(
-        self,
-        *,
-        owner_user_id: UUID,
-        plan: Plan,
-        task: PlanTask,
-        state: str,
-    ) -> None:
-        item_id = _nonempty_text(task.payload.get("plan_todo_item_id"))
-        period_id = _nonempty_text(task.payload.get("plan_todo_period_id"))
-        if not item_id:
-            raise ApiError(
-                code="plan_task_sync_conflict",
-                message="Pregnancy plan task is missing its todo item reference.",
-                status=409,
-            )
-        next_payload = deepcopy(plan.payload)
-        item = _find_todo_item_by_reference(
-            next_payload,
-            item_id=item_id,
-            period_id=period_id or None,
-        )
-        if item is None:
-            raise ApiError(
-                code="plan_task_sync_conflict",
-                message="Linked pregnancy plan todo item was not found.",
-                status=409,
-            )
-        item["completed"] = state == "completed"
-        item["status"] = state
-        updated = await self.repository.update_plan_payload_and_version(
-            plan_id=plan.id,
-            owner_user_id=owner_user_id,
-            expected_version=plan.version,
-            payload=next_payload,
-        )
-        if updated is None:
-            raise ApiError(
-                code="version_conflict",
-                message="Pregnancy plan changed during task update.",
-                status=409,
-            )
 
     async def _reserve_idempotency(
         self, *, owner_user_id: UUID, scope: str, key: str | None, payload: dict[str, Any]
@@ -972,60 +761,4 @@ def _payload_date(value: Any) -> date | None:
 
 
 def _normalize_plan_payload(*, plan_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if plan_type.strip().lower() != "pregnancy":
-        return deepcopy(payload)
-    return normalize_pregnancy_plan_payload(payload)
-
-
-def _find_todo_item_by_item_id(payload: dict[str, Any], item_id: str) -> dict[str, Any] | None:
-    return _find_todo_item_by_reference(payload, item_id=item_id)
-
-
-def _find_todo_item_by_reference(
-    payload: dict[str, Any],
-    *,
-    item_id: str,
-    period_id: str | None = None,
-) -> dict[str, Any] | None:
-    for period_index, period in enumerate(_todo_periods(payload)):
-        current_period_id = _nonempty_text(period.get("id")) or f"period_{period_index + 1:02d}"
-        if period_id is not None and current_period_id != period_id:
-            continue
-        items = period.get("items")
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if isinstance(item, dict) and _nonempty_text(item.get("item_id")) == item_id:
-                return item
-    return None
-
-
-def _is_pregnancy_plan_task(task: PlanTask) -> bool:
-    return _nonempty_text(task.payload.get("source")) == "pregnancy_plan"
-
-
-def _task_links_to_pregnancy_todo(task: PlanTask, *, item_id: str) -> bool:
-    return (
-        _is_pregnancy_plan_task(task)
-        and _nonempty_text(task.payload.get("plan_todo_item_id")) == item_id
-    )
-
-
-def _todo_periods(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    card = payload.get("card")
-    if not isinstance(card, dict):
-        return []
-    card_json = card.get("card_json")
-    if not isinstance(card_json, dict):
-        return []
-    todo_plan = card_json.get("todo_plan")
-    if not isinstance(todo_plan, dict):
-        return []
-    periods = todo_plan.get("periods")
-    if not isinstance(periods, list):
-        return []
-    return [period for period in periods if isinstance(period, dict)]
-
-
-def _nonempty_text(value: Any) -> str:
-    return value.strip() if isinstance(value, str) else ""
+    return deepcopy(payload)

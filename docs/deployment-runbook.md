@@ -89,19 +89,17 @@ The host layout is fixed under `/opt/momcozy-lab`:
 - database backups: `/opt/momcozy-lab/backups/backend`;
 - archived release manifests: `/opt/momcozy-lab/manifests`.
 
-The current private repository plan cannot enforce GitHub environment required
-reviewers. The workflow therefore uses a first-party issue-comment gate before
-the delivery job receives any deployment secret. Create one repository issue
-for test approvals, set repository variable `TEST_APPROVAL_ISSUE` to its
-number, and set `TEST_APPROVERS` to a comma-separated allowlist of operator
-logins. For each run, an allowlisted operator must post the exact
-`/approve-test ...` command shown in the approval job summary. This separate
-confirmation may be performed by the run initiator, matching GitHub required
-reviewers when prevent-self-review is not enabled. The
-command binds the approval to the repository, run ID, attempt, and trigger SHA;
-missing variables or approval fail closed after at most 30 minutes.
-The current remote configuration uses issue `#1`,
-`TEST_APPROVAL_ISSUE=1`, and `TEST_APPROVERS=hensonzh`.
+Test delivery is an explicit manual dispatch from `main`. Before deployment
+secrets are available, the workflow checks both the original actor and the
+re-run actor against the comma-separated `TEST_APPROVERS` repository variable.
+Missing, malformed, or unauthorized operator configuration fails closed.
+The current allowlist is `hensonzh`. No second issue comment or polling wait is
+required; the old `TEST_APPROVAL_ISSUE` variable is no longer consumed.
+
+CI builds and smoke-tests the image on the publishing runner after prerequisite
+gates pass, verifies its OCI revision, then pushes that same image to GHCR.
+Only the small immutable digest manifest is uploaded to Actions; no image tar
+is saved, uploaded, downloaded, or loaded by another job.
 
 Keep the `test` environment for deployment records and configure
 `TEST_SSH_HOST`, `TEST_SSH_PORT`, `TEST_SSH_USER`,
@@ -220,37 +218,18 @@ safeguards remain in code until a separate production design is approved.
 
 ## Agent Runtime Integration Boundary
 
-The independent Agent Runtime calls only the Product Backend internal API:
+The independent Agent Runtime uses only:
 
-- `GET /v1/internal/agent/profile`
-- `POST /v1/internal/agent/actions/profile.update/apply`
-- `GET /v1/internal/agent/lactation/milk-analysis-snapshot`
-- `POST /v1/internal/agent/actions/lactation.record/apply`
-- `GET /v1/internal/agent/plans/current`
-- `GET /v1/internal/agent/plans/calendar`
-- `GET /v1/internal/agent/plans/{plan_id}`
-- `GET /v1/internal/agent/schedule-timeline`
-- `POST /v1/internal/agent/actions/plans/apply`
-- `GET /v1/internal/agent/diary`
-- `POST /v1/internal/agent/actions/diary.entry/apply`
-- `POST /v1/internal/agent/files/resolve`
+- `GET /v1/internal/agent/profile` for the current Run's basic profile context.
+- `POST /v1/internal/agent/files/resolve` for model attachments.
 
-Every call requires the Agent Runtime-only `X-Service-Key`. Read calls carry
-`actor_user_id` as an explicit query parameter. Action calls carry
-`actor_user_id`, `action_id`, and runtime correlation metadata in the request
-body. The Product Backend derives owner scope from `actor_user_id`, validates
-the action payload, writes business state, and records audit data.
+Both require the Runtime-only service key and explicit actor scope. Business
+Tool and Action endpoints have been removed; Runtime cannot write Product data.
 
-Every action apply call also requires:
-
-```text
-Idempotency-Key: agent-action:<action_id>
-```
-
-The same action and idempotency key must replay the stored Product Backend result rather
-than duplicate a business write. Agent Runtime owns proposal, confirmation,
-conversation, orchestration, and final-response state; the Product Backend owns
-only the resulting business transaction.
+The retirement migration `20260916_0019` removes both diary tables and prenatal
+plans/tasks, preserving feeding/pumping facts by clearing retired task links.
+Reports using removed diary sources are cancelled and their derived content is
+cleared. Downgrade recreates empty tables only; historical rows require a backup.
 
 `POST /v1/internal/agent/files/resolve` validates both `actor_user_id` and
 `file_id` ownership before returning an opaque Product Backend capability URL.
@@ -371,3 +350,17 @@ The current single-key JWKS contract does not provide an overlapping signing-key
 window. Add current/previous key publication before relying on zero-downtime JWT
 rotation. Never put old or new credentials in logs, tickets, commits, or
 OpenAPI examples.
+
+### Worker lifecycle during test delivery
+
+Deploy, restart, and rollback reconcile API, notification, and auth-email workers
+from the same immutable image. The report worker starts when both
+`CARE_REPORT_RUNTIME_URL` and `CARE_REPORT_SERVICE_KEY` are configured; the video
+worker starts when `CONSULTATION_VIDEO_PROVIDER` is enabled. Disabled workers
+are stopped. Historical source snapshots only select services defined by that
+snapshot, and failed candidate workers are stopped before restoring a previous
+release. PostgreSQL, Redis, and MinIO are never restarted by this switch.
+
+Starting a mail worker does not configure SMTP; complete the account-auth fields
+in the private env before testing email delivery. Readiness alone does not prove
+SMTP, Google login, FCM, or report generation works.

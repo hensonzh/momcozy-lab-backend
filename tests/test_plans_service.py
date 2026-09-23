@@ -53,27 +53,6 @@ def test_milk_plan_creation_is_retired_at_the_service_boundary() -> None:
     assert repository.create_plan_kwargs == {}
 
 
-def test_pregnancy_plan_create_rejects_a_second_active_plan() -> None:
-    owner_user_id = uuid4()
-    existing = _pregnancy_plan(owner_user_id=owner_user_id)
-    repository = FakePlansRepository(plan=existing, plans=[existing])
-    service = PlansService(repository=repository)
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            service.create_plan(
-                owner_user_id=owner_user_id,
-                plan_type="pregnancy",
-                title="重复孕期计划",
-            )
-        )
-
-    assert exc_info.value.code == "active_pregnancy_plan_exists"
-    assert exc_info.value.details == {
-        "plan_id": str(existing.id),
-        "version": existing.version,
-    }
-    assert repository.locked_plan_types == [(owner_user_id, "pregnancy")]
 
 
 def test_plans_service_creates_and_completes_task() -> None:
@@ -91,50 +70,8 @@ def test_plans_service_creates_and_completes_task() -> None:
     assert audit_service.record_kwargs["action"] == "plans.tasks.complete"
 
 
-def test_pregnancy_plan_task_completion_updates_authoritative_todo() -> None:
-    owner_user_id = uuid4()
-    plan = _pregnancy_plan(owner_user_id=owner_user_id)
-    task = _pregnancy_plan_task(owner_user_id=owner_user_id, plan_id=plan.id)
-    repository = FakePlansRepository(plan=plan, task=task, tasks=[task])
-    service = PlansService(repository=repository, audit_service=FakeAuditService())
-
-    completed = asyncio.run(
-        service.set_task_completed(
-            owner_user_id=owner_user_id,
-            task_id=task.id,
-            completed=True,
-            request_id="req_timeline_complete",
-        )
-    )
-
-    item = plan.payload["card"]["card_json"]["todo_plan"]["periods"][0]["items"][0]
-    assert completed.status == "completed"
-    assert item["completed"] is True
-    assert item["status"] == "completed"
-    assert plan.version == 2
 
 
-def test_pregnancy_plan_task_skipped_state_updates_authoritative_todo() -> None:
-    owner_user_id = uuid4()
-    plan = _pregnancy_plan(owner_user_id=owner_user_id)
-    task = _pregnancy_plan_task(owner_user_id=owner_user_id, plan_id=plan.id)
-    repository = FakePlansRepository(plan=plan, task=task, tasks=[task])
-    service = PlansService(repository=repository, audit_service=FakeAuditService())
-
-    skipped = asyncio.run(
-        service.set_task_state(
-            owner_user_id=owner_user_id,
-            task_id=task.id,
-            state="skipped",
-            request_id="req_timeline_skip",
-        )
-    )
-
-    item = plan.payload["card"]["card_json"]["todo_plan"]["periods"][0]["items"][0]
-    assert skipped.status == "skipped"
-    assert item["completed"] is False
-    assert item["status"] == "skipped"
-    assert plan.version == 2
 
 
 def test_plans_service_supports_typed_skipped_state() -> None:
@@ -176,14 +113,14 @@ def test_plans_service_updates_task_with_audit() -> None:
         service.update_task(
             owner_user_id=owner_user_id,
             task_id=task.id,
-            updates={"title": "Pack hospital bag", "description": None, "payload": {"category": "birth_prep"}},
+            updates={"title": "Prepare appointment", "description": None, "payload": {"category": "general"}},
             request_id="req_task_update",
         )
     )
 
-    assert updated.title == "Pack hospital bag"
+    assert updated.title == "Prepare appointment"
     assert updated.description == ""
-    assert updated.payload == {"category": "birth_prep"}
+    assert updated.payload == {"category": "general"}
     assert repository.update_task_kwargs["updates"]["description"] == ""
     assert audit_service.record_kwargs["action"] == "plans.tasks.update"
 
@@ -219,7 +156,7 @@ def test_plans_service_task_idempotency_hash_includes_persisted_body() -> None:
             task_time="09:00",
             title="Pack bag",
             description="Bring charger and snacks",
-            payload={"category": "birth_prep"},
+            payload={"category": "general"},
             idempotency_key="idem-task",
         )
     )
@@ -231,7 +168,7 @@ def test_plans_service_task_idempotency_hash_includes_persisted_body() -> None:
             "task_time": "09:00",
             "title": "Pack bag",
             "description": "Bring charger and snacks",
-            "payload": {"category": "birth_prep"},
+            "payload": {"category": "general"},
         }
     )
     legacy_hash = request_hash({"plan_id": "", "task_date": "2026-07-04", "task_time": "09:00", "title": "Pack bag"})
@@ -299,7 +236,7 @@ def test_plans_service_can_filter_plans_by_type() -> None:
     asyncio.run(
         service.list_plans(
             owner_user_id=owner_user_id,
-            plan_type="pregnancy",
+            plan_type="postpartum_recovery",
             status="active",
             as_of_date=date(2026, 7, 27),
             limit=5,
@@ -308,7 +245,7 @@ def test_plans_service_can_filter_plans_by_type() -> None:
 
     assert repository.list_plans_kwargs == {
         "owner_user_id": owner_user_id,
-        "plan_type": "pregnancy",
+        "plan_type": "postpartum_recovery",
         "status": "active",
         "as_of_date": date(2026, 7, 27),
         "limit": 5,
@@ -375,7 +312,7 @@ def test_plans_service_lists_cross_domain_timeline_plans_and_tasks() -> None:
     plans = asyncio.run(
         service.list_schedule_timeline_plans(
             owner_user_id=owner_user_id,
-            domains=("general", "pregnancy"),
+            domains=("general", "postpartum_recovery"),
             status="active",
             as_of_date=date(2026, 7, 27),
             limit=5,
@@ -386,7 +323,7 @@ def test_plans_service_lists_cross_domain_timeline_plans_and_tasks() -> None:
             owner_user_id=owner_user_id,
             start_date=date(2026, 7, 1),
             end_date=date(2026, 7, 31),
-            domains=("general", "pregnancy"),
+            domains=("general", "postpartum_recovery"),
             limit=7,
         )
     )
@@ -395,7 +332,7 @@ def test_plans_service_lists_cross_domain_timeline_plans_and_tasks() -> None:
     assert rows[0].task is task
     assert repository.list_schedule_plans_kwargs == {
         "owner_user_id": owner_user_id,
-        "domains": ("pregnancy", "general"),
+        "domains": ("postpartum_recovery", "general"),
         "status": "active",
         "as_of_date": date(2026, 7, 27),
         "limit": 5,
@@ -404,211 +341,21 @@ def test_plans_service_lists_cross_domain_timeline_plans_and_tasks() -> None:
         "owner_user_id": owner_user_id,
         "start_date": date(2026, 7, 1),
         "end_date": date(2026, 7, 31),
-        "domains": ("pregnancy", "general"),
+        "domains": ("postpartum_recovery", "general"),
         "limit": 7,
     }
 
 
-def test_pregnancy_plan_create_normalizes_stable_todo_item_ids() -> None:
-    owner_user_id = uuid4()
-    repository = FakePlansRepository()
-    service = PlansService(repository=repository)
-    source_payload = {
-        "card": {
-            "card_json": {
-                "todo_plan": {
-                    "periods": [
-                        {
-                            "id": "current",
-                            "items": [
-                                {"id": "existing-id", "title": "产检问题"},
-                                {"title": "准备待产包"},
-                            ],
-                        },
-                        {
-                            "id": "next",
-                            "items": [
-                                {"id": "existing-id", "title": "再次核对产检问题"},
-                            ],
-                        },
-                    ]
-                }
-            }
-        }
-    }
-
-    first = asyncio.run(
-        service.create_plan(
-            owner_user_id=owner_user_id,
-            plan_type="pregnancy",
-            title="孕期计划",
-            payload=source_payload,
-        )
-    )
-    first_ids = [
-        item["item_id"]
-        for period in first.payload["card"]["card_json"]["todo_plan"]["periods"]
-        for item in period["items"]
-    ]
-
-    repository.plan = None
-    second = asyncio.run(
-        service.create_plan(
-            owner_user_id=owner_user_id,
-            plan_type="pregnancy",
-            title="孕期计划",
-            payload=source_payload,
-        )
-    )
-    second_ids = [
-        item["item_id"]
-        for period in second.payload["card"]["card_json"]["todo_plan"]["periods"]
-        for item in period["items"]
-    ]
-
-    assert first_ids[0] == "existing-id"
-    assert first_ids[1].startswith("todo-")
-    assert first_ids[2] != "existing-id"
-    assert len(first_ids) == len(set(first_ids))
-    assert second_ids == first_ids
-    assert "item_id" not in source_payload["card"]["card_json"]["todo_plan"]["periods"][0]["items"][0]
 
 
-def test_todo_completion_updates_authoritative_payload_version_and_audit() -> None:
-    owner_user_id = uuid4()
-    plan = _pregnancy_plan(owner_user_id=owner_user_id)
-    task = _pregnancy_plan_task(owner_user_id=owner_user_id, plan_id=plan.id)
-    repository = FakePlansRepository(plan=plan, task=task, tasks=[task])
-    idempotency_service = FakeIdempotencyService(status="reserved")
-    audit_service = FakeAuditService()
-    service = PlansService(
-        repository=repository,
-        idempotency_service=idempotency_service,
-        audit_service=audit_service,
-    )
-
-    updated = asyncio.run(
-        service.update_plan_todo_completion(
-            owner_user_id=owner_user_id,
-            plan_id=plan.id,
-            item_id="prepare-hospital-bag",
-            completed=True,
-            expected_version=1,
-            request_id="req_todo",
-            idempotency_key="idem-todo",
-        )
-    )
-
-    item = updated.payload["card"]["card_json"]["todo_plan"]["periods"][0]["items"][0]
-    assert item == {
-        "item_id": "prepare-hospital-bag",
-        "title": "准备待产包",
-        "completed": True,
-        "status": "completed",
-    }
-    assert updated.version == 2
-    assert task.status == "completed"
-    assert task.completed_at is not None
-    assert idempotency_service.reserve_kwargs["scope"] == "plans.todos.completion"
-    assert audit_service.record_kwargs["action"] == "plans.todos.completion"
 
 
-def test_todo_completion_rejects_stale_version_and_legacy_item_without_item_id() -> None:
-    owner_user_id = uuid4()
-    plan = _pregnancy_plan(owner_user_id=owner_user_id)
-    plan.version = 2
-    repository = FakePlansRepository(plan=plan)
-    service = PlansService(repository=repository)
-
-    with pytest.raises(ApiError) as stale:
-        asyncio.run(
-            service.update_plan_todo_completion(
-                owner_user_id=owner_user_id,
-                plan_id=plan.id,
-                item_id="prepare-hospital-bag",
-                completed=True,
-                expected_version=1,
-            )
-        )
-    assert stale.value.code == "version_conflict"
-
-    plan.version = 2
-    plan.payload["card"]["card_json"]["todo_plan"]["periods"][0]["items"] = [
-        {"title": "准备待产包"}
-    ]
-    with pytest.raises(ApiError) as missing:
-        asyncio.run(
-            service.update_plan_todo_completion(
-                owner_user_id=owner_user_id,
-                plan_id=plan.id,
-                item_id="prepare-hospital-bag",
-                completed=True,
-                expected_version=2,
-            )
-        )
-    assert missing.value.code == "todo_item_not_found"
 
 
-def test_todo_completion_hides_cross_owner_plan_as_not_found() -> None:
-    service = PlansService(repository=FakePlansRepository(plan=None))
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            service.update_plan_todo_completion(
-                owner_user_id=uuid4(),
-                plan_id=uuid4(),
-                item_id="prepare-hospital-bag",
-                completed=True,
-                expected_version=1,
-            )
-        )
-
-    assert exc_info.value.code == "not_found"
 
 
-def test_todo_completion_rejects_non_pregnancy_plan() -> None:
-    owner_user_id = uuid4()
-    plan = _plan(owner_user_id=owner_user_id)
-    plan.plan_type = "milk"
-    service = PlansService(repository=FakePlansRepository(plan=plan))
-
-    with pytest.raises(ApiError) as exc_info:
-        asyncio.run(
-            service.update_plan_todo_completion(
-                owner_user_id=owner_user_id,
-                plan_id=plan.id,
-                item_id="prepare-hospital-bag",
-                completed=True,
-                expected_version=1,
-            )
-        )
-
-    assert exc_info.value.code == "validation_failed"
 
 
-def test_todo_completion_idempotency_replay_returns_authoritative_plan_without_second_update() -> None:
-    owner_user_id = uuid4()
-    plan = _pregnancy_plan(owner_user_id=owner_user_id)
-    plan.version = 2
-    repository = FakePlansRepository(plan=plan)
-    service = PlansService(
-        repository=repository,
-        idempotency_service=FakeIdempotencyService(status="replay", response_ref=str(plan.id)),
-    )
-
-    replayed = asyncio.run(
-        service.update_plan_todo_completion(
-            owner_user_id=owner_user_id,
-            plan_id=plan.id,
-            item_id="prepare-hospital-bag",
-            completed=True,
-            expected_version=1,
-            idempotency_key="idem-todo",
-        )
-    )
-
-    assert replayed is plan
-    assert repository.update_plan_payload_kwargs == {}
 
 
 def _now() -> datetime:
@@ -619,51 +366,12 @@ def _plan(*, owner_user_id: UUID) -> Plan:
     return Plan(id=uuid4(), owner_user_id=owner_user_id, title="Birth plan", plan_type="", summary="", source="manual", payload={}, status="active", version=1)
 
 
-def _pregnancy_plan(*, owner_user_id: UUID) -> Plan:
-    return Plan(
-        id=uuid4(),
-        owner_user_id=owner_user_id,
-        title="孕期计划",
-        plan_type="pregnancy",
-        summary="",
-        source="agent_action",
-        status="active",
-        version=1,
-        payload={
-            "card": {
-                "card_json": {
-                    "todo_plan": {
-                        "periods": [
-                            {
-                                "id": "period_01",
-                                "items": [
-                                    {"item_id": "prepare-hospital-bag", "title": "准备待产包", "completed": False}
-                                ]
-                            }
-                        ]
-                    }
-                }
-            }
-        },
-    )
 
 
 def _task(*, owner_user_id: UUID, plan_id: UUID | None = None) -> PlanTask:
     return PlanTask(id=uuid4(), owner_user_id=owner_user_id, plan_id=plan_id, title="Pack bag", task_date=date(2026, 7, 2), status="pending", payload={})
 
 
-def _pregnancy_plan_task(*, owner_user_id: UUID, plan_id: UUID) -> PlanTask:
-    task = _task(owner_user_id=owner_user_id, plan_id=plan_id)
-    task.title = "准备待产包"
-    task.payload = {
-        "domain": "pregnancy",
-        "event_type": "task",
-        "source": "pregnancy_plan",
-        "plan_todo_period_id": "period_01",
-        "plan_todo_item_id": "prepare-hospital-bag",
-        "plan_todo_instance_id": "period_01:prepare-hospital-bag",
-    }
-    return task
 
 
 class FakePlansRepository:
@@ -857,3 +565,11 @@ class FakeAuditService:
     async def record(self, **kwargs):
         self.record_kwargs = kwargs
         return None
+
+
+@pytest.mark.parametrize("plan_type", ["pregnancy", "birth_prep", "birth_journey"])
+def test_retired_plan_creation_is_rejected(plan_type: str) -> None:
+    service = PlansService(repository=None)  # rejection must happen before any database access
+    with pytest.raises(ApiError) as error:
+        asyncio.run(service.create_plan(owner_user_id=uuid4(), plan_type=plan_type, title="retired"))
+    assert error.value.code == "unsupported_plan_type"

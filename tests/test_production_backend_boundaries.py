@@ -63,7 +63,7 @@ def test_embedded_agent_runtime_is_absent_and_internal_product_adapters_remain()
     ):
         assert not retired_path.exists() or not any(retired_path.rglob("*.py"))
 
-    for module in ("diary", "files", "plans", "profiles", "records"):
+    for module in ("files",):
         module_root = APP_ROOT / "modules" / module
         for filename in ("agent_contracts.py", "agent_router.py", "agent_service.py"):
             assert (module_root / filename).is_file()
@@ -119,3 +119,11 @@ def test_records_module_keeps_domain_rules_out_of_service_or_infrastructure() ->
     doc_text = layering_doc.read_text()
     assert "domain.py" in doc_text
     assert "records/domain.py" in doc_text
+
+
+def test_retired_product_and_agent_adapters_are_removed() -> None:
+    for domain in ("diary", "mother"):
+        assert not (APP_ROOT / "modules" / domain).exists()
+    for domain in ("plans", "records", "profiles"):
+        assert not (APP_ROOT / "modules" / domain / "agent_service.py").exists()
+    assert (APP_ROOT / "modules" / "profiles" / "agent_router.py").is_file()

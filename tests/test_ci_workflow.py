@@ -35,7 +35,6 @@ def test_backend_ci_runs_core_gates() -> None:
         "python -m alembic -c alembic.ini check",
         '"idempotency_keys"',
         '"feeding_records"',
-        '"diary_entries"',
         '"maternal_current_delivery_infants"',
         "redis-product-profile",
         "scripts/check_redis_profile.py",

@@ -41,7 +41,7 @@ the Agent Runtime release.
 - Oversized upload returns `payload_too_large` without object metadata or bytes.
 - Create and list feeding and pumping records.
 - Create and list a plan and task.
-- Create and read a diary entry.
+- Verify removed diary and Runtime business-action routes return 404.
 - Upsert and list a pump device.
 - Create a support ticket.
 - Retry one write with the same `Idempotency-Key` and verify replay or the
@@ -55,8 +55,7 @@ the Agent Runtime release.
   service secrets.
 - Every `/v1/internal/agent/*` route rejects a missing, invalid, or operator
   service key.
-- A valid Runtime service key can read profile, lactation, plan, and diary
-  context only for the supplied `actor_user_id`.
+- A valid Runtime service key can read basic profile context only for the supplied `actor_user_id`.
 - Cross-user file resolve is rejected; owner-scoped file resolve returns a
   stable opaque Product capability URL and stable Product `file_id`.
 - Resolve the same active file twice with a time gap: `model_url` remains
@@ -64,14 +63,6 @@ the Agent Runtime release.
   Fetching the capability directly must not extend Redis TTL.
 - Delete the file and verify both a later internal resolve and the old public
   capability fetch are rejected; application logs must not contain its token.
-- Each action apply endpoint rejects a missing idempotency key.
-- Each action apply endpoint requires
-  `Idempotency-Key: agent-action:<action_id>`.
-- Repeating an applied action with the same key returns the same Product result
-  without duplicating the business record.
-- Audit records identify `actor_user_id`, `actor_service=agent-runtime`,
-  `action_id`, and `request_id` without recording secrets or file bodies.
-
 ## Observability
 
 - Product logs include `request_id`, route, status, and latency.

@@ -19,14 +19,13 @@ from ..consultations.models import CareConsentRevision, CareIntakeRevision
 from ..consultations.room_models import CareConsultation
 from ..documentation.models import CarePlanDraft, CarePlanPublication
 from ..lactation.models import LactationRecord
-from ..mother.models import MotherDiaryEntry
 from ..baby.models import BabyRecord
 from .baby_source_text import baby_record_text
 from .access import ReportAccess
 from .models import CareConversationLink
 from .schemas import ReportPurpose, ReportSnapshot
 from .sharing import sharing_windows
-from .source_text import diary_text, intake_text, lactation_text, plan_text
+from .source_text import intake_text, lactation_text, plan_text
 
 
 @dataclass(frozen=True)
@@ -69,12 +68,6 @@ async def prepare_sources(session: AsyncSession, access: ReportAccess, purpose: 
         raise ApiError(code='care_report_source_limit', message='The conversation sharing history exceeds the report window limit.', status=422)
     sources: list[ReportSource] = []
     available = 0
-    diary_query = select(MotherDiaryEntry).where(MotherDiaryEntry.owner_user_id == episode.owner_user_id,
-        MotherDiaryEntry.entry_date >= start_day, MotherDiaryEntry.entry_date <= day, MotherDiaryEntry.updated_at <= cutoff)
-    for value in await session.scalars(diary_query.order_by(MotherDiaryEntry.entry_date)):
-        content, truncated = source_text(diary_text(value))
-        sources.append(ReportSource(id=f'mother_diary:{value.id}:{value.version}', kind='mother_diary', recorded_at=value.updated_at, content=content, truncated=truncated))
-        available += 1
     lactation_query = select(LactationRecord).where(LactationRecord.owner_user_id == episode.owner_user_id,
         LactationRecord.occurred_at >= start, LactationRecord.occurred_at < end,
         LactationRecord.occurred_at <= cutoff, LactationRecord.updated_at <= cutoff, LactationRecord.deleted_at.is_(None))
@@ -127,7 +120,7 @@ def assemble_snapshot(prepared: PreparedSources, dialogues: ReportSourcesRead) -
         candidates.append(ReportSource(id=f'dialogue:{item.run_id}', kind='dialogue', recorded_at=item.question_at,
             content=content, truncated=truncated or item.question_truncated or item.answer_truncated))
     candidates.extend(prepared.sources)
-    if not candidates or (prepared.purpose == 'daily' and not any(value.kind in {'dialogue', 'mother_diary', 'lactation', 'baby_record'} for value in candidates)):
+    if not candidates or (prepared.purpose == 'daily' and not any(value.kind in {'dialogue', 'lactation', 'baby_record'} for value in candidates)):
         return None
     included: list[ReportSource] = []
     size = 0

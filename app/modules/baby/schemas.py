@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, computed_field, field_validator, model_validator
 
-RecordKind = Literal['feeding', 'sleep', 'diaper', 'growth', 'development']
+RecordKind = Literal['feeding', 'sleep', 'diaper', 'growth', 'development', 'daily_status']
 DevelopmentItem = Literal['looks-at-face', 'responds-to-sound', 'lifts-head']
 DEVELOPMENT_LABELS = {'looks-at-face': '看向靠近的脸', 'responds-to-sound': '听到声音后有动作或表情反应', 'lifts-head': '俯卧时短暂抬起头'}
 
@@ -80,7 +80,25 @@ class DiaperObservation(NotedObservation):
         return self
 
 
+class DailyStatusObservation(DatedObservation):
+    kind: Literal['daily_status']
+    mental_state: Literal['content', 'active', 'crying', 'drowsy'] | None = None
+    wet_count: int | None = Field(default=None, ge=1, le=100, strict=True)
+    stool_count: int | None = Field(default=None, ge=1, le=100, strict=True)
+    color: Literal['yellow', 'yellow_brown', 'green', 'brown', 'black', 'red', 'pale', 'unsure'] | None = None
+    consistency: Literal['watery', 'loose', 'pasty', 'formed', 'hard', 'unsure'] | None = None
+
+    @model_validator(mode='after')
+    def filled_tabs(self) -> DailyStatusObservation:
+        if self.mental_state is None and self.wet_count is None and self.stool_count is None:
+            raise ValueError('Fill at least one daily status item.')
+        if self.stool_count is None and (self.color is not None or self.consistency is not None):
+            raise ValueError('Stool observations require the daily stool count.')
+        return self
+
+
 class GrowthObservation(DatedObservation):
+    measurement_source: Literal['home','clinic','other'] | None = None
     kind: Literal['growth']
     metric: Literal['weight', 'length', 'head_circumference']
     value: float = Field(gt=0, le=150)
@@ -108,7 +126,7 @@ class DevelopmentObservation(DatedObservation):
         return DEVELOPMENT_LABELS[self.item_id]
 
 
-Observation = Annotated[FeedingObservation | SleepObservation | DiaperObservation | GrowthObservation | DevelopmentObservation, Field(discriminator='kind')]
+Observation = Annotated[FeedingObservation | SleepObservation | DiaperObservation | GrowthObservation | DevelopmentObservation | DailyStatusObservation, Field(discriminator='kind')]
 observation_adapter: TypeAdapter[Observation] = TypeAdapter(Observation)
 
 

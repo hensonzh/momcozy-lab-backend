@@ -23,7 +23,6 @@ from .schemas import (
     PlanTaskRead,
     PlanTaskStateUpdate,
     PlanTaskUpdate,
-    PlanTodoCompletionUpdate,
 )
 from .service import PlansService
 
@@ -113,26 +112,6 @@ async def delete_plan(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch("/{plan_id}/todos/{item_id}/completion", response_model=PlanRead)
-async def update_plan_todo_completion(
-    plan_id: UUID,
-    item_id: str,
-    payload: PlanTodoCompletionUpdate,
-    request: Request,
-    idempotency_key: str | None = Depends(optional_idempotency_key),
-    current_user: CurrentUser = Depends(require_current_user),
-    service: PlansService = Depends(get_plans_service),
-) -> PlanRead:
-    plan = await service.update_plan_todo_completion(
-        owner_user_id=current_user.user_id,
-        plan_id=plan_id,
-        item_id=item_id,
-        completed=payload.completed,
-        expected_version=payload.expected_version,
-        request_id=str(getattr(request.state, "request_id", "") or ""),
-        idempotency_key=idempotency_key,
-    )
-    return PlanRead.model_validate(plan)
 
 
 @router.post("/tasks", response_model=PlanTaskRead, status_code=status.HTTP_201_CREATED)

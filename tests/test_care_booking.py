@@ -24,7 +24,6 @@ from app.modules.appointments.service import AppointmentService
 from app.modules.care.models import CareEligibility, CareEpisode, CareOrder, CareProvider
 from app.modules.care.event_models import CareServiceEvent, CareServiceEventRead
 from app.modules.reports.models import CareConversationLink, CareReport, CareReportReview
-from app.modules.mother.models import MotherDiaryEntry
 from app.modules.lactation.models import LactationRecord
 from app.modules.baby.models import BabyRecord
 from app.modules.consultations.models import CareConsentRevision, CareIntakeRevision
@@ -70,7 +69,7 @@ async def database():
                 CareIntakeRevision.__table__, CareConsentRevision.__table__, CareConsultation.__table__,
                 CareLocationCheck.__table__, CareRoomParticipant.__table__, CareSessionConsumption.__table__, CareVideoCommand.__table__,
                 ClinicalNote.__table__, CarePlanDraft.__table__, CarePlanPublication.__table__, CareTaskProgress.__table__,
-                CareServiceEvent.__table__, CareServiceEventRead.__table__, CareConversationLink.__table__, CareReport.__table__, CareReportReview.__table__, MotherDiaryEntry.__table__, LactationRecord.__table__, BabyRecord.__table__]))
+                CareServiceEvent.__table__, CareServiceEventRead.__table__, CareConversationLink.__table__, CareReport.__table__, CareReportReview.__table__, LactationRecord.__table__, BabyRecord.__table__]))
         sessions = async_sessionmaker(engine, expire_on_commit=False)
         now = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0) + timedelta(days=1)
         provider, owners, episodes = uuid4(), [uuid4(), uuid4()], [uuid4(), uuid4()]

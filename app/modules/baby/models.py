@@ -18,10 +18,10 @@ class BabyRecord(Base):
         Index('ix_baby_records_scope_time', 'owner_user_id', 'baby_id', 'occurred_at', 'id'),
         Index('ix_baby_records_scope_date', 'owner_user_id', 'baby_id', 'recorded_on', 'id'),
         Index('uq_baby_records_active_sleep', 'baby_id', unique=True, postgresql_where=text("kind = 'sleep' AND ended_at IS NULL AND deleted_at IS NULL")),
-        CheckConstraint("kind IN ('feeding','sleep','diaper','growth','development')", name='baby_record_kind'),
+        CheckConstraint("kind IN ('feeding','sleep','diaper','growth','development','daily_status')", name='baby_record_kind'),
         CheckConstraint("ended_at IS NULL OR (kind = 'sleep' AND ended_at > occurred_at)", name='baby_record_sleep_end'),
         CheckConstraint('version >= 1', name='baby_record_version'),
-        CheckConstraint("(kind IN ('growth','development') AND recorded_on IS NOT NULL AND occurred_at IS NULL) OR (kind IN ('feeding','sleep','diaper') AND occurred_at IS NOT NULL AND recorded_on IS NULL)", name='baby_record_time_kind'),
+        CheckConstraint("(kind IN ('growth','development','daily_status') AND recorded_on IS NOT NULL AND occurred_at IS NULL) OR (kind IN ('feeding','sleep','diaper') AND occurred_at IS NOT NULL AND recorded_on IS NULL)", name='baby_record_time_kind'),
     )
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     owner_user_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey('users.id'), nullable=False)
@@ -39,5 +39,5 @@ class BabyRecord(Base):
     @property
     def observation(self) -> Observation:
         return observation_adapter.validate_python({'kind': self.kind, **self.data,
-            **({'recorded_on': self.recorded_on} if self.kind in {'growth', 'development'} else {'occurred_at': self.occurred_at}),
+            **({'recorded_on': self.recorded_on} if self.kind in {'growth', 'development', 'daily_status'} else {'occurred_at': self.occurred_at}),
             **({'ended_at': self.ended_at} if self.kind == 'sleep' else {})})

@@ -7,7 +7,7 @@ from alembic.script import ScriptDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_BASE_REVISION = "20260727_0001"
-PRODUCT_HEAD_REVISION = "20260910_0018"
+PRODUCT_HEAD_REVISION = "20260916_0019"
 
 
 def test_alembic_has_one_linear_product_migration_chain() -> None:
@@ -21,7 +21,7 @@ def test_alembic_has_one_linear_product_migration_chain() -> None:
     assert head_revision.down_revision is None
     assert script.get_current_head() == PRODUCT_HEAD_REVISION
     assert [revision.revision for revision in script.walk_revisions()] == [
-        PRODUCT_HEAD_REVISION, "20260910_0017", "20260909_0016", "20260909_0015", "20260908_0014", "20260908_0013", "20260908_0012", "20260908_0011", "20260908_0010", "20260908_0009", "20260908_0008", "20260908_0007", "20260908_0006", "20260908_0005", "20260908_0004", "20260908_0003", "20260908_0002", PRODUCT_BASE_REVISION
+        PRODUCT_HEAD_REVISION, "20260910_0018", "20260910_0017", "20260909_0016", "20260909_0015", "20260908_0014", "20260908_0013", "20260908_0012", "20260908_0011", "20260908_0010", "20260908_0009", "20260908_0008", "20260908_0007", "20260908_0006", "20260908_0005", "20260908_0004", "20260908_0003", "20260908_0002", PRODUCT_BASE_REVISION
     ]
 
 
@@ -58,6 +58,9 @@ def test_alembic_offline_upgrade_head_creates_final_product_schema() -> None:
         "CREATE TABLE support_tickets",
         "CREATE TABLE pumping_records",
         "CREATE TABLE mother_diary_entries",
+        "DROP TABLE mother_diary_entries",
+        "DROP TABLE diary_entries",
+        "DROP INDEX uq_plans_owner_active_pregnancy",
         "CREATE TABLE lactation_records",
         "CREATE TABLE care_episodes",
         "CREATE TABLE care_orders",
@@ -105,6 +108,17 @@ def test_alembic_offline_upgrade_head_creates_final_product_schema() -> None:
         "pregnancy_diary_entries",
         "gestational_week",
         "safe_output_json",
-        "DROP TABLE",
     ]:
         assert legacy_fragment not in sql
+
+
+def test_retirement_migration_keeps_actual_records_and_invalidates_old_reports() -> None:
+    result = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "20260910_0018:head", "--sql"], cwd=ROOT, check=True, capture_output=True, text=True)
+    sql = result.stdout
+    assert "UPDATE feeding_records SET plan_task_id = NULL" in sql
+    assert "UPDATE pumping_records SET plan_task_id = NULL" in sql
+    assert "DELETE FROM feeding_records" not in sql
+    assert "DELETE FROM pumping_records" not in sql
+    assert "status = 'cancelled', snapshot = NULL, result = NULL" in sql
+    assert "DROP TABLE mother_diary_entries" in sql
+    assert "DROP TABLE diary_entries" in sql

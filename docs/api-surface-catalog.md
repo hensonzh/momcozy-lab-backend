@@ -118,8 +118,6 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | PUT | `/v1/lactation/records/{record_id}` | lactation | flutter | stable | Update Record |
 | POST | `/v1/lactation/records/{record_id}/restore` | lactation | flutter | stable | Restore Record |
 | GET | `/v1/model-assets/{token}` | files | openai-responses | stable | Get Agent Model Asset Opaque bearer capability used only for model input fetches. |
-| GET | `/v1/mother/diary` | mother | flutter | stable | List Diary |
-| PUT | `/v1/mother/diary/{entry_date}` | mother | flutter | stable | Save Diary |
 | GET | `/v1/notifications` | notifications | flutter | stable | List Notifications |
 | GET | `/v1/notifications/appointments/{appointment_id}/reminder` | notifications | flutter | stable | Read Appointment Reminder |
 | PUT | `/v1/notifications/appointments/{appointment_id}/reminder` | notifications | flutter | stable | Update Appointment Reminder |
@@ -135,6 +133,11 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | PATCH | `/v1/profile/lactation` | profiles | flutter | stable | Update My Maternal Lactation Profile |
 | GET | `/v1/profile/me` | profiles | flutter | stable | Get My Profile |
 | PATCH | `/v1/profile/me` | profiles | flutter | stable | Update My Profile |
+| GET | `/v1/profile/me-experience` | profiles | flutter | stable | Read Me |
+| PUT | `/v1/profile/me-experience/concerns/{concern_id}` | profiles | flutter | stable | Put Concern |
+| PUT | `/v1/profile/me-experience/order` | profiles | flutter | stable | Put Order |
+| PATCH | `/v1/profile/me-experience/profile` | profiles | flutter | stable | Update Profile |
+| PUT | `/v1/profile/me-experience/records/{record_id}` | profiles | flutter | stable | Put Record |
 | GET | `/v1/records/feeding` | records | flutter | stable | List Feedings |
 | POST | `/v1/records/feeding` | records | flutter | stable | Create Feeding |
 | DELETE | `/v1/records/feeding/{record_id}` | records | flutter | stable | Delete Feeding |
@@ -167,18 +170,8 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
 | GET | `/.well-known/jwks.json` | auth | agent-runtime | stable | Jwks |
-| POST | `/v1/internal/agent/actions/diary.entry/apply` | diary | agent-runtime | stable | Apply Agent Diary Action |
-| POST | `/v1/internal/agent/actions/lactation.record/apply` | records | agent-runtime | stable | Apply Agent Lactation Record |
-| POST | `/v1/internal/agent/actions/plans/apply` | plans | agent-runtime | stable | Apply Agent Plans Action |
-| POST | `/v1/internal/agent/actions/profile.update/apply` | profiles | agent-runtime | stable | Apply Agent Profile Update |
-| GET | `/v1/internal/agent/diary` | diary | agent-runtime | stable | Read Agent Diary |
 | POST | `/v1/internal/agent/files/resolve` | files | agent-runtime | stable | Resolve Agent File |
-| GET | `/v1/internal/agent/lactation/milk-analysis-snapshot` | records | agent-runtime | stable | Read Agent Milk Analysis Snapshot |
-| GET | `/v1/internal/agent/plans/calendar` | plans | agent-runtime | stable | Read Agent Plan Calendar |
-| GET | `/v1/internal/agent/plans/current` | plans | agent-runtime | stable | Read Agent Current Plans |
-| GET | `/v1/internal/agent/plans/{plan_id}` | plans | agent-runtime | stable | Read Agent Plan Detail |
 | GET | `/v1/internal/agent/profile` | profiles | agent-runtime | stable | Read Agent Profile |
-| GET | `/v1/internal/agent/schedule-timeline` | plans | agent-runtime | stable | Read Agent Schedule Timeline |
 
 ## admin_ops_api
 
@@ -211,9 +204,3 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | PATCH | `/v1/plans/tasks/{task_id}/state` | plans | legacy-flutter | deprecated | Update Task State Use /v1/schedule and /v1/care plan publications for the current product. |
 | DELETE | `/v1/plans/{plan_id}` | plans | legacy-flutter | deprecated | Delete Plan Use /v1/schedule and /v1/care plan publications for the current product. |
 | GET | `/v1/plans/{plan_id}` | plans | legacy-flutter | deprecated | Get Plan Use /v1/schedule and /v1/care plan publications for the current product. |
-| PATCH | `/v1/plans/{plan_id}/todos/{item_id}/completion` | plans | legacy-flutter | deprecated | Update Plan Todo Completion Use /v1/schedule and /v1/care plan publications for the current product. |
-| GET | `/v1/pregnancy-diary/entries` | pregnancy-diary | legacy-flutter | deprecated | List Entries Use /v1/mother/diary for the current postpartum diary contract. |
-| POST | `/v1/pregnancy-diary/entries` | pregnancy-diary | legacy-flutter | deprecated | Create Entry Use /v1/mother/diary for the current postpartum diary contract. |
-| DELETE | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | legacy-flutter | deprecated | Delete Entry Use /v1/mother/diary for the current postpartum diary contract. |
-| GET | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | legacy-flutter | deprecated | Get Entry Use /v1/mother/diary for the current postpartum diary contract. |
-| PATCH | `/v1/pregnancy-diary/entries/{entry_date}` | pregnancy-diary | legacy-flutter | deprecated | Update Entry Use /v1/mother/diary for the current postpartum diary contract. |

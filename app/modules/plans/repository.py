@@ -65,48 +65,8 @@ class PlansRepository:
         )
         return cast(Plan | None, await self.session.scalar(statement))
 
-    async def lock_plan_type(self, *, owner_user_id: UUID, plan_type: str) -> None:
-        lock_key = _plan_type_advisory_lock_key(
-            owner_user_id=owner_user_id,
-            plan_type=plan_type,
-        )
-        await self.session.execute(select(func.pg_advisory_xact_lock(lock_key)))
 
-    async def get_active_plan_by_type_for_update(
-        self,
-        *,
-        owner_user_id: UUID,
-        plan_type: str,
-    ) -> Plan | None:
-        statement = (
-            select(Plan)
-            .where(
-                Plan.owner_user_id == owner_user_id,
-                Plan.plan_type == plan_type,
-                Plan.status == "active",
-                Plan.deleted_at.is_(None),
-            )
-            .order_by(Plan.updated_at.desc(), Plan.id.desc())
-            .limit(1)
-            .with_for_update()
-        )
-        return cast(Plan | None, await self.session.scalar(statement))
 
-    async def update_plan_payload_and_version(
-        self,
-        *,
-        plan_id: UUID,
-        owner_user_id: UUID,
-        expected_version: int,
-        payload: dict[str, Any],
-    ) -> Plan | None:
-        plan = await self.get_plan_for_owner_for_update(plan_id=plan_id, owner_user_id=owner_user_id)
-        if plan is None or plan.version != expected_version:
-            return None
-        plan.payload = payload
-        plan.version += 1
-        await self.session.flush()
-        return plan
 
     async def update_plan_metadata_and_version(
         self,
@@ -436,19 +396,12 @@ def _schedule_advisory_lock_key(*, owner_user_id: UUID, task_date: date) -> int:
     return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
 
-def _plan_type_advisory_lock_key(*, owner_user_id: UUID, plan_type: str) -> int:
-    digest = hashlib.sha256(
-        f"plan-type:{owner_user_id}:{plan_type}".encode()
-    ).digest()
-    return int.from_bytes(digest[:8], byteorder="big", signed=True)
 
 
 def _plan_domain_condition(domains: tuple[str, ...]) -> Any:
     conditions: list[Any] = []
     if "lactation" in domains:
         conditions.append(Plan.plan_type == "milk_management")
-    if "pregnancy" in domains:
-        conditions.append(Plan.plan_type.in_(("pregnancy", "birth_prep", "birth_journey")))
     if "postpartum_recovery" in domains:
         conditions.append(Plan.plan_type == "postpartum_recovery")
     if "general" in domains:
@@ -466,13 +419,6 @@ def _task_domain_condition(domains: tuple[str, ...]) -> Any:
                 and_(PlanTask.plan_id.is_(None), standalone_domain == "lactation"),
             )
         )
-    if "pregnancy" in domains:
-        conditions.append(
-            or_(
-                Plan.plan_type.in_(("pregnancy", "birth_prep", "birth_journey")),
-                and_(PlanTask.plan_id.is_(None), standalone_domain == "pregnancy"),
-            )
-        )
     if "postpartum_recovery" in domains:
         conditions.append(
             or_(
@@ -488,7 +434,7 @@ def _task_domain_condition(domains: tuple[str, ...]) -> Any:
                     PlanTask.plan_id.is_(None),
                     or_(
                         standalone_domain.is_(None),
-                        standalone_domain.not_in(("lactation", "pregnancy", "postpartum_recovery")),
+                        standalone_domain.not_in(("lactation", "postpartum_recovery")),
                     ),
                 ),
             )

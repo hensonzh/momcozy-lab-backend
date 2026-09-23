@@ -18,7 +18,7 @@ def test_create_plan_requires_current_user() -> None:
 
 
 def test_list_plans_requires_current_user() -> None:
-    response = TestClient(create_app(Settings(app_env="test"))).get("/v1/plans?plan_type=pregnancy")
+    response = TestClient(create_app(Settings(app_env="test"))).get("/v1/plans?plan_type=postpartum_recovery")
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
@@ -50,12 +50,12 @@ def test_list_plans_filters_by_type_status_and_limit_with_current_user_scope() -
     _override_current_user(app, user_id)
     app.dependency_overrides[get_plans_service] = lambda: fake_service
 
-    response = TestClient(app).get("/v1/plans?plan_type=pregnancy&status=active&limit=5")
+    response = TestClient(app).get("/v1/plans?plan_type=postpartum_recovery&status=active&limit=5")
 
     assert response.status_code == 200
     assert fake_service.list_plans_kwargs == {
         "owner_user_id": user_id,
-        "plan_type": "pregnancy",
+        "plan_type": "postpartum_recovery",
         "status": "active",
         "limit": 5,
     }
@@ -73,7 +73,7 @@ def test_task_apis_use_current_user_scope() -> None:
     update_response = TestClient(app).patch(
         f"/v1/plans/tasks/{fake_service.task_id}",
         headers={"X-Request-ID": "req_task_update"},
-        json={"title": "Pack hospital bag"},
+        json={"title": "Prepare appointment"},
     )
     complete_response = TestClient(app).patch(f"/v1/plans/tasks/{fake_service.task_id}/completion", json={"completed": True})
     skip_response = TestClient(app).patch(
@@ -89,7 +89,7 @@ def test_task_apis_use_current_user_scope() -> None:
     assert fake_service.create_task_kwargs["owner_user_id"] == user_id
     assert fake_service.list_tasks_kwargs["limit"] == 10
     assert fake_service.update_task_kwargs["owner_user_id"] == user_id
-    assert fake_service.update_task_kwargs["updates"] == {"title": "Pack hospital bag"}
+    assert fake_service.update_task_kwargs["updates"] == {"title": "Prepare appointment"}
     assert fake_service.update_task_kwargs["request_id"] == "req_task_update"
     assert fake_service.set_task_completed_kwargs["owner_user_id"] == user_id
     assert fake_service.set_task_state_kwargs["owner_user_id"] == user_id
@@ -98,30 +98,6 @@ def test_task_apis_use_current_user_scope() -> None:
     assert fake_service.set_task_state_kwargs["request_id"].startswith("req_")
 
 
-def test_todo_completion_uses_owner_version_request_id_and_idempotency() -> None:
-    user_id = uuid4()
-    fake_service = FakePlansService(user_id=user_id)
-    app = create_app(Settings(app_env="test"))
-    _override_current_user(app, user_id)
-    app.dependency_overrides[get_plans_service] = lambda: fake_service
-
-    response = TestClient(app).patch(
-        f"/v1/plans/{fake_service.plan_id}/todos/prepare-hospital-bag/completion",
-        headers={"X-Request-ID": "req_todo", "Idempotency-Key": " idem-todo "},
-        json={"completed": True, "expected_version": 1},
-    )
-
-    assert response.status_code == 200
-    assert response.json()["version"] == 2
-    assert fake_service.update_plan_todo_completion_kwargs == {
-        "owner_user_id": user_id,
-        "plan_id": fake_service.plan_id,
-        "item_id": "prepare-hospital-bag",
-        "completed": True,
-        "expected_version": 1,
-        "request_id": "req_todo",
-        "idempotency_key": "idem-todo",
-    }
 
 
 def _override_current_user(app, user_id: UUID) -> None:
@@ -188,29 +164,6 @@ class FakePlansService:
         task.status = kwargs["state"]
         return task
 
-    async def update_plan_todo_completion(self, **kwargs):
-        self.update_plan_todo_completion_kwargs = kwargs
-        plan = self._plan()
-        plan.version = kwargs["expected_version"] + 1
-        plan.payload = {
-            "card": {
-                "card_json": {
-                    "todo_plan": {
-                        "periods": [
-                            {
-                                "items": [
-                                    {
-                                        "item_id": kwargs["item_id"],
-                                        "completed": kwargs["completed"],
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                }
-            }
-        }
-        return plan
 
     async def update_task(self, **kwargs):
         self.update_task_kwargs = kwargs

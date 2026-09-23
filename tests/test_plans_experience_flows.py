@@ -6,7 +6,7 @@ from app.modules.plans.models import Plan, PlanTask
 from app.modules.plans.service import PlansService
 
 
-def test_birth_plan_task_main_flow_tracks_completion_and_delete_state() -> None:
+def test_general_plan_task_main_flow_tracks_completion_and_delete_state() -> None:
     owner_user_id = uuid4()
     repository = InMemoryPlansRepository()
     audit_service = FlowAuditService()
@@ -15,7 +15,7 @@ def test_birth_plan_task_main_flow_tracks_completion_and_delete_state() -> None:
     plan = asyncio.run(
         service.create_plan(
             owner_user_id=owner_user_id,
-            plan_type="birth_prep",
+            plan_type="general",
             title="Hospital bag plan",
             summary="Prepare essentials before delivery.",
             source="manual",
@@ -30,7 +30,7 @@ def test_birth_plan_task_main_flow_tracks_completion_and_delete_state() -> None:
             task_time="09:00",
             title="Pack nursing bra",
             description="Add nursing bra and charger to hospital bag.",
-            payload={"category": "hospital_bag"},
+            payload={"category": "appointment"},
             request_id="req_task_create",
         )
     )

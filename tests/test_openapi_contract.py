@@ -112,18 +112,8 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
 def test_openapi_contains_runtime_to_product_internal_contracts_only() -> None:
     paths = build_openapi_schema()["paths"]
     expected = {
-        "/v1/internal/agent/actions/lactation.record/apply",
-        "/v1/internal/agent/actions/plans/apply",
-        "/v1/internal/agent/actions/diary.entry/apply",
-        "/v1/internal/agent/actions/profile.update/apply",
-        "/v1/internal/agent/diary",
         "/v1/internal/agent/files/resolve",
-        "/v1/internal/agent/lactation/milk-analysis-snapshot",
-        "/v1/internal/agent/plans/calendar",
-        "/v1/internal/agent/plans/current",
-        "/v1/internal/agent/plans/{plan_id}",
         "/v1/internal/agent/profile",
-        "/v1/internal/agent/schedule-timeline",
     }
 
     assert expected <= set(paths)
@@ -178,10 +168,6 @@ def test_retryable_writes_declare_idempotency_header() -> None:
         ("post", "/v1/devices/pump-threshold"),
         ("post", "/v1/devices/pump-health"),
         ("post", "/v1/support/tickets"),
-        ("post", "/v1/internal/agent/actions/lactation.record/apply"),
-        ("post", "/v1/internal/agent/actions/plans/apply"),
-        ("post", "/v1/internal/agent/actions/diary.entry/apply"),
-        ("post", "/v1/internal/agent/actions/profile.update/apply"),
     ]:
         operation = schema["paths"][path][method]
         header_names = {parameter["name"] for parameter in operation.get("parameters", []) if parameter.get("in") == "header"}
@@ -193,3 +179,12 @@ def _iter_operations(schema: dict):
         for method, operation in path_item.items():
             if method in HTTP_METHODS:
                 yield method, path, operation
+
+
+def test_removed_diary_and_agent_business_routes_are_absent() -> None:
+    schema = build_openapi_schema()
+    paths = schema["paths"]
+    assert not any("diary" in path or "/todos/" in path for path in paths)
+    assert {path for path in paths if path.startswith("/v1/internal/agent/")} == {
+        "/v1/internal/agent/profile", "/v1/internal/agent/files/resolve",
+    }

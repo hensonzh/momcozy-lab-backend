@@ -84,8 +84,7 @@ blank values to `null`, trims whitespace, and rejects values over 255
 characters.
 
 Current retryable write surfaces include files, profile infants, records,
-plans/tasks, device telemetry, notifications, support tickets, and the internal
-Agent action-apply endpoints.
+plans/tasks, device telemetry, notifications, and support tickets.
 
 ## Owner Scope
 
@@ -102,16 +101,9 @@ Product tables. It calls the following Product-owned internal endpoints:
 ### Read
 
 - `GET /v1/internal/agent/profile`
-- `GET /v1/internal/agent/lactation/milk-analysis-snapshot`
-- `GET /v1/internal/agent/plans/current`
-- `GET /v1/internal/agent/plans/calendar`
-- `GET /v1/internal/agent/plans/{plan_id}`
-- `GET /v1/internal/agent/schedule-timeline`
-- `GET /v1/internal/agent/diary`
 
-Read calls require `X-Service-Key: <runtime-service-key>` and an explicit
-`actor_user_id`. Product applies owner scope before returning a bounded domain
-projection.
+This service-only endpoint provides the current Run's basic profile context.
+It requires the Runtime service key and explicit `actor_user_id` owner scope.
 
 ### Files
 
@@ -131,30 +123,8 @@ own TTL, revalidates authoritative file state before proxying bytes, returns
 revoked, unknown, or drifted mappings. Product application logs redact the
 path token.
 
-### Business Actions
-
-- `POST /v1/internal/agent/actions/profile.update/apply`
-- `POST /v1/internal/agent/actions/lactation.record/apply`
-- `POST /v1/internal/agent/actions/plans/apply`
-- `POST /v1/internal/agent/actions/diary.entry/apply`
-
-Action requests carry `actor_user_id`, `action_id`, Runtime correlation
-metadata, and a bounded Product payload. Every request requires:
-
-```text
-X-Service-Key: <runtime-service-key>
-Idempotency-Key: agent-action:<action_id>
-```
-
-Product validates owner scope and domain invariants, commits the business
-mutation, records `actor_service=agent-runtime` audit metadata, and returns an
-explicit Product result. Replaying the same action key must not duplicate the
-business write.
-
-The Runtime owns tool selection, proposal, confirmation, conversation events,
-and final response. The Product Backend owns business authorization, action
-application, idempotency, audit, and Product data. Mobile clients never call
-these internal endpoints.
+Runtime business tools and Action endpoints have been removed. Mobile clients
+continue using public Product APIs; the Runtime has no Product write adapter.
 
 ## Files
 
@@ -178,10 +148,9 @@ personal entries, appointments, episodes, and the latest published Care Plan:
   authoritative publication. A stale write returns `version_conflict` and the
   client reloads the schedule.
 
-The old `/v1/plans` and pregnancy-card surfaces remain only as deprecated
-server compatibility modules for existing data migrations. New Flutter and
-Agent consumers must use `/v1/schedule` and `/v1/care` and must not create or
-update legacy plan or pregnancy records.
+The old `/v1/plans` surface remains deprecated. New Flutter clients use
+`/v1/schedule` and `/v1/care`. Prenatal plans, pregnancy cards and diaries have
+been removed; Runtime business tools are unavailable.
 
 ## Product Assets
 

@@ -63,11 +63,8 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "scripts/check_object_storage_profile.py",
         "scripts/check_product_asset_storage.py",
         "app/modules/auth/jwks_router.py",
-        "app/modules/diary/agent_router.py",
         "app/modules/files/agent_router.py",
-        "app/modules/plans/agent_router.py",
         "app/modules/profiles/agent_router.py",
-        "app/modules/records/agent_router.py",
     ]
     return [_file_exists(root, relative_path) for relative_path in required]
 

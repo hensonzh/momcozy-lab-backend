@@ -128,10 +128,10 @@ def test_schedule_timeline_keeps_schedule_and_lactation_facts_distinct() -> None
 
 def test_schedule_timeline_reads_cross_domain_tasks_without_loading_lactation_records() -> None:
     owner_user_id = uuid4()
-    pregnancy_plan = _plan(owner_user_id=owner_user_id, plan_type="pregnancy", title="孕期计划")
-    pregnancy_task = _task(
+    postpartum_recovery_plan = _plan(owner_user_id=owner_user_id, plan_type="postpartum_recovery", title="产后康复计划")
+    postpartum_recovery_task = _task(
         owner_user_id=owner_user_id,
-        plan=pregnancy_plan,
+        plan=postpartum_recovery_plan,
         task_time="09:00",
         event_type="appointment",
     )
@@ -145,10 +145,10 @@ def test_schedule_timeline_reads_cross_domain_tasks_without_loading_lactation_re
     records_service = FakeRecordsService()
     plans_service = FakePlansService(
         rows=[
-            ScheduleTimelineTaskRow(task=pregnancy_task, plan=pregnancy_plan),
+            ScheduleTimelineTaskRow(task=postpartum_recovery_task, plan=postpartum_recovery_plan),
             ScheduleTimelineTaskRow(task=general_task, plan=None),
         ],
-        plans=[pregnancy_plan],
+        plans=[postpartum_recovery_plan],
     )
 
     result = asyncio.run(
@@ -162,18 +162,18 @@ def test_schedule_timeline_reads_cross_domain_tasks_without_loading_lactation_re
             end_date=date(2026, 7, 24),
             timezone_name="UTC",
             limit=20,
-            domains=("pregnancy", "general"),
+            domains=("postpartum_recovery", "general"),
             states=("pending",),
         )
     )
 
-    assert result.domains == ["pregnancy", "general"]
+    assert result.domains == ["postpartum_recovery", "general"]
     assert [(item.domain, item.event_type) for item in result.items] == [
-        ("pregnancy", "appointment"),
+        ("postpartum_recovery", "appointment"),
         ("general", "family"),
     ]
     assert records_service.call_count == 0
-    assert plans_service.plan_query["domains"] == ("pregnancy", "general")
+    assert plans_service.plan_query["domains"] == ("postpartum_recovery", "general")
 
 
 def test_internal_schedule_preview_reads_many_tasks_without_executions() -> None:

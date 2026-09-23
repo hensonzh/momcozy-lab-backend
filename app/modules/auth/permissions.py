@@ -10,13 +10,9 @@ STANDARD_USER_PERMISSIONS = frozenset(
     {
         AGENT_RUN_PERMISSION,
         "device:read",
-        "diary:read",
-        "diary:write",
         "files:read",
         "plans:read",
         "plans:write",
-        "prenatal:read",
-        "prenatal:write",
         "profile:read",
         "profile:write",
         "records:read",

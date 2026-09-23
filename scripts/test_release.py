@@ -38,6 +38,10 @@ SOURCE_TREE_MARKER = ".source-tree.sha256"
 SOURCE_TREE_EXCLUSIONS = frozenset(
     {SOURCE_ARCHIVE_MARKER, SOURCE_TREE_MARKER, "release-manifest.json"}
 )
+RUNTIME_SERVICES = (
+    "api", "notification-worker", "auth-email-worker",
+    "care-report-worker", "care-video-worker",
+)
 KNOWN_SECRET_PLACEHOLDERS = frozenset(
     {
         "test-service-key-with-at-least-32-bytes",
@@ -233,6 +237,7 @@ def build_deploy_commands(spec: BackendReleaseSpec) -> list[list[str]]:
             "python",
             "scripts/check_object_storage_profile.py",
         ],
+        [*compose, "stop", "--timeout", "30", *_runtime_services(spec, enabled_only=False)],
         [
             *compose,
             "up",
@@ -240,7 +245,7 @@ def build_deploy_commands(spec: BackendReleaseSpec) -> list[list[str]]:
             "--no-build",
             "--no-deps",
             "--force-recreate",
-            "api",
+            *_runtime_services(spec),
         ],
         _local_readiness_command(),
         _public_readiness_command(spec.public_url, spec.ca_file),
@@ -446,9 +451,11 @@ def rollback(
     runner.run(["docker", "pull", previous.image_ref], env=env)
     _verify_image_revision(previous, runner, env)
     try:
+        _stop_backend(current, runner)
         _start_backend(previous, runner)
     except Exception as rollback_error:
         try:
+            _stop_backend(previous, runner)
             _start_backend(current, runner)
         except Exception as restore_error:
             raise RuntimeError(
@@ -471,6 +478,35 @@ def _compose_base(spec: BackendReleaseSpec) -> list[str]:
         "-f",
         str(spec.repo_dir / COMPOSE_PATH),
     ]
+
+
+def _runtime_services(
+    spec: BackendReleaseSpec, *, enabled_only: bool = True
+) -> list[str]:
+    # Source snapshots use the repository's two-space Compose service layout.
+    # Older releases may not define workers added by a newer release.
+    compose = (spec.repo_dir / COMPOSE_PATH).read_text()
+    defined = set(re.findall(r"^  ([a-z][a-z-]+):\s*$", compose, re.MULTILINE))
+    services = [name for name in RUNTIME_SERVICES if name in defined]
+    if "api" not in services:
+        raise ValueError("release Compose must define the API service")
+    if not enabled_only:
+        return services
+    values = _read_env_values(spec.env_file)
+    if not (values.get("CARE_REPORT_RUNTIME_URL") and values.get("CARE_REPORT_SERVICE_KEY")):
+        services = [name for name in services if name != "care-report-worker"]
+    if values.get("CONSULTATION_VIDEO_PROVIDER", "disabled").lower() == "disabled":
+        services = [name for name in services if name != "care-video-worker"]
+    return services
+
+
+def _stop_backend(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
+    runner.run(
+        [*_compose_base(spec), "stop", "--timeout", "30",
+         *_runtime_services(spec, enabled_only=False)],
+        cwd=spec.repo_dir,
+        env=_command_env(spec),
+    )
 
 
 def _command_env(spec: BackendReleaseSpec) -> dict[str, str]:
@@ -931,14 +967,9 @@ def _restore_backend(
     failed: BackendReleaseSpec,
     runner: CommandRunner,
 ) -> None:
+    _stop_backend(failed, runner)
     if previous is None:
-        runner.run(
-            [*_compose_base(failed), "stop", "--timeout", "30", "api"],
-            cwd=failed.repo_dir,
-            env=_command_env(failed),
-            check=False,
-        )
-        print("First Product Backend deploy failed; failed API was stopped.", file=sys.stderr)
+        print("First Product Backend deploy failed; failed services were stopped.", file=sys.stderr)
         return
     _start_backend(previous, runner)
     print(
@@ -949,6 +980,7 @@ def _restore_backend(
 
 def _start_backend(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
     _validate_spec_files(spec)
+    _stop_backend(spec, runner)
     env = _command_env(spec)
     runner.run(
         [
@@ -958,7 +990,7 @@ def _start_backend(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
             "--no-build",
             "--no-deps",
             "--force-recreate",
-            "api",
+            *_runtime_services(spec),
         ],
         cwd=spec.repo_dir,
         env=env,

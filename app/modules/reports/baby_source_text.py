@@ -1,7 +1,7 @@
 from zoneinfo import ZoneInfo
 
 from ..baby.models import BabyRecord
-from ..baby.schemas import DevelopmentObservation, DiaperObservation, FeedingObservation, GrowthObservation, SleepObservation
+from ..baby.schemas import DailyStatusObservation, DevelopmentObservation, DiaperObservation, FeedingObservation, GrowthObservation, SleepObservation
 
 COLORS = {'yellow': '黄色', 'yellow_brown': '黄褐色', 'green': '绿色', 'brown': '褐色', 'black': '黑色', 'red': '红色', 'pale': '灰白色', 'unsure': '不确定'}
 CONSISTENCY = {'watery': '水样', 'loose': '稀软', 'pasty': '糊状', 'formed': '成形', 'hard': '颗粒或硬球', 'unsure': '不确定'}
@@ -34,6 +34,20 @@ def baby_record_text(value: BabyRecord, timezone: str) -> str:
             lines.append('可见迹象：' + ('、'.join({'blood': '看到血迹', 'mucus': '看到黏液'}[sign] for sign in observation.signs) or '未填写'))
         if observation.note:
             lines.append(f'备注：{observation.note}')
+    elif isinstance(observation, DailyStatusObservation):
+        lines.append(f'记录日期：{observation.recorded_on}；记录时区：{observation.timezone}')
+        if observation.mental_state is not None:
+            state = {'content': '平静满足', 'active': '活跃', 'crying': '烦躁哭闹', 'drowsy': '困倦'}[observation.mental_state]
+            lines.append(f'吃奶后精神状态：{state}')
+        if observation.wet_count is not None:
+            lines.append(f'今日湿尿布数：{observation.wet_count}')
+        if observation.stool_count is not None:
+            lines.append(f'今日便便次数：{observation.stool_count}')
+            if observation.color is not None:
+                lines.append(f'便便颜色：{COLORS[observation.color]}')
+            if observation.consistency is not None:
+                lines.append(f'便便性状：{CONSISTENCY[observation.consistency]}')
+        lines.append('次数是该日填写的总数；同一天同一项目应以最新填写值为准，不累加多次提交。')
     elif isinstance(observation, GrowthObservation):
         lines.append(f'测量日期：{observation.recorded_on}；记录时区：{observation.timezone}')
         metric = {'weight': '体重', 'length': '身长', 'head_circumference': '头围'}[observation.metric]

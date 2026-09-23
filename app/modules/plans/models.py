@@ -17,14 +17,6 @@ class Plan(Base):
     __table_args__ = (
         Index("ix_plans_owner_status_updated", "owner_user_id", "status", "updated_at"),
         Index("ix_plans_owner_type", "owner_user_id", "plan_type"),
-        Index(
-            "uq_plans_owner_active_pregnancy",
-            "owner_user_id",
-            unique=True,
-            postgresql_where=text(
-                "plan_type = 'pregnancy' AND status = 'active' AND deleted_at IS NULL"
-            ),
-        ),
     )
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)

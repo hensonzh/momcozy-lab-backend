@@ -75,9 +75,6 @@ class PlanTaskStateUpdate(BaseModel):
     state: Literal["pending", "completed", "skipped"]
 
 
-class PlanTodoCompletionUpdate(BaseModel):
-    completed: bool
-    expected_version: int = Field(ge=1)
 
 
 class PlanTaskListResponse(BaseModel):

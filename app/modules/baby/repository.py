@@ -63,5 +63,5 @@ class BabyRecordRepository:
             query = query.where(BabyRecord.kind == kind)
         total = int(await self.session.scalar(select(func.count()).select_from(query.subquery())) or 0)
         day = func.coalesce(BabyRecord.recorded_on, cast(func.timezone(timezone, BabyRecord.occurred_at), Date))
-        values = list(await self.session.scalars(query.order_by(day.desc(), BabyRecord.occurred_at.desc().nulls_last(), BabyRecord.id).offset(offset).limit(limit)))
+        values = list(await self.session.scalars(query.order_by(day.desc(), BabyRecord.occurred_at.desc().nulls_last(), BabyRecord.created_at.desc(), BabyRecord.id).offset(offset).limit(limit)))
         return values, total

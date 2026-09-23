@@ -90,7 +90,16 @@ def test_test_compose_only_consumes_an_explicit_release_image() -> None:
 def test_ci_publishes_one_sha_tagged_image_and_records_its_digest() -> None:
     workflow = CI_WORKFLOW.read_text()
 
-    assert "publish-image:" in workflow
+    assert "      - name: Push the immutable commit tag" in workflow
+    container = workflow.split("  container:\n", 1)[1]
+    prerequisites = container.split("    permissions:", 1)[0]
+    assert "      - test" in prerequisites
+    assert "      - postgres-migration" in prerequisites
+    assert "      - redis-product-profile" in prerequisites
+    assert "      - object-storage-integration" in prerequisites
+    assert "docker save" not in workflow
+    assert "docker load" not in workflow
+    assert "Download the already verified image" not in workflow
     assert "packages: write" in workflow
     assert "docker/login-action@" in workflow
     assert "docker/build-push-action@" in workflow
@@ -112,15 +121,15 @@ def test_test_delivery_is_manual_protected_serial_and_host_key_checked() -> None
     assert "environment:" in workflow
     assert "name: test" in workflow
     assert "group: momcozy-lab-backend-test" in workflow
-    assert "issues: read" in workflow
+    assert "issues: read" not in workflow
     assert "packages: read" in workflow
-    assert "Wait for independent test approval" in workflow
+    assert "Validate the manual release operator" in workflow
     assert "TEST_APPROVERS" in workflow
-    assert "TEST_APPROVAL_ISSUE" in workflow
-    assert "/approve-test" in workflow
-    assert "GITHUB_TRIGGERING_ACTOR" not in workflow
+    assert "TEST_APPROVAL_ISSUE" not in workflow
+    assert "/approve-test" not in workflow
+    assert "GITHUB_TRIGGERING_ACTOR" in workflow
     assert "Ignoring self-approval" not in workflow
-    assert "needs: approve" in workflow
+    assert "needs: authorize" in workflow
     assert "ref: ${{ github.sha }}" in workflow
     assert "ref: main" not in workflow
     assert "timeout-minutes: 45" in workflow
@@ -216,6 +225,10 @@ def test_deploy_plan_never_reconciles_stateful_services(
         public_url="https://backend.example.test:8443",
         ca_file=Path("/etc/ssl/test-ca.pem"),
     )
+
+    spec.repo_dir.mkdir(parents=True)
+    (spec.repo_dir / test_release.COMPOSE_PATH).write_text(TEST_COMPOSE.read_text())
+    spec.env_file.write_text("CONSULTATION_VIDEO_PROVIDER=disabled\n")
 
     commands = build_deploy_commands(spec)
     rendered = [" ".join(command) for command in commands]
@@ -345,6 +358,9 @@ def test_failed_backend_switch_restores_current_manifest_release(
         public_url=candidate.public_url,
         ca_file=candidate.ca_file,
     )
+    candidate.repo_dir.mkdir(parents=True)
+    (candidate.repo_dir / test_release.COMPOSE_PATH).write_text(TEST_COMPOSE.read_text())
+    candidate.env_file.write_text("CONSULTATION_VIDEO_PROVIDER=disabled\n")
     restored: list[BackendReleaseSpec | None] = []
     runner = FailingReadinessRunner()
 
@@ -371,3 +387,69 @@ def test_failed_backend_switch_restores_current_manifest_release(
 
     assert restored == [current]
     assert not any("migrate" in command for command in runner.commands)
+
+
+@pytest.mark.parametrize(
+    ("allowlist", "actor", "rerun_actor", "allowed"),
+    [
+        ("Operator, Second", "operator", "SECOND", True),
+        ("operator", "stranger", "operator", False),
+        ("operator", "operator", "stranger", False),
+        ("operator", "oper", "oper", False),
+        ("", "operator", "operator", False),
+        ("operator,invalid!", "operator", "operator", False),
+    ],
+)
+def test_manual_release_operator_gate(
+    allowlist: str, actor: str, rerun_actor: str, allowed: bool
+) -> None:
+    script = _literal_run_blocks(DELIVERY_WORKFLOW.read_text())[0]
+    result = subprocess.run(
+        ["bash", "-c", script],
+        env={**os.environ, "TEST_APPROVERS": allowlist,
+             "GITHUB_ACTOR": actor, "GITHUB_TRIGGERING_ACTOR": rerun_actor},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (result.returncode == 0) is allowed, result.stderr
+
+
+@pytest.mark.parametrize("provider", ["disabled", "sandbox", "livekit"])
+@pytest.mark.parametrize("reports", [False, True])
+def test_backend_switch_includes_enabled_workers_only(
+    tmp_path: Path, provider: str, reports: bool
+) -> None:
+    spec = BackendReleaseSpec(
+        image_ref=IMAGE_REF, commit_sha=COMMIT_SHA, repo_dir=tmp_path,
+        env_file=tmp_path / "backend.env", release_root=Path("/opt/momcozy-lab"),
+        public_url="https://backend.example.test:8443", ca_file=tmp_path / "ca.pem",
+    )
+    (tmp_path / test_release.COMPOSE_PATH).write_text(TEST_COMPOSE.read_text())
+    spec.env_file.write_text(
+        f"CONSULTATION_VIDEO_PROVIDER={provider}\n"
+        + ("CARE_REPORT_RUNTIME_URL=http://agent\nCARE_REPORT_SERVICE_KEY=fixture\n" if reports else "")
+    )
+    commands = build_deploy_commands(spec)
+    start = next(command for command in commands if "up" in command)
+    stop = next(command for command in commands if "stop" in command)
+    assert all(name in start for name in ("api", "notification-worker", "auth-email-worker"))
+    assert ("care-video-worker" in start) is (provider != "disabled")
+    assert ("care-report-worker" in start) is reports
+    assert all(name in stop for name in test_release.RUNTIME_SERVICES)
+    assert all(name not in start + stop for name in ("postgres", "redis", "minio"))
+    # Rollbacks to historical snapshots cannot ask Compose for nonexistent workers.
+    (tmp_path / test_release.COMPOSE_PATH).write_text("services:\n  api:\n    image: fixture\n")
+    assert test_release._runtime_services(spec) == ["api"]
+
+
+def test_failed_first_backend_deploy_stops_all_workers(tmp_path: Path) -> None:
+    spec = BackendReleaseSpec(
+        image_ref=IMAGE_REF, commit_sha=COMMIT_SHA, repo_dir=tmp_path,
+        env_file=tmp_path / "backend.env", release_root=Path("/opt/momcozy-lab"),
+        public_url="https://backend.example.test:8443", ca_file=tmp_path / "ca.pem",
+    )
+    (tmp_path / test_release.COMPOSE_PATH).write_text(TEST_COMPOSE.read_text())
+    runner = FailingReadinessRunner()
+    test_release._restore_backend(previous=None, failed=spec, runner=runner)  # type: ignore[arg-type]
+    assert all(name in runner.commands[0] for name in test_release.RUNTIME_SERVICES)
