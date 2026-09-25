@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..users.models import User
+from .me_models import MePreferences
 from .models import (
     LactationProfile,
     MaternalCurrentDeliveryInfant,
@@ -49,6 +50,9 @@ class ProfileRepository:
             .where(User.id == owner_user_id)
             .with_for_update()
         )
+
+    async def get_me_preferences(self, *, owner_user_id: UUID) -> MePreferences | None:
+        return await self.session.get(MePreferences, owner_user_id)
 
     async def get_user_profile(self, *, user_id: UUID) -> UserProfile | None:
         statement = select(UserProfile).where(UserProfile.user_id == user_id)
@@ -184,8 +188,11 @@ class ProfileRepository:
                 MaternalProfile,
                 MaternalProfile.id == MaternalCurrentDeliveryInfant.maternal_profile_id,
             )
+            .join(BabyProfile, BabyProfile.id == MaternalCurrentDeliveryInfant.infant_id)
             .where(
                 MaternalProfile.owner_user_id == owner_user_id,
+                BabyProfile.owner_user_id == owner_user_id,
+                BabyProfile.deleted_at.is_(None),
                 MaternalCurrentDeliveryInfant.infant_id == infant_id,
             )
         )

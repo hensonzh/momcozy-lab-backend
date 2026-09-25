@@ -589,6 +589,8 @@ class RecordsService:
         *,
         owner_user_id: UUID,
         infant_ids: list[UUID],
+        as_of_date: date | None = None,
+        timezone: str = "UTC",
     ) -> dict[UUID, LatestGrowthMeasurement]:
         if len(infant_ids) > 10 or len(set(infant_ids)) != len(infant_ids):
             raise ApiError(
@@ -599,6 +601,8 @@ class RecordsService:
         return await self.repository.list_latest_growth_by_infant_ids(
             owner_user_id=owner_user_id,
             infant_ids=infant_ids,
+            as_of_date=as_of_date,
+            timezone=timezone,
         )
 
     async def update_growth(

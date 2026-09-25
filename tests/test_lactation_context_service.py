@@ -8,6 +8,7 @@ import pytest
 
 from app.core.errors import ApiError
 from app.modules.profiles.lactation_context import LactationContextService
+from app.modules.profiles.me_models import MePreferences
 from app.modules.profiles.models import (
     LactationProfile,
     MaternalCurrentDeliveryInfant,
@@ -123,6 +124,12 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
             "has_cesarean_history": True,
             "postpartum_days": 74,
             "current_feeding_mode": "mixed_feeding",
+            "personal_context": {
+                "baby_count": None, "gestation_weeks": None, "gestation_days": None,
+                "feeding_methods": None, "feeding_preference": None, "caregivers": None,
+                "return_to_work_date": None, "additional_context": None,
+                "active_concerns": [], "active_concern_count": 0,
+            },
         },
         "infants": [
             {
@@ -140,6 +147,7 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
                     "height_cm": 57.5,
                     "head_circumference_cm": 38.2,
                     "measured_at": "2026-07-20T08:30:00Z",
+                    "recorded_on": "2026-07-20", "source": "growth_records",
                 },
             },
             {
@@ -157,18 +165,66 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
                     "height_cm": 56.8,
                     "head_circumference_cm": 37.9,
                     "measured_at": "2026-07-21T09:00:00Z",
+                    "recorded_on": "2026-07-21", "source": "growth_records",
                 },
             },
         ],
         "missing_fields": [],
         "data_quality_issues": [],
     }
+    assert result["mother"]["personal_context"] == {
+        "baby_count": None, "gestation_weeks": None, "gestation_days": None,
+        "feeding_methods": None, "feeding_preference": None, "caregivers": None,
+        "return_to_work_date": None, "additional_context": None,
+        "active_concerns": [], "active_concern_count": 0,
+    }
     assert records_service.queries == [
         {
             "owner_user_id": owner_user_id,
             "infant_ids": [first_infant_id, second_infant_id],
+            "as_of_date": date(2026, 7, 23),
+            "timezone": "UTC",
         }
     ]
+
+
+def test_lactation_context_projects_only_bounded_active_personal_profile() -> None:
+    owner = uuid4()
+    preferences = MePreferences(
+        owner_user_id=owner,
+        profile={
+            "baby_count": 2, "gestation_weeks": 37, "gestation_days": 4,
+            "feeding_methods": ["direct", "expressed"],
+            "feeding_preference": "mixed", "caregivers": ["partner"],
+            "return_to_work_date": "2026-10-12",
+            "additional_context": "I need rest.",
+            "unrelated_field": "must never be projected",
+        },
+        concerns=[
+            {"id": str(uuid4()), "issues": ["supply"], "note": "Current concern", "ended": False},
+            {"id": str(uuid4()), "issues": ["work"], "note": "Old concern", "ended": True},
+        ],
+        record_order=["feed", "energy", "sleep", "mood"],
+    )
+    service = LactationContextService(
+        profile_repository=FakeProfileRepository(
+            user_profile=None, maternal_profile=None, lactation_profile=None,
+            current_infants=[], infants=[], me_preferences=preferences,
+        ),
+        records_service=FakeRecordsService(growth_by_infant={}),
+    )
+    result = asyncio.run(service.read(owner_user_id=owner, as_of_date=date(2026, 9, 24)))
+    personal = result["mother"]["personal_context"]
+    assert personal == {
+        "baby_count": 2, "gestation_weeks": 37, "gestation_days": 4,
+        "feeding_methods": ["direct", "expressed"], "feeding_preference": "mixed",
+        "caregivers": ["partner"], "return_to_work_date": "2026-10-12",
+        "additional_context": "I need rest.",
+        "active_concerns": [{"issues": ["supply"], "note": "Current concern"}],
+        "active_concern_count": 1,
+    }
+    assert "Old concern" not in str(result)
+    assert "must never be projected" not in str(result)
 
 
 def test_maternal_infant_profile_read_does_not_infer_unlinked_single_baby_as_current() -> None:
@@ -702,7 +758,9 @@ class FakeProfileRepository:
         lactation_profile: LactationProfile | None,
         current_infants: list[tuple[MaternalCurrentDeliveryInfant, BabyProfile]],
         infants: list[BabyProfile],
+        me_preferences: MePreferences | None = None,
     ) -> None:
+        self.me_preferences = me_preferences
         self.user_profile = user_profile
         self.maternal_profile = maternal_profile
         self.lactation_profile = lactation_profile
@@ -717,6 +775,9 @@ class FakeProfileRepository:
 
     async def get_user_profile(self, *, user_id):
         return self.user_profile
+
+    async def get_me_preferences(self, *, owner_user_id):
+        return self.me_preferences
 
     async def get_maternal_profile(self, *, owner_user_id):
         return self.maternal_profile
@@ -804,11 +865,15 @@ class FakeRecordsService:
         *,
         owner_user_id,
         infant_ids,
+        as_of_date=None,
+        timezone="UTC",
     ):
         self.queries.append(
             {
                 "owner_user_id": owner_user_id,
                 "infant_ids": infant_ids,
+                "as_of_date": as_of_date,
+                "timezone": timezone,
             }
         )
         return {infant_id: records[0] for infant_id, records in self.growth_by_infant.items() if infant_id in infant_ids and records}
@@ -821,3 +886,135 @@ def _infant_context(infant: BabyProfile) -> LactationInfantContext:
         sex=infant.sex or "unspecified",
         birth_date=infant.birth_date,
     )
+
+
+def test_latest_growth_uses_one_app_record_without_backfilling_other_metrics() -> None:
+    from app.modules.baby.models import BabyRecord
+    from app.modules.profiles.lactation_context import _choose_latest_growth, _latest_measurement
+
+    owner, baby = uuid4(), uuid4()
+    old = GrowthRecord(owner_user_id=owner, infant_id=baby,
+        measured_at=datetime(2026, 8, 1, 12, tzinfo=timezone.utc), weight_kg=4.0, height_cm=55.0)
+    new = BabyRecord(owner_user_id=owner, baby_id=baby, kind="growth", recorded_on=date(2026, 8, 2),
+        data={"metric": "weight", "value": 4.2, "timezone": "Asia/Shanghai"})
+    snapshot = _latest_measurement(_choose_latest_growth(old, new))
+    assert snapshot == {"weight_kg": 4.2, "height_cm": None, "head_circumference_cm": None,
+        "recorded_on": date(2026, 8, 2), "measured_at": None, "source": "baby_records"}
+    assert _latest_measurement(_choose_latest_growth(old, None))["source"] == "growth_records"
+
+
+def test_latest_growth_compares_and_reports_legacy_date_in_client_timezone() -> None:
+    from app.modules.baby.models import BabyRecord
+    from app.modules.profiles.lactation_context import _choose_latest_growth, _latest_measurement
+    from zoneinfo import ZoneInfo
+
+    owner, baby = uuid4(), uuid4()
+    zone = ZoneInfo("Asia/Shanghai")
+    legacy = GrowthRecord(owner_user_id=owner, infant_id=baby,
+        measured_at=datetime(2026, 9, 24, 17, tzinfo=timezone.utc), weight_kg=4.0)
+    app = BabyRecord(owner_user_id=owner, baby_id=baby, kind="growth", recorded_on=date(2026, 9, 24),
+        data={"metric": "weight", "value": 4.2})
+    assert _choose_latest_growth(legacy, app, zone=zone) is legacy
+    assert _latest_measurement(legacy, zone=zone)["recorded_on"] == date(2026, 9, 25)
+
+    legacy.measured_at = datetime(2026, 9, 24, 15, 59, tzinfo=timezone.utc)
+    assert _choose_latest_growth(legacy, app, zone=zone) is app
+    assert _latest_measurement(legacy, zone=zone)["recorded_on"] == date(2026, 9, 24)
+
+
+def test_profile_snapshot_applies_local_date_independently_to_two_babies() -> None:
+    from app.modules.baby.models import BabyRecord
+
+    owner, first, second = uuid4(), uuid4(), uuid4()
+    maternal = MaternalProfile(id=uuid4(), owner_user_id=owner, latest_delivery_date=date(2026, 8, 1))
+    babies = [BabyProfile(id=first, owner_user_id=owner, name="A"),
+              BabyProfile(id=second, owner_user_id=owner, name="B")]
+    links = [(MaternalCurrentDeliveryInfant(maternal_profile_id=maternal.id,
+              infant_id=baby.id, birth_order=index), baby)
+             for index, baby in enumerate(babies, start=1)]
+    legacy_first = GrowthRecord(owner_user_id=owner, infant_id=first,
+        measured_at=datetime(2026, 9, 24, 15, 59, tzinfo=timezone.utc), weight_kg=4.0)
+    legacy_second = GrowthRecord(owner_user_id=owner, infant_id=second,
+        measured_at=datetime(2026, 9, 23, 16, tzinfo=timezone.utc), weight_kg=5.0)
+    app_first = BabyRecord(owner_user_id=owner, baby_id=first, kind="growth",
+        recorded_on=date(2026, 9, 23), data={"metric": "weight", "value": 3.9})
+    app_second = BabyRecord(owner_user_id=owner, baby_id=second, kind="growth",
+        recorded_on=date(2026, 9, 24), data={"metric": "weight", "value": 5.1})
+
+    class FakeAppGrowth:
+        async def list_latest_growth_by_infant_ids(self, *, owner_user_id, infant_ids, as_of_date=None):
+            assert (owner_user_id, infant_ids, as_of_date) == (owner, [first, second], date(2026, 9, 24))
+            return {first: app_first, second: app_second}
+
+    records = FakeRecordsService(growth_by_infant={first: [legacy_first], second: [legacy_second]})
+    service = LactationContextService(
+        profile_repository=FakeProfileRepository(user_profile=None, maternal_profile=maternal,
+            lactation_profile=None, current_infants=links, infants=babies),
+        records_service=records, baby_records_repository=FakeAppGrowth())
+    result = asyncio.run(service.read(owner_user_id=owner, as_of_date=date(2026, 9, 24),
+        timezone="Asia/Shanghai"))
+
+    assert records.queries[0]["timezone"] == "Asia/Shanghai"
+    first_measurement, second_measurement = (baby["latest_measurement"] for baby in result["infants"])
+    assert first_measurement["source"] == "growth_records"
+    assert first_measurement["recorded_on"] == "2026-09-24"
+    assert first_measurement["measured_at"] == "2026-09-24T15:59:00Z"
+    assert second_measurement["source"] == "baby_records"
+    assert second_measurement["weight_kg"] == 5.1
+    assert second_measurement["recorded_on"] == "2026-09-24"
+
+
+def test_current_run_profile_prefers_latest_app_growth_without_cross_baby_merge() -> None:
+    from app.modules.baby.models import BabyRecord
+
+    owner, first, second = uuid4(), uuid4(), uuid4()
+    maternal = MaternalProfile(id=uuid4(), owner_user_id=owner, latest_delivery_date=date(2026, 8, 1))
+    babies = [
+        BabyProfile(id=first, owner_user_id=owner, name="A", birth_date=date(2026, 8, 1)),
+        BabyProfile(id=second, owner_user_id=owner, name="B", birth_date=date(2026, 8, 1)),
+    ]
+    links = [
+        (MaternalCurrentDeliveryInfant(maternal_profile_id=maternal.id, infant_id=baby.id, birth_order=index), baby)
+        for index, baby in enumerate(babies, start=1)
+    ]
+    old_growth = GrowthRecord(owner_user_id=owner, infant_id=first,
+        measured_at=datetime(2026, 9, 20, 12, tzinfo=timezone.utc), weight_kg=4.0, height_cm=54.0)
+    latest = BabyRecord(owner_user_id=owner, baby_id=first, kind="growth", recorded_on=date(2026, 9, 23),
+        data={"metric": "weight", "value": 4.3, "timezone": "Asia/Shanghai"})
+
+    class FakeBabyGrowth:
+        async def list_latest_growth_by_infant_ids(self, *, owner_user_id, infant_ids, as_of_date=None):
+            assert owner_user_id == owner
+            assert infant_ids == [first, second]
+            assert as_of_date == date(2026, 9, 24)
+            return {first: latest}
+
+    service = LactationContextService(
+        profile_repository=FakeProfileRepository(user_profile=None, maternal_profile=maternal,
+            lactation_profile=None, current_infants=links, infants=babies),
+        records_service=FakeRecordsService(growth_by_infant={first: [old_growth]}),
+        baby_records_repository=FakeBabyGrowth(),
+    )
+    result = asyncio.run(service.read(owner_user_id=owner, as_of_date=date(2026, 9, 24)))
+    first_measurement, second_measurement = (baby["latest_measurement"] for baby in result["infants"])
+    assert first_measurement == {"weight_kg": 4.3, "height_cm": None, "head_circumference_cm": None,
+        "recorded_on": "2026-09-23", "measured_at": None, "source": "baby_records"}
+    assert second_measurement is None
+    assert {item["code"] for item in result["missing_fields"]} >= {"infant_latest_measurement_missing"}
+
+
+def test_personal_context_ignores_corrupt_fields_and_bounds_active_concerns() -> None:
+    from app.modules.profiles.lactation_context import _personal_context
+
+    preferences = MePreferences(owner_user_id=uuid4(), profile={
+        "baby_count": 2, "additional_context": "x" * 501, "unrelated_secret": "never include me",
+    }, concerns=[
+        {"id": str(uuid4()), "issues": ["supply"], "note": "needs help", "ended": False}
+        for _ in range(12)
+    ], record_order=[])
+    context = _personal_context(preferences)
+    assert context["baby_count"] == 2
+    assert context["additional_context"] is None
+    assert "unrelated_secret" not in context
+    assert len(context["active_concerns"]) == 10
+    assert context["active_concern_count"] == 12

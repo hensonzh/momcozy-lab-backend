@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-from ..baby.profile_models import BabyProfile
-
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
+
+from pydantic import ValidationError
 
 from ...core.errors import ApiError
+from ..baby.models import BabyRecord
+from ..baby.profile_models import BabyProfile
+from ..baby.repository import BabyRecordRepository
 from ..audit import AuditService
 from ..records.service import RecordsService
+from .me_models import MePreferences
+from .me_schemas import Concern, MeProfilePatch
 from .models import (
     LactationProfile,
     MaternalProfile,
@@ -60,10 +66,12 @@ class LactationContextService:
         *,
         profile_repository: ProfileRepository,
         records_service: RecordsService,
+        baby_records_repository: BabyRecordRepository | None = None,
         audit_service: AuditService | None = None,
     ) -> None:
         self.profile_repository = profile_repository
         self.records_service = records_service
+        self.baby_records_repository = baby_records_repository
         self.audit_service = audit_service
 
     async def get_maternal_profile(
@@ -88,6 +96,7 @@ class LactationContextService:
         owner_user_id: UUID,
         as_of_date: date | None = None,
         infant_scope: Literal["current_delivery", "all"] = "current_delivery",
+        timezone: str = "UTC",
     ) -> dict[str, Any]:
         if infant_scope not in {"current_delivery", "all"}:
             raise ApiError(
@@ -95,8 +104,10 @@ class LactationContextService:
                 message="infant_scope must be current_delivery or all.",
                 status=422,
             )
-        today = as_of_date or date.today()
+        zone = ZoneInfo(timezone)
+        today = as_of_date or datetime.now(zone).date()
         maternal = await self.profile_repository.get_lactation_mother_context(owner_user_id=owner_user_id)
+        preferences = await self.profile_repository.get_me_preferences(owner_user_id=owner_user_id)
         current_infants, infant_issues = await self._current_infants(
             owner_user_id=owner_user_id,
         )
@@ -137,8 +148,20 @@ class LactationContextService:
                 await self.records_service.list_latest_growth_by_infant_ids(
                     owner_user_id=owner_user_id,
                     infant_ids=selected_infant_ids[offset : offset + 10],
+                    as_of_date=today,
+                    timezone=timezone,
                 )
             )
+        latest_app_growth: dict[UUID, BabyRecord] = {}
+        if self.baby_records_repository is not None:
+            for offset in range(0, len(selected_infant_ids), 10):
+                latest_app_growth.update(
+                    await self.baby_records_repository.list_latest_growth_by_infant_ids(
+                        owner_user_id=owner_user_id,
+                        infant_ids=selected_infant_ids[offset : offset + 10],
+                        as_of_date=today,
+                    )
+                )
         for birth_order, infant, is_current_delivery in selected_infants:
             infant_birth_date = infant.birth_date
             infant_age_reference = (
@@ -146,7 +169,11 @@ class LactationContextService:
                 if is_current_delivery
                 else infant_birth_date
             )
-            latest_growth = latest_growth_by_infant.get(infant.infant_id)
+            latest_growth = _choose_latest_growth(
+                latest_growth_by_infant.get(infant.infant_id),
+                latest_app_growth.get(infant.infant_id),
+                zone=zone,
+            )
             infant_contexts.append(
                 {
                     "infant_id": str(infant.infant_id),
@@ -165,7 +192,7 @@ class LactationContextService:
                         infant_age_reference,
                         today=today,
                     ),
-                    "latest_measurement": _latest_measurement(latest_growth),
+                    "latest_measurement": _latest_measurement(latest_growth, zone=zone),
                 }
             )
             if (
@@ -197,6 +224,7 @@ class LactationContextService:
             "has_cesarean_history": maternal.has_cesarean_history,
             "postpartum_days": postpartum_days,
             "current_feeding_mode": maternal.current_feeding_mode,
+            "personal_context": _personal_context(preferences),
         }
         if delivery_date is not None and delivery_date > today:
             issues.append(
@@ -551,14 +579,81 @@ def _elapsed_calendar_months(value: date | None, *, today: date) -> int | None:
 
 
 
-def _latest_measurement(record: Any | None) -> dict[str, Any] | None:
+def _personal_context(preferences: MePreferences | None) -> dict[str, Any]:
+    raw = preferences.profile if preferences is not None and isinstance(preferences.profile, dict) else {}
+    allowed = (
+        "baby_count", "gestation_weeks", "gestation_days", "feeding_methods",
+        "feeding_preference", "caregivers", "return_to_work_date", "additional_context",
+    )
+    fields = {field: raw.get(field) for field in allowed}
+    try:
+        values = MeProfilePatch.model_validate(fields)
+    except ValidationError:
+        # Corrupt user-editable JSON must not make the entire profile unreadable.
+        fields = {}
+        for field in allowed:
+            try:
+                fields[field] = getattr(MeProfilePatch.model_validate({field: raw.get(field)}), field)
+            except ValidationError:
+                fields[field] = None
+    else:
+        fields = {field: getattr(values, field) for field in allowed}
+    active: list[Concern] = []
+    if preferences is not None and isinstance(preferences.concerns, list):
+        for raw_concern in preferences.concerns:
+            try:
+                concern = Concern.model_validate(raw_concern)
+            except ValidationError:
+                continue
+            if not concern.ended:
+                active.append(concern)
+    return {
+        **fields,
+        "active_concerns": [
+            {"issues": concern.issues, "note": concern.note}
+            for concern in active[:10]
+        ],
+        "active_concern_count": min(len(active), 100),
+    }
+
+
+def _choose_latest_growth(legacy: Any | None, app: BabyRecord | None, *, zone: ZoneInfo = ZoneInfo("UTC")) -> Any | None:
+    if app is None or _latest_measurement(app) is None:
+        return legacy
+    if legacy is None or (app.recorded_on is not None and app.recorded_on >= legacy.measured_at.astimezone(zone).date()):
+        return app
+    return legacy
+
+
+def _latest_measurement(record: Any | None, *, zone: ZoneInfo = ZoneInfo("UTC")) -> dict[str, Any] | None:
     if record is None:
         return None
+    if isinstance(record, BabyRecord):
+        metric = record.data.get("metric")
+        value = record.data.get("value")
+        if (
+            metric not in {"weight", "length", "head_circumference"}
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or value <= 0
+            or value > (50 if metric == "weight" else 150)
+        ):
+            return None
+        return {
+            "weight_kg": value if metric == "weight" else None,
+            "height_cm": value if metric == "length" else None,
+            "head_circumference_cm": value if metric == "head_circumference" else None,
+            "recorded_on": record.recorded_on,
+            "measured_at": None,
+            "source": "baby_records",
+        }
     return {
         "weight_kg": record.weight_kg,
         "height_cm": record.height_cm,
         "head_circumference_cm": record.head_cm,
-        "measured_at": record.measured_at.isoformat(),
+        "recorded_on": record.measured_at.astimezone(zone).date(),
+        "measured_at": record.measured_at,
+        "source": "growth_records",
     }
 
 

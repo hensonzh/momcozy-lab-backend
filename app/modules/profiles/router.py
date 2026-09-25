@@ -12,6 +12,7 @@ from ...infrastructure.db import get_session
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
+from ..baby.repository import BabyRecordRepository
 from ..records.repository import RecordsRepository
 from ..records.service import RecordsService
 from .lactation_context import (
@@ -52,6 +53,7 @@ def get_lactation_context_service(
     return LactationContextService(
         profile_repository=ProfileRepository(session),
         records_service=RecordsService(repository=RecordsRepository(session)),
+        baby_records_repository=BabyRecordRepository(session),
         audit_service=AuditService(repository=audit_repository),
     )
 

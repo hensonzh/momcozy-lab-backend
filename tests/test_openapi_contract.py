@@ -181,10 +181,13 @@ def _iter_operations(schema: dict):
                 yield method, path, operation
 
 
-def test_removed_diary_and_agent_business_routes_are_absent() -> None:
+def test_removed_diary_and_legacy_agent_business_routes_are_absent() -> None:
     schema = build_openapi_schema()
     paths = schema["paths"]
     assert not any("diary" in path or "/todos/" in path for path in paths)
     assert {path for path in paths if path.startswith("/v1/internal/agent/")} == {
-        "/v1/internal/agent/profile", "/v1/internal/agent/files/resolve",
+        "/v1/internal/agent/profile",
+        "/v1/internal/agent/files/resolve",
+        "/v1/internal/agent/records",
     }
+    assert set(paths["/v1/internal/agent/records"]) == {"get"}

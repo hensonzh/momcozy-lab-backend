@@ -3,11 +3,12 @@ from __future__ import annotations
 from ..baby.profile_models import BabyProfile
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone as utc_timezone
 from typing import Any, cast
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..plans.models import PlanTask
@@ -53,7 +54,7 @@ class RecordsRepository:
         if task is None:
             return False
         task.status = "completed"
-        task.completed_at = datetime.now(timezone.utc)
+        task.completed_at = datetime.now(utc_timezone.utc)
         await self.session.flush()
         return True
 
@@ -363,9 +364,26 @@ class RecordsRepository:
         *,
         owner_user_id: UUID,
         infant_ids: list[UUID],
+        as_of_date: date | None = None,
+        timezone: str = "UTC",
     ) -> dict[UUID, LatestGrowthMeasurement]:
         if not infant_ids:
             return {}
+        conditions = [
+            GrowthRecord.owner_user_id == owner_user_id,
+            GrowthRecord.infant_id.in_(infant_ids),
+            GrowthRecord.status == "active",
+            GrowthRecord.deleted_at.is_(None),
+            or_(GrowthRecord.height_cm > 0, GrowthRecord.weight_kg > 0, GrowthRecord.head_cm > 0),
+            BabyProfile.owner_user_id == owner_user_id,
+            BabyProfile.deleted_at.is_(None),
+        ]
+        if as_of_date is not None:
+            conditions.append(
+                GrowthRecord.measured_at < datetime.combine(
+                    as_of_date + timedelta(days=1), time.min, tzinfo=ZoneInfo(timezone),
+                ).astimezone(utc_timezone.utc)
+            )
         ranked = (
             select(
                 GrowthRecord.infant_id.label("infant_id"),
@@ -384,14 +402,7 @@ class RecordsRepository:
                 .label("record_rank"),
             )
             .join(BabyProfile, BabyProfile.id == GrowthRecord.infant_id)
-            .where(
-                GrowthRecord.owner_user_id == owner_user_id,
-                GrowthRecord.infant_id.in_(infant_ids),
-                GrowthRecord.status == "active",
-                GrowthRecord.deleted_at.is_(None),
-                BabyProfile.owner_user_id == owner_user_id,
-                BabyProfile.deleted_at.is_(None),
-            )
+            .where(*conditions)
             .subquery()
         )
         statement = select(

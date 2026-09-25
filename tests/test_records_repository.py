@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
@@ -74,6 +74,9 @@ class EmptyScalarResult:
     def all(self):
         return []
 
+    def __iter__(self):
+        return iter(())
+
 
 class CapturingExecuteSession:
     def __init__(self) -> None:
@@ -91,3 +94,53 @@ class EmptyRowResult:
 
 def _compile_sql(statement) -> str:
     return str(statement.compile(dialect=postgresql.dialect()))
+
+
+def test_latest_growth_query_rejects_empty_measurement_and_future_as_of_date() -> None:
+    from datetime import date
+
+    session = CapturingExecuteSession()
+    asyncio.run(RecordsRepository(session).list_latest_growth_by_infant_ids(
+        owner_user_id=uuid4(), infant_ids=[uuid4()], as_of_date=date(2026, 9, 24),
+    ))
+    sql = _compile_sql(session.statement)
+    assert "growth_records.measured_at < " in sql
+    assert "growth_records.weight_kg > " in sql
+    assert "growth_records.height_cm > " in sql
+    assert "growth_records.head_cm > " in sql
+
+
+def test_latest_growth_cutoff_uses_local_midnight_for_each_timezone() -> None:
+    from sqlalchemy import DateTime
+    from sqlalchemy.sql import visitors
+
+    for zone, expected in (
+        ("Asia/Shanghai", datetime(2026, 9, 24, 16, tzinfo=timezone.utc)),
+        ("America/Los_Angeles", datetime(2026, 9, 25, 7, tzinfo=timezone.utc)),
+        ("UTC", datetime(2026, 9, 25, tzinfo=timezone.utc)),
+    ):
+        session = CapturingExecuteSession()
+        asyncio.run(RecordsRepository(session).list_latest_growth_by_infant_ids(
+            owner_user_id=uuid4(), infant_ids=[uuid4(), uuid4()],
+            as_of_date=date(2026, 9, 24), timezone=zone,
+        ))
+        datetimes = [node.value for node in visitors.iterate(session.statement)
+                     if hasattr(node, "value") and isinstance(getattr(node, "type", None), DateTime)]
+        assert expected in datetimes
+
+
+def test_app_latest_growth_query_requires_valid_metric_value_owner_and_date() -> None:
+    from datetime import date
+
+    from app.modules.baby.repository import BabyRecordRepository
+
+    session = CapturingSession()
+    asyncio.run(BabyRecordRepository(session).list_latest_growth_by_infant_ids(
+        owner_user_id=uuid4(), infant_ids=[uuid4()], as_of_date=date(2026, 9, 24),
+    ))
+    sql = _compile_sql(session.statement)
+    assert "jsonb_typeof" in sql
+    assert "baby_records.recorded_on <= " in sql
+    assert "baby_records.deleted_at IS NULL" in sql
+    assert "baby_profiles.owner_user_id" in sql
+    assert "row_number() OVER" in sql

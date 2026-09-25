@@ -5,7 +5,7 @@ from ..baby.profile_models import BabyProfile
 from datetime import date, datetime
 from uuid import UUID
 
-from sqlalchemy import Date, and_, cast, func, literal, or_, select
+from sqlalchemy import Date, Float, and_, case, cast, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.errors import ApiError
@@ -44,6 +44,42 @@ class BabyRecordRepository:
         if exclude is not None:
             query = query.where(BabyRecord.id != exclude)
         return await self.session.scalar(query.limit(1)) is not None
+
+    async def list_latest_growth_by_infant_ids(
+        self, *, owner_user_id: UUID, infant_ids: list[UUID], as_of_date: date | None = None,
+    ) -> dict[UUID, BabyRecord]:
+        if not infant_ids:
+            return {}
+        metric = BabyRecord.data["metric"].astext
+        numeric_value = case(
+            (func.jsonb_typeof(BabyRecord.data["value"]) == "number", cast(BabyRecord.data["value"].astext, Float)),
+            else_=None,
+        )
+        conditions = [
+            BabyRecord.owner_user_id == owner_user_id,
+            BabyRecord.baby_id.in_(infant_ids),
+            BabyRecord.kind == "growth",
+            BabyRecord.deleted_at.is_(None),
+            metric.in_(("weight", "length", "head_circumference")),
+            numeric_value > 0,
+            numeric_value <= 150,
+            or_(metric != "weight", numeric_value <= 50),
+            BabyProfile.owner_user_id == owner_user_id,
+            BabyProfile.deleted_at.is_(None),
+        ]
+        if as_of_date is not None:
+            conditions.append(BabyRecord.recorded_on <= as_of_date)
+        ranked = select(
+            BabyRecord.id,
+            func.row_number().over(
+                partition_by=BabyRecord.baby_id,
+                order_by=(BabyRecord.recorded_on.desc(), BabyRecord.updated_at.desc(), BabyRecord.id.desc()),
+            ).label("record_rank"),
+        ).join(BabyProfile, BabyProfile.id == BabyRecord.baby_id).where(*conditions).subquery()
+        rows = await self.session.scalars(
+            select(BabyRecord).join(ranked, ranked.c.id == BabyRecord.id).where(ranked.c.record_rank == 1)
+        )
+        return {record.baby_id: record for record in rows}
 
     async def latest_growth(self, owner: UUID, baby_id: UUID) -> list[BabyRecord]:
         ranked = select(BabyRecord.id, func.row_number().over(
