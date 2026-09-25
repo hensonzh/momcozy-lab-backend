@@ -80,11 +80,11 @@ async def disable_invite_code(
 
 
 def _admin_page_html(settings: Settings) -> str:
-    title = escape("MomCozy 邀请码管理")
+    title = escape("Momcozy Invitation Codes")
     service_key_json = json.dumps(settings.service_api_key).replace("</", "<\\/")
     return (
         """<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -228,61 +228,61 @@ def _admin_page_html(settings: Settings) -> str:
   <main>
     <header>
       <h1>__TITLE__</h1>
-      <button class="ghost" onclick="loadInviteCodes()">刷新列表</button>
+      <button class="ghost" onclick="loadInviteCodes()">Refresh list</button>
     </header>
-    <div id="status" class="status">管理凭证由后端配置注入，页面加载后会自动读取邀请码列表。</div>
+    <div id="status" class="status">Admin credentials are injected by the backend. The invitation code list loads automatically.</div>
     <section>
-      <h2>创建邀请码</h2>
+      <h2>Create invitation code</h2>
       <div class="form-grid">
         <div>
-          <label for="label">备注</label>
-          <input id="label" placeholder="例如 Alice 内测" />
+          <label for="label">Notes</label>
+          <input id="label" placeholder="For example: Alice beta test" />
         </div>
         <div>
-          <label for="assignedTo">分发对象</label>
-          <input id="assignedTo" placeholder="邮箱、姓名或备注，可留空" />
+          <label for="assignedTo">Assigned to</label>
+          <input id="assignedTo" placeholder="Email, name, or notes (optional)" />
         </div>
       </div>
       <div class="actions">
-        <button id="createButton" onclick="createInviteCode()">创建邀请码</button>
+        <button id="createButton" onclick="createInviteCode()">Create invitation code</button>
       </div>
-      <p class="hint">创建成功后会直接新增到下方表格第一行。</p>
+      <p class="hint">New codes appear at the top of the table below.</p>
     </section>
     <section class="table-card">
       <div class="table-header">
         <div>
-          <h2>邀请码列表</h2>
-          <p class="hint">已绑定的邀请码会在禁用后同步踢出用户。</p>
+          <h2>Invitation codes</h2>
+          <p class="hint">Disabling a bound code also signs the user out.</p>
         </div>
-        <button class="secondary" onclick="loadInviteCodes()">刷新列表</button>
+        <button class="secondary" onclick="loadInviteCodes()">Refresh list</button>
       </div>
       <div class="table-wrap">
-        <table aria-label="邀请码列表">
+        <table aria-label="Invitation codes">
           <thead>
             <tr>
-              <th>邀请码</th>
-              <th>是否绑定</th>
-              <th>是否可用</th>
-              <th>备注</th>
-              <th>分发对象</th>
-              <th>绑定设备</th>
-              <th>绑定用户</th>
-              <th>使用次数</th>
-              <th>有效期至</th>
-              <th>创建时间</th>
-              <th>禁用时间</th>
-              <th>操作</th>
+              <th>Invitation code</th>
+              <th>Bound</th>
+              <th>Available</th>
+              <th>Notes</th>
+              <th>Assigned to</th>
+              <th>Bound device</th>
+              <th>Bound user</th>
+              <th>Use count</th>
+              <th>Expires</th>
+              <th>Created</th>
+              <th>Disabled</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody id="inviteRows">
-            <tr><td class="empty" colspan="12">正在加载...</td></tr>
+            <tr><td class="empty" colspan="12">Loading…</td></tr>
           </tbody>
         </table>
       </div>
       <div class="pagination">
         <span id="pageSummary" class="page-summary">-</span>
-        <button id="prevPageButton" class="ghost" onclick="previousPage()">上一页</button>
-        <button id="nextPageButton" class="ghost" onclick="nextPage()">下一页</button>
+        <button id="prevPageButton" class="ghost" onclick="previousPage()">Previous page</button>
+        <button id="nextPageButton" class="ghost" onclick="nextPage()">Next page</button>
       </div>
     </section>
   </main>
@@ -297,7 +297,7 @@ def _admin_page_html(settings: Settings) -> str:
     }
 
     function apiHeaders() {
-      if (!SERVICE_KEY) throw new Error('后端未配置 SERVICE_API_KEY，无法调用管理 API。');
+      if (!SERVICE_KEY) throw new Error('SERVICE_API_KEY is not configured. The admin API is unavailable.');
       return { 'Content-Type': 'application/json', 'X-Service-Key': SERVICE_KEY };
     }
 
@@ -311,7 +311,7 @@ def _admin_page_html(settings: Settings) -> str:
       try {
         payload = text ? JSON.parse(text) : {};
       } catch (_) {
-        payload = { error: { message: text || '接口返回无法解析' } };
+        payload = { error: { message: text || 'Could not parse the API response' } };
       }
       if (!response.ok) throw new Error(payload.error ? payload.error.message : text);
       return payload;
@@ -332,7 +332,7 @@ def _admin_page_html(settings: Settings) -> str:
       if (!value) return '-';
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return value;
-      return date.toLocaleString('zh-CN', { hour12: false });
+      return date.toLocaleString('en-US', { hour12: false });
     }
 
     function isBound(item) {
@@ -350,7 +350,7 @@ def _admin_page_html(settings: Settings) -> str:
     function renderPagination() {
       const start = state.total === 0 ? 0 : state.offset + 1;
       const end = Math.min(state.offset + state.items.length, state.total);
-      document.getElementById('pageSummary').textContent = `显示 ${start}-${end} / 共 ${state.total} 条`;
+      document.getElementById('pageSummary').textContent = `Showing ${start}-${end} of ${state.total}`;
       document.getElementById('prevPageButton').disabled = state.offset <= 0;
       document.getElementById('nextPageButton').disabled = !state.hasMore;
     }
@@ -360,7 +360,7 @@ def _admin_page_html(settings: Settings) -> str:
       body.innerHTML = '';
       if (!state.items.length) {
         const row = document.createElement('tr');
-        row.innerHTML = '<td class="empty" colspan="12">暂无邀请码</td>';
+        row.innerHTML = '<td class="empty" colspan="12">No invitation codes</td>';
         body.appendChild(row);
         renderPagination();
         return;
@@ -387,10 +387,10 @@ def _admin_page_html(settings: Settings) -> str:
         `;
         row.querySelector('code').textContent = item.code;
         const bindingBadge = row.querySelector('.binding');
-        bindingBadge.textContent = bound ? '已绑定' : '未绑定';
+        bindingBadge.textContent = bound ? 'Bound' : 'Not bound';
         bindingBadge.classList.add(bound ? 'bound' : 'unbound');
         const availabilityBadge = row.querySelector('.availability');
-        availabilityBadge.textContent = available ? '可用' : '禁用';
+        availabilityBadge.textContent = available ? 'Available' : 'Disable';
         availabilityBadge.classList.add(available ? 'available' : 'unavailable');
         row.querySelector('.label').textContent = text(item.label);
         row.querySelector('.label').title = text(item.label);
@@ -409,11 +409,11 @@ def _admin_page_html(settings: Settings) -> str:
         if (item.status === 'active') {
           const button = document.createElement('button');
           button.className = 'danger';
-          button.textContent = isBound(item) ? '踢出用户' : '禁用';
+          button.textContent = isBound(item) ? 'Sign out user' : 'Disable';
           button.onclick = () => disableInviteCode(item.code);
           action.appendChild(button);
         } else {
-          action.innerHTML = '<span class="muted">不可操作</span>';
+          action.innerHTML = '<span class="muted">No action available</span>';
         }
         body.appendChild(row);
       }
@@ -434,7 +434,7 @@ def _admin_page_html(settings: Settings) -> str:
 
     async function loadInviteCodes(offset = state.offset) {
       try {
-        setStatus('正在加载邀请码列表...');
+        setStatus('Loading invitation codes…');
         const nextOffset = Math.max(0, offset);
         const payload = await request('/v1/admin/invite-codes?limit=' + state.limit + '&offset=' + nextOffset);
         state.items = payload.items || [];
@@ -443,9 +443,9 @@ def _admin_page_html(settings: Settings) -> str:
         state.offset = payload.offset || 0;
         state.hasMore = Boolean(payload.has_more);
         renderInviteCodes();
-        setStatus('邀请码列表已更新。', 'ok');
+        setStatus('Invitation codes updated.', 'ok');
       } catch (error) {
-        setStatus('加载失败：' + error.message, 'error');
+        setStatus('Could not load: ' + error.message, 'error');
         renderInviteCodes();
       }
     }
@@ -464,7 +464,7 @@ def _admin_page_html(settings: Settings) -> str:
       const button = document.getElementById('createButton');
       try {
         button.disabled = true;
-        setStatus('正在创建邀请码...');
+        setStatus('Creating invitation code…');
         const payload = await request('/v1/admin/invite-codes', {
           method: 'POST',
           body: JSON.stringify({
@@ -478,13 +478,13 @@ def _admin_page_html(settings: Settings) -> str:
           state.total += 1;
           upsertInviteCode(payload, { prepend: true });
           state.hasMore = state.offset + state.items.length < state.total;
-          setStatus('创建成功：' + payload.code, 'ok');
+          setStatus('Created: ' + payload.code, 'ok');
         } else {
           await loadInviteCodes(0);
-          setStatus('创建成功：' + payload.code + '，已返回第一页。', 'ok');
+          setStatus('Created: ' + payload.code + '. Returned to the first page.', 'ok');
         }
       } catch (error) {
-        setStatus('创建失败：' + error.message, 'error');
+        setStatus('Could not create: ' + error.message, 'error');
       } finally {
         button.disabled = false;
       }
@@ -493,16 +493,16 @@ def _admin_page_html(settings: Settings) -> str:
     async function disableInviteCode(code) {
       const existing = state.items.find((item) => item.code === code);
       const willKickUser = existing ? isBound(existing) : false;
-      const prompt = willKickUser ? '确认禁用 ' + code + '？已绑定用户会被踢出登录。' : '确认禁用 ' + code + '？';
+      const prompt = willKickUser ? 'Disable ' + code + '? The bound user will be signed out.' : 'Disable ' + code + '?';
       if (!confirm(prompt)) return;
       try {
-        setStatus('正在禁用：' + code);
+        setStatus('Disabling: ' + code);
         const payload = await request('/v1/admin/invite-codes/' + encodeURIComponent(code) + '/disable', { method: 'POST', body: '{}' });
         upsertInviteCode(payload);
-        const message = isBound(payload) ? '已禁用邀请码，绑定用户已被踢出：' : '已禁用邀请码：';
+        const message = isBound(payload) ? 'Invitation code disabled and bound user signed out: ' : 'Invitation code disabled: ';
         setStatus(message + payload.code, 'ok');
       } catch (error) {
-        setStatus('禁用失败：' + error.message, 'error');
+        setStatus('Could not disable: ' + error.message, 'error');
       }
     }
 

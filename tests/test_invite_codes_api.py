@@ -16,25 +16,24 @@ def test_invite_codes_admin_ui_returns_lightweight_page() -> None:
     response = TestClient(create_app(Settings(app_env="test", service_api_key=SERVICE_KEY))).get("/v1/admin/invite-codes/ui")
 
     assert response.status_code == 200
-    assert "创建邀请码" in response.text
-    assert "邀请码列表" in response.text
-    assert "管理员凭证" not in response.text
+    assert "Create invitation code" in response.text
+    assert "Invitation codes" in response.text
     assert 'id="serviceKey"' not in response.text
-    assert "结果" not in response.text
+    assert "Result" not in response.text
     assert 'const SERVICE_KEY = "service-key-value-with-at-least-32-bytes";' in response.text
-    assert "<th>邀请码</th>" in response.text
-    assert "<th>是否绑定</th>" in response.text
-    assert "<th>是否可用</th>" in response.text
-    assert "<th>分发对象</th>" in response.text
-    assert "<th>有效期至</th>" in response.text
-    assert "<th>操作</th>" in response.text
+    assert "<th>Invitation code</th>" in response.text
+    assert "<th>Bound</th>" in response.text
+    assert "<th>Available</th>" in response.text
+    assert "<th>Assigned to</th>" in response.text
+    assert "<th>Expires</th>" in response.text
+    assert "<th>Actions</th>" in response.text
     assert "loadInviteCodes();" in response.text
     assert "disableInviteCode(item.code)" in response.text
-    assert "上一页" in response.text
-    assert "下一页" in response.text
-    assert "已绑定的邀请码会在禁用后同步踢出用户" in response.text
-    assert "踢出用户" in response.text
-    assert "创建成功后会直接新增到下方表格第一行" in response.text
+    assert "Previous page" in response.text
+    assert "Next page" in response.text
+    assert "Disabling a bound code also signs the user out" in response.text
+    assert "Sign out user" in response.text
+    assert "New codes appear at the top of the table below" in response.text
 
 
 def test_invite_code_admin_api_requires_service_key() -> None:

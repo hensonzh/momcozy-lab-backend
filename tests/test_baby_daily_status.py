@@ -54,7 +54,7 @@ def test_daily_status_commits_all_tabs_and_replays_once_in_the_correct_day():
                 assert replay.observation == body.observation
                 assert replay.occurred_at is None
                 text = baby_record_text(replay, 'Asia/Shanghai')
-                assert '平静满足' in text and '今日湿尿布数：5' in text and '不累加' in text
+                assert 'Calm and content' in text and 'Wet diapers today: 5' in text and 'do not add repeated submissions' in text
                 day = body.observation.recorded_on
                 result = await api.list(owners[0], first, day, day + timedelta(days=1), timezone_name='Asia/Shanghai', kind='daily_status', offset=0, limit=100)
                 assert result.total == 1

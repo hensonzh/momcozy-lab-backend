@@ -1,54 +1,66 @@
-COMPOSE_ENV_FILE ?= env/compose.local.env
-TEST_COMPOSE_ENV_FILE ?= env/compose.test.env
-BACKEND_ENV_FILE ?= $(COMPOSE_ENV_FILE)
+LOCAL_ENV_FILE ?= env/local.env
+DEPLOY_ENVIRONMENT ?= staging
+DEPLOY_ENV_FILE ?= env/$(DEPLOY_ENVIRONMENT).env
+BACKEND_ENV_FILE ?= $(LOCAL_ENV_FILE)
+DEPLOY_IMAGE ?= ghcr.io/hensonzh/momcozy-lab-backend@sha256:0000000000000000000000000000000000000000000000000000000000000000
 PYTHON ?= .venv/bin/python
 BACKEND_BUILD_FLAGS ?=
-COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(COMPOSE_ENV_FILE) docker compose -f docker-compose.local.yml
-TEST_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE) docker compose --env-file $(TEST_COMPOSE_ENV_FILE) -f docker-compose.test.yml
+LOCAL_COMPOSE = MOMCOZY_BACKEND_ENV_FILE=$(LOCAL_ENV_FILE) docker compose -f docker-compose.local.yml
+DEPLOY_COMPOSE = MOMCOZY_BACKEND_IMAGE=$(DEPLOY_IMAGE) MOMCOZY_BACKEND_ENV_FILE=$(DEPLOY_ENV_FILE) docker compose --env-file $(DEPLOY_ENV_FILE) -f docker-compose.deploy.yml
 
-.PHONY: backend-local-build backend-build backend-local-up backend-up backend-down backend-local-migrate backend-migrate backend-local-minio backend-test-pull backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset backend-test-ps backend-test-logs backend-export-contracts backend-check-infra backend-productization-status backend-smoke backend-test-smoke backend-env-print
+.PHONY: \
+	backend-local-build backend-build backend-local-up backend-up backend-down \
+	backend-local-migrate backend-migrate backend-local-minio backend-local-account \
+	backend-deploy-validate backend-staging-config backend-production-config \
+	backend-deploy-ps backend-deploy-logs backend-export-contracts \
+	backend-check-infra backend-productization-status backend-smoke backend-env-print
 
 backend-local-build:
 	$(MAKE) backend-build
 
 backend-build:
-	$(COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api
+	$(LOCAL_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api
 
 backend-local-up:
 	$(MAKE) backend-up
 
 backend-up:
-	$(MAKE) backend-build COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
-	$(COMPOSE) up -d postgres redis minio minio-init
-	$(COMPOSE) --profile tools run --rm migrate
-	$(COMPOSE) up -d --force-recreate api
+	$(MAKE) backend-build LOCAL_ENV_FILE=$(LOCAL_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
+	$(LOCAL_COMPOSE) up -d postgres redis minio minio-init
+	$(LOCAL_COMPOSE) --profile tools run --rm migrate
+	$(LOCAL_COMPOSE) up -d --force-recreate api
 
 backend-down:
-	$(COMPOSE) down
+	$(LOCAL_COMPOSE) down
 
 backend-local-migrate:
 	$(MAKE) backend-migrate
 
 backend-migrate:
-	$(COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
-	$(COMPOSE) --profile tools run --rm migrate
+	$(LOCAL_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate
+	$(LOCAL_COMPOSE) --profile tools run --rm migrate
 
 backend-local-minio:
-	$(COMPOSE) up -d minio minio-init
+	$(LOCAL_COMPOSE) up -d minio minio-init
 
-.PHONY: backend-local-account
 backend-local-account:
-	$(COMPOSE) exec -T api python < scripts/seed_local_test_account.py
+	$(LOCAL_COMPOSE) exec -T api python < scripts/seed_local_test_account.py
 
-backend-test-pull backend-test-migrate backend-test-up backend-test-services backend-test-down backend-test-reset:
-	@echo "Direct test mutation is disabled; use the protected backend-test-delivery workflow or an approved maintenance runbook." >&2
-	@exit 2
+# Deployment mutation is intentionally owned by the protected backend-delivery workflow.
+backend-deploy-validate:
+	$(DEPLOY_COMPOSE) config --quiet
 
-backend-test-ps:
-	docker ps --filter label=com.docker.compose.project=momcozy-lab-backend-test
+backend-staging-config:
+	$(MAKE) backend-deploy-validate DEPLOY_ENVIRONMENT=staging DEPLOY_ENV_FILE=env/staging.env.example
 
-backend-test-logs:
-	docker logs --follow $$(docker ps --quiet --filter label=com.docker.compose.project=momcozy-lab-backend-test --filter label=com.docker.compose.service=api)
+backend-production-config:
+	$(MAKE) backend-deploy-validate DEPLOY_ENVIRONMENT=production DEPLOY_ENV_FILE=env/production.env.example
+
+backend-deploy-ps:
+	$(DEPLOY_COMPOSE) ps
+
+backend-deploy-logs:
+	$(DEPLOY_COMPOSE) logs --follow api
 
 backend-export-contracts:
 	$(PYTHON) scripts/export_openapi.py --output docs/openapi.generated.json
@@ -68,13 +80,10 @@ backend-smoke:
 	$(PYTHON) scripts/check_productization_status.py
 	$(PYTHON) -m pytest -q tests/test_agent_diary_internal_api.py tests/test_agent_file_internal_api.py tests/test_agent_lactation_internal_api.py tests/test_agent_plans_internal_api.py tests/test_agent_profile_internal_api.py tests/test_auth_jwks.py
 
-backend-test-smoke:
-	$(MAKE) backend-productization-status
-	$(MAKE) backend-check-infra BACKEND_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)
-
 backend-env-print:
 	@echo "BACKEND_ENV_FILE=$(BACKEND_ENV_FILE)"
-	@echo "COMPOSE_ENV_FILE=$(COMPOSE_ENV_FILE)"
-	@echo "TEST_COMPOSE_ENV_FILE=$(TEST_COMPOSE_ENV_FILE)"
+	@echo "LOCAL_ENV_FILE=$(LOCAL_ENV_FILE)"
+	@echo "DEPLOY_ENVIRONMENT=$(DEPLOY_ENVIRONMENT)"
+	@echo "DEPLOY_ENV_FILE=$(DEPLOY_ENV_FILE)"
 	@echo "PYTHON=$(PYTHON)"
 	@echo "BACKEND_BUILD_FLAGS=$(BACKEND_BUILD_FLAGS)"

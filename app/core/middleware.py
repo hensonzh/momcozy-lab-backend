@@ -82,7 +82,7 @@ def _apply_security_headers(*, response: Response, settings: Settings) -> None:
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
-    if settings.is_production:
+    if settings.is_deployed:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 

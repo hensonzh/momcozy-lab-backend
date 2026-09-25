@@ -7,12 +7,12 @@ the Agent Runtime release.
 ## Infrastructure
 
 - `make backend-productization-status` passes.
-- `make backend-test-smoke` passes against the shared test infrastructure.
+- `make backend-staging-config` passes against the shared test infrastructure.
 - `make backend-smoke` passes.
 - `GET /v1/health/live` returns `200`.
-- `GET /v1/health/ready` returns `200` and checks test Postgres/Redis.
+- `GET /v1/health/ready` returns `200` and checks the target PostgreSQL/Redis.
 - `GET /v1/health/metrics` returns Product Backend request/dependency metrics;
-  test calls include the operator `X-Service-Key`.
+  deployment checks include the operator `X-Service-Key`.
 - Alembic head matches the expected release revision.
 - CORS, trusted-host, security-header, rate-limit, and upload-limit checks pass.
 - Object-storage write/read/delete and Product asset checks pass.

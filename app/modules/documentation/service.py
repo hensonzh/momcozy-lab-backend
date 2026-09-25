@@ -169,6 +169,8 @@ class DocumentationService:
         content = PlanContent.model_validate(plan.content)
         if not content.ready_to_publish():
             raise ApiError(code="plan_incomplete", message="Complete the summary, goals and task details before publishing.", status=422)
+        if not content.english_client_copy():
+            raise ApiError(code="plan_language_review_required", message="Review the client-facing care plan in English before publishing.", status=422)
         provider = await self.appointments.repository.provider(actor.user_id)
         assert provider is not None
         previous = await self.repository.latest_publication(plan.id)

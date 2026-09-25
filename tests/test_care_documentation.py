@@ -34,7 +34,44 @@ async def documented_case():
 
 NOTE = NoteContent(subjective='Private report from the client', objective='Private observations', assessment='Professional assessment', plan='Professional next steps')
 PLAN = PlanContent.model_validate({'title': 'Our next steps', 'summary': 'Published client-facing summary', 'goals': ['Review progress together'],
-    'tasks': [{'source_key': 'log-observation', 'title': 'Record an observation', 'description': 'Record the agreed observation.', 'category': '观察', 'due_label': '今天', 'scheduled_date': None}]})
+    'tasks': [{'source_key': 'log-observation', 'title': 'Record an observation', 'description': 'Record the agreed observation.', 'category': 'Observation', 'due_label': 'Today', 'scheduled_date': None}]})
+
+
+def test_client_facing_plan_requires_reviewed_english_for_publication():
+    assert PLAN.ready_to_publish()
+    assert PLAN.english_client_copy()
+    for field, value in [
+        ('title', '喂养计划'),
+        ('summary', 'CozyMate will help you.'),
+        ('goals', ['수유 기록']),
+        ('tasks', [PLAN.tasks[0].model_copy(update={'description': 'Запишите кормление.'})]),
+        ('tasks', [PLAN.tasks[0].model_copy(update={'due_label': 'مرحبا'})]),
+    ]:
+        legacy = PLAN.model_copy(update={field: value})
+        assert legacy.ready_to_publish()  # Meaningful draft content is retained.
+        assert not legacy.english_client_copy()
+        assert getattr(legacy, field) == value
+
+
+@postgres
+def test_untranslated_plan_stays_a_draft_until_expert_reviews_english_copy():
+    async def run():
+        async with documented_case() as (sessions, service, at, appointment, mom, expert, wrong):
+            async with sessions.begin() as session:
+                current = service(session)
+                await current.save_note(expert, appointment.id, NoteWrite(expected_revision=0, expected_version=0, content=NOTE), 'note', 'note')
+                await current.sign_note(expert, appointment.id, NoteVersionWrite(expected_revision=1, expected_version=1), 'sign', 'sign')
+                legacy = PLAN.model_copy(update={'summary': '请记录喂养变化'})
+                saved = await current.save_plan(expert, appointment.id, PlanWrite(expected_version=0, content=legacy), 'legacy-plan', 'legacy-plan')
+                assert saved.content.summary == legacy.summary
+                with pytest.raises(ApiError) as error:
+                    await current.publish(expert, appointment.id, VersionWrite(expected_version=saved.version), 'unreviewed', 'unreviewed')
+                assert error.value.code == 'plan_language_review_required'
+                assert (await current.patient_plan(mom.user_id, appointment.id)).publication is None
+                reviewed = await current.save_plan(expert, appointment.id, PlanWrite(expected_version=saved.version, content=PLAN), 'reviewed', 'reviewed')
+                publication = await current.publish(expert, appointment.id, VersionWrite(expected_version=reviewed.version), 'publication', 'publication')
+                assert publication.summary == PLAN.summary
+    asyncio.run(run())
 
 
 @postgres

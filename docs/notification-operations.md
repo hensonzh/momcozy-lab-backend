@@ -46,8 +46,8 @@ Use the existing backend virtual environment and the local Compose environment.
 `python -m app.workers.notifications`. The test Compose template also contains
 this worker, but was not deployed during local acceptance.
 
-Public examples are in `env/compose.local.env.example` and
-`env/compose.test.env.example`:
+Public examples are in `env/local.env.example` and
+`env/staging.env.example`:
 
 - `PUSH_PROVIDER=disabled` keeps provider delivery off.
 - `PUSH_TOKEN_KEY` is a private random encryption key of at least 32 bytes.

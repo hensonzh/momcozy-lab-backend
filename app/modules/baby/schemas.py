@@ -9,7 +9,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, c
 
 RecordKind = Literal['feeding', 'sleep', 'diaper', 'growth', 'development', 'daily_status']
 DevelopmentItem = Literal['looks-at-face', 'responds-to-sound', 'lifts-head']
-DEVELOPMENT_LABELS = {'looks-at-face': '看向靠近的脸', 'responds-to-sound': '听到声音后有动作或表情反应', 'lifts-head': '俯卧时短暂抬起头'}
+DEVELOPMENT_LABELS = {'looks-at-face': 'Looks at a face up close', 'responds-to-sound': 'Reacts to sounds with movement or expressions', 'lifts-head': 'Briefly lifts their head during tummy time'}
 
 
 class ObservationBase(BaseModel):

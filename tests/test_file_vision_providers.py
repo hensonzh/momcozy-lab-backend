@@ -91,18 +91,18 @@ def test_local_stub_schedule_analysis_is_deterministic_and_bounded() -> None:
     assert first.schedule_tasks == second.schedule_tasks
     assert 0 < len(first.schedule_tasks) <= MAX_SCHEDULE_VISION_TASKS
     assert [task.model_dump() for task in first.schedule_tasks] == [
-        {"time": "09:00", "event": "吸奶", "event_type": "pump"},
-        {"time": "12:00", "event": "亲喂", "event_type": "breastfeed"},
+        {"time": "09:00", "event": "Pumping", "event_type": "pump"},
+        {"time": "12:00", "event": "Nursing", "event_type": "breastfeed"},
     ]
 
 
 @pytest.mark.parametrize(
     ("payload", "match"),
     [
-        ({"time": "9:00", "event": "吸奶", "event_type": "pump"}, "time"),
-        ({"time": "0９:0５", "event": "吸奶", "event_type": "pump"}, "time"),
+        ({"time": "9:00", "event": "Pumping", "event_type": "pump"}, "time"),
+        ({"time": "0９:0５", "event": "Pumping", "event_type": "pump"}, "time"),
         ({"time": "09:00", "event": "", "event_type": "pump"}, "event"),
-        ({"time": "09:00", "event": "吸奶", "event_type": "feed"}, "event_type"),
+        ({"time": "09:00", "event": "Pumping", "event_type": "feed"}, "event_type"),
     ],
 )
 def test_schedule_vision_task_contract_rejects_unbounded_or_unknown_fields(payload: dict, match: str) -> None:
@@ -114,7 +114,7 @@ def test_schedule_vision_task_contract_rejects_unbounded_or_unknown_fields(paylo
 
 
 def test_schedule_vision_output_limits_task_count() -> None:
-    task = {"time": "09:00", "event": "吸奶", "event_type": "pump"}
+    task = {"time": "09:00", "event": "Pumping", "event_type": "pump"}
 
     with pytest.raises(ValidationError, match="tasks"):
         ScheduleVisionOutput.model_validate({"tasks": [task] * (MAX_SCHEDULE_VISION_TASKS + 1)})

@@ -116,7 +116,7 @@ def assemble_snapshot(prepared: PreparedSources, dialogues: ReportSourcesRead) -
             (value.shared_until is None or max(item.question_at, item.answered_at) < value.shared_until) for value in prepared.query.threads)
         if not authorized or not prepared.query.starts_at <= item.question_at < prepared.query.ends_at or item.answered_at > prepared.cutoff:
             raise ApiError(code='care_report_invalid_output', message='A conversation source is outside the authorized window.', status=502)
-        content, truncated = source_text(f'用户问题：{item.question}\n智能体回答：{item.answer}', budget=18000)
+        content, truncated = source_text(f'Client question: {item.question}\nAI response: {item.answer}', budget=18000)
         candidates.append(ReportSource(id=f'dialogue:{item.run_id}', kind='dialogue', recorded_at=item.question_at,
             content=content, truncated=truncated or item.question_truncated or item.answer_truncated))
     candidates.extend(prepared.sources)

@@ -25,6 +25,6 @@ build/
 *.egg-info/
 
 *.sh
-!deploy/test/init-postgres.sh
-!deploy/test/start-redis.sh
+!deploy/shared/init-postgres.sh
+!deploy/shared/start-redis.sh
 data/

@@ -106,8 +106,8 @@ class LocalStubVisionProvider:
                 summary="",
                 bytes_read=len(body),
                 schedule_tasks=(
-                    ScheduleVisionTaskPreview(time="09:00", event="吸奶", event_type="pump"),
-                    ScheduleVisionTaskPreview(time="12:00", event="亲喂", event_type="breastfeed"),
+                    ScheduleVisionTaskPreview(time="09:00", event="Pumping", event_type="pump"),
+                    ScheduleVisionTaskPreview(time="12:00", event="Nursing", event_type="breastfeed"),
                 ),
             )
         return VisionAnalysis(

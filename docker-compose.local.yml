@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
     environment:
       AUTH_REQUIRE_ACTIVE_SESSION: "true"
     ports:
@@ -37,7 +37,7 @@ services:
       dockerfile: Dockerfile
     command: python -m alembic -c alembic.ini upgrade head
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
     profiles:
       - tools
     depends_on:
@@ -51,7 +51,7 @@ services:
       dockerfile: Dockerfile
     command: python -m app.workers.notifications
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
     volumes:
       - ${MOMCOZY_PUSH_SECRETS_DIR:-./.local/push-secrets}:/run/momcozy-push:ro
     init: true
@@ -67,7 +67,7 @@ services:
       dockerfile: Dockerfile
     command: python -m scripts.deliver_auth_emails
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
     init: true
     restart: unless-stopped
     depends_on:
@@ -81,7 +81,7 @@ services:
       dockerfile: Dockerfile
     command: python -m app.workers.care_video
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
     profiles: [consultations]
     init: true
     restart: unless-stopped
@@ -96,7 +96,7 @@ services:
       dockerfile: Dockerfile
     command: python -m app.workers.care_reports
     env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/compose.local.env}
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
     profiles: [reports]
     init: true
     restart: unless-stopped

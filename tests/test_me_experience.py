@@ -71,6 +71,31 @@ def test_observations_reject_invalid_or_future_inputs():
             Observation(**{**base, **changes})
 
 
+@pytest.mark.parametrize(
+    ("kind", "value", "fields"),
+    [
+        ("energy", "Energized", {}),
+        ("sleep", "3–4 hours", {}),
+        ("mood", "Having a hard day", {}),
+        ("latch", "Stayed latched", {}),
+        ("bottle", "Took some", {}),
+        ("pain", "3 / 10", {"pain": 3, "side": "Left side", "phase": "When latching", "impact": "Needed a break", "swallow": "Not sure"}),
+        ("storage", "60 ml", {"volume_ml": 60, "action": "Add a bag"}),
+        ("pump", "60 ml", {"volume_ml": 60, "side": "Both sides"}),
+    ],
+)
+def test_observations_accept_english_labels_without_changing_legacy_contract(kind, value, fields):
+    observation = Observation(
+        id=uuid4(),
+        kind=kind,
+        occurred_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        value=value,
+        fields=fields,
+    )
+    assert observation.value == value
+    assert observation.fields.model_dump(exclude_unset=True) == fields
+
+
 def test_keys_isolate_owners_and_observations():
     assert list(MePreferences.__table__.primary_key.columns.keys()) == ["owner_user_id"]
     assert set(MotherObservation.__table__.primary_key.columns.keys()) == {"owner_user_id", "id"}

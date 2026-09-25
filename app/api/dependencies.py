@@ -46,7 +46,7 @@ async def authenticate_request_user(
     session_factory: Callable[[], AsyncContextManager[AsyncSession]] | None,
 ) -> CurrentUser:
     current_user = authenticate_access_token(token, settings)
-    if settings.is_production or settings.auth_require_active_session or "ibclc" in current_user.roles:
+    if settings.is_deployed or settings.auth_require_active_session or "ibclc" in current_user.roles:
         if session_factory is None:
             raise ApiError(code="auth_session_check_not_configured", message="Authentication session check is not configured.", status=500)
         await _require_active_device_session(current_user=current_user, session_factory=session_factory, settings=settings)

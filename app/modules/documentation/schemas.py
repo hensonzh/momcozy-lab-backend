@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -9,6 +10,12 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 from ..appointments.schemas import AppointmentRead
 from ..care.schemas import CareEpisodeRead, CareRead
 from ..consultations.room_schemas import ConsultationRead
+
+
+_UNREVIEWED_CLIENT_COPY = re.compile(
+    r"[\u3400-\u9fff\U00020000-\U000323af\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u0400-\u052f\u0600-\u06ff\u0900-\u097f]|cozy[\s-]*mate",
+    re.IGNORECASE,
+)
 
 
 class NoteContent(BaseModel):
@@ -90,6 +97,11 @@ class PlanContent(BaseModel):
     def ready_to_publish(self) -> bool:
         return bool(self.title and self.summary and self.goals and all(self.goals) and self.tasks
             and all(task.title and task.description and task.category and task.due_label for task in self.tasks))
+
+    def english_client_copy(self) -> bool:
+        visible_text = [self.title, self.summary, *self.goals,
+            *(field for task in self.tasks for field in (task.title, task.description, task.category, task.due_label))]
+        return not any(_UNREVIEWED_CLIENT_COPY.search(value) for value in visible_text)
 
 
 class PlanWrite(BaseModel):

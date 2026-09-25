@@ -62,7 +62,7 @@ adapters, not an embedded Agent Runtime.
 Copy one committed template to an ignored private file:
 
 ```bash
-cp env/compose.local.env.example env/compose.local.env
+cp env/local.env.example env/local.env
 ```
 
 Core infrastructure is configured through `DATABASE_URL`, `REDIS_URL`, and
@@ -121,43 +121,33 @@ runs the migration job, starts the real API container, and requires
 `/v1/health/ready` to pass before cleaning up the stack. No CI private key is
 committed or reused.
 
-## Test
+## Deployable Environments
 
-The Product Backend test Compose profile is the single owner of the shared
-PostgreSQL, Redis, MinIO, and `momcozy-lab-test` network. It creates separate
-`momcozy_test` and `agent_runtime_test` databases, Redis ACL identities
-and DB 0/1 separation, bucket-scoped MinIO identities for `momcozy-test` and
-`agent-runtime-test`, and binds Product Backend to `127.0.0.1:8001`.
+`staging` and `production` share one environment-neutral deployment implementation:
 
-Copy `env/compose.test.env.example` to the private host env, generate every
-empty secret, and set mode `0600`. Do not add an image reference. On a new host,
-run the protected delivery workflow with `operation=bootstrap`; then deploy the
-application with `operation=deploy`.
+```text
+env/staging.env.example
+env/production.env.example
+docker-compose.deploy.yml
+scripts/release.py
+.github/workflows/backend-delivery.yml
+```
 
-Start this stack before Agent Runtime test; Agent Runtime joins the shared
-network as an external consumer and does not create another infrastructure stack.
+Product Backend owns the shared PostgreSQL, Redis, MinIO, and Docker network for
+each environment. Agent Runtime joins that network as an external consumer and
+uses separate database, Redis ACL/DB, and bucket identities. The actual staging
+DNS names still contain `-test`; this is a transitional hostname only.
 
-Direct test mutation targets in the Makefile fail closed. Infrastructure
-shutdown, reset, or credential rotation is separate approved maintenance and
-must not bypass the protected release lock, current manifest, and backup gate.
+A successful `backend-ci` run publishes the exact tested image under the full
+commit SHA and records its digest. An operator then runs `backend-delivery`,
+selects `staging` or `production`, and chooses `bootstrap`, `deploy`, or
+`rollback`. Deployment pulls only the CI-proven digest, validates the private
+environment file, serializes with the shared release lock, backs up before schema
+changes, verifies loopback and public readiness, and writes the release manifest
+under `${RELEASE_ROOT}/current/backend/release-manifest.json`.
 
-The normal delivery path is not an on-host build. A successful `backend-ci`
-run on `main` publishes the exact image tested by CI to GHCR under the full
-commit SHA and records its digest. An operator then runs
-`backend-test-delivery`, selects the protected `test` environment, and
-supplies only a full commit already merged into `main`. The workflow consumes
-that commit's successful CI image manifest, serializes with Agent/App delivery
-through the host lock, checks port/network ownership, and never reconciles
-stateful containers during application delivery. It backs up PostgreSQL and
-migrates only when the Alembic revision changes, verifies object storage plus
-loopback/SNI readiness, restores the current-manifest image on a failed switch,
-and writes
-`/opt/momcozy-lab/current/backend/release-manifest.json`.
-
-Rollback is an explicit operation in the same workflow. It changes application
-code only, never downgrades PostgreSQL, and therefore requires the operator to
-confirm schema compatibility.
-
-No production deployment profile is shipped. Production application safeguards
-remain in code, but a production Compose/env contract will be designed only
-when a real production target and managed dependencies are approved.
+Direct server mutation is intentionally absent from the Makefile. Use
+`make backend-staging-config` or `make backend-production-config` only to render
+and validate the committed Compose contract. See
+[`docs/environment-profiles.md`](docs/environment-profiles.md) and
+[`docs/deployment-runbook.md`](docs/deployment-runbook.md).

@@ -46,12 +46,15 @@ async def main() -> None:
                         session.add(User(id=provider_id))
                         await session.flush()
                     provider = CareProvider(
-                        user_id=provider_id, display_name="Jamie Lee（测试）",
-                        timezone="Asia/Shanghai", regions=["CA"], languages=["zh-CN", "en"],
-                        bio="本机 UI 测试用虚拟专家，不对应真实咨询服务。", active=True, sandbox=True,
+                        user_id=provider_id, display_name="Jamie Lee (Test)",
+                        timezone="Asia/Shanghai", regions=["CA"], languages=["en"],
+                        bio="Fictional consultant for local UI testing only; not a real consultation service.", active=True, sandbox=True,
                     )
                     session.add(provider)
                     await session.flush()
+                provider.display_name = "Jamie Lee (Test)"
+                provider.languages = ["en"]
+                provider.bio = "Fictional consultant for local UI testing only; not a real consultation service."
                 if not provider.sandbox or not provider.active:
                     raise RuntimeError("The fixture provider must be active and sandbox-only.")
                 audit_repository = AuditRepository(session)

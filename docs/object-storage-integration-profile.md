@@ -54,7 +54,7 @@ OBJECT_STORAGE_SECRET_ACCESS_KEY=minioadmin
 Host-side checks use the exposed localhost port:
 
 ```bash
-set -a; . env/compose.local.env.example; set +a
+set -a; . env/local.env.example; set +a
 python scripts/check_object_storage_profile.py
 ```
 

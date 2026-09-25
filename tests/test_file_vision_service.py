@@ -60,7 +60,7 @@ def test_file_vision_service_returns_read_only_schedule_task_previews() -> None:
         "provider": "local_stub",
         "purpose": "schedule",
         "time": "09:00",
-        "event": "吸奶",
+        "event": "Pumping",
         "event_type": "pump",
     }
     assert events[2].payload["event_type"] == "breastfeed"

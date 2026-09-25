@@ -56,8 +56,10 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "docs/release-smoke-checklist.md",
         "docker-compose.ci.yml",
         "docker-compose.local.yml",
-        "docker-compose.test.yml",
-        "deploy/test/init-postgres.sh",
+        "docker-compose.deploy.yml",
+        "deploy/shared/init-postgres.sh",
+        "scripts/release.py",
+        ".github/workflows/backend-delivery.yml",
         "scripts/check_database_profile.py",
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
@@ -71,7 +73,7 @@ def _check_required_files(root: Path) -> list[CheckResult]:
 
 def _check_environment_profiles(root: Path) -> list[CheckResult]:
     required_by_file = {
-        "env/compose.local.env.example": [
+        "env/local.env.example": [
             "APP_ENV=local",
             "DATABASE_URL=postgresql+asyncpg://momcozy:momcozy@postgres",
             "REDIS_URL=redis://redis",
@@ -79,15 +81,21 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
             "AUTH_JWT_PRIVATE_KEY_B64=",
             "AUTH_JWT_ISSUER=momcozy-local",
         ],
-        "env/compose.test.env.example": [
-            "APP_ENV=test",
-            "DATABASE_URL=postgresql+asyncpg://momcozy_test:${MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD}@test-postgres",
-            "REDIS_URL=redis://product-backend:${MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD}@test-redis:6379/0",
+        "env/staging.env.example": [
+            "APP_ENV=staging",
+            "MOMCOZY_NETWORK_NAME=momcozy-lab-staging",
+            "MOMCOZY_PRODUCT_POSTGRES_DB=momcozy_staging",
+            "REDIS_URL=redis://product-backend:${MOMCOZY_PRODUCT_REDIS_PASSWORD}@redis:6379/0",
             "OBJECT_STORAGE_PROVIDER=minio",
-            "AUTH_JWT_PRIVATE_KEY_B64=",
-            "AUTH_JWT_ISSUER=momcozy-test",
-            "AUTH_INVITE_CODES=",
-            "OBJECT_STORAGE_ENDPOINT_URL=http://test-minio:9000",
+            "AUTH_JWT_ISSUER=momcozy-staging",
+            "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
+        ],
+        "env/production.env.example": [
+            "APP_ENV=production",
+            "MOMCOZY_NETWORK_NAME=momcozy-lab-production",
+            "MOMCOZY_PRODUCT_POSTGRES_DB=momcozy_production",
+            "OBJECT_STORAGE_PROVIDER=minio",
+            "AUTH_JWT_ISSUER=momcozy-production",
         ],
     }
     common = [
@@ -159,8 +167,9 @@ def _check_ci_workflow(root: Path) -> list[CheckResult]:
         "scripts/check_object_storage_profile.py",
         "docker-compose.local.yml",
         "docker-compose.ci.yml",
-        "docker-compose.test.yml",
-        "--env-file env/compose.test.env.example",
+        "docker-compose.deploy.yml",
+        "--env-file env/staging.env.example",
+        "python scripts/release.py image-manifest",
         "openssl genpkey",
         "momcozy-lab-backend:ci",
         "--profile tools run --rm migrate",
@@ -182,7 +191,9 @@ def _check_makefile(root: Path) -> list[CheckResult]:
         "backend-check-infra:",
         "backend-productization-status:",
         "backend-smoke:",
-        "backend-test-smoke:",
+        "backend-deploy-validate:",
+        "backend-staging-config:",
+        "backend-production-config:",
         "scripts/check_redis_profile.py",
         "scripts/check_product_asset_storage.py",
     ]

@@ -27,7 +27,9 @@ DEFAULT_DOUBAO_TTS_SAMPLE_RATE = 24000
 DEFAULT_DOUBAO_TTS_SPEED_RATIO = 1.1
 DEFAULT_DOUBAO_TTS_FIRST_CHUNK_TIMEOUT_SECONDS = 20
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
-PRODUCTION_ENVS = {"prod", "production"}
+VALID_APP_ENVS = {"local", "test", "staging", "production"}
+PRODUCTION_ENVS = {"production"}
+DEPLOYED_ENVS = {"staging", "production"}
 SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub", "doubao", "volcengine"}
 SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub", "openai"}
 
@@ -243,11 +245,18 @@ class Settings:
         return self.app_env.lower() in PRODUCTION_ENVS
 
     @property
+    def is_deployed(self) -> bool:
+        return self.app_env.lower() in DEPLOYED_ENVS
+
+    @property
     def stripe_livemode(self) -> bool:
         return self.stripe_secret_key.startswith(("sk_live_", "rk_live_"))
 
     def validate_for_startup(self) -> None:
         errors: list[str] = []
+        normalized_app_env = self.app_env.strip().lower()
+        if normalized_app_env not in VALID_APP_ENVS:
+            errors.append("APP_ENV must be one of: local, test, staging, production")
         if self.push_provider not in {"disabled", "fcm"}:
             errors.append("PUSH_PROVIDER must be disabled or fcm")
         if self.push_provider == "fcm":
@@ -275,8 +284,8 @@ class Settings:
             if (not valid_port or not runtime.hostname or runtime.scheme not in {'http', 'https'} or
                 runtime.username is not None or runtime.password is not None or runtime.path not in {'', '/'} or runtime.query or runtime.fragment):
                 errors.append('CARE_REPORT_RUNTIME_URL must be an HTTP(S) origin without credentials')
-            if self.is_production and runtime.scheme != 'https':
-                errors.append('CARE_REPORT_RUNTIME_URL must use HTTPS in production')
+            if self.is_deployed and runtime.scheme != 'https':
+                errors.append('CARE_REPORT_RUNTIME_URL must use HTTPS in deployed environments')
         if self.care_report_service_key:
             if len(self.care_report_service_key.encode('utf-8')) < 32:
                 errors.append('CARE_REPORT_SERVICE_KEY must be at least 32 bytes')
@@ -293,20 +302,20 @@ class Settings:
         provider = self.object_storage_provider.lower()
         if self.consultation_video_provider not in {"disabled", "sandbox", "livekit"}:
             errors.append("CONSULTATION_VIDEO_PROVIDER must be disabled, sandbox or livekit")
-        if self.is_production and (self.consultation_video_provider == "sandbox" or self.consultation_demo_early_join):
-            errors.append("Production consultations cannot use sandbox video or bypass the join window")
+        if self.is_deployed and (self.consultation_video_provider == "sandbox" or self.consultation_demo_early_join):
+            errors.append("Deployed consultations cannot use sandbox video or bypass the join window")
         if self.consultation_video_provider == "livekit":
             if not self.consultation_livekit_api_key or not self.consultation_livekit_api_secret:
                 errors.append("LiveKit credentials are required")
             video_url = urlparse(self.consultation_livekit_url)
             if video_url.scheme not in {"ws", "wss"} or not video_url.netloc or video_url.username or video_url.password or video_url.query or video_url.fragment:
                 errors.append("CONSULTATION_LIVEKIT_URL must be a WebSocket origin")
-            if self.is_production and video_url.scheme != "wss":
-                errors.append("Production LiveKit connections require WSS")
+            if self.is_deployed and video_url.scheme != "wss":
+                errors.append("Deployed LiveKit connections require WSS")
             client_url = urlparse(self.consultation_livekit_client_url or self.consultation_livekit_url)
             if client_url.scheme not in {"ws", "wss"} or not client_url.netloc or client_url.username or client_url.password or client_url.query or client_url.fragment:
                 errors.append("CONSULTATION_LIVEKIT_CLIENT_URL must be a WebSocket origin")
-            if self.is_production and client_url.scheme != "wss":
+            if self.is_deployed and client_url.scheme != "wss":
                 errors.append("Production LiveKit client connections require WSS")
 
         if not self.database_url:
@@ -426,19 +435,19 @@ class Settings:
         if not isfinite(self.vision_request_timeout_seconds) or self.vision_request_timeout_seconds <= 0:
             errors.append("VISION_REQUEST_TIMEOUT_SECONDS must be positive")
 
-        if self.is_production:
+        if self.is_deployed:
             if _is_local_url(self.database_url, LOCAL_DATABASE_URL):
-                errors.append("DATABASE_URL must be explicitly configured for production")
+                errors.append("DATABASE_URL must be explicitly configured for deployed environments")
             if _is_local_url(self.redis_url, LOCAL_REDIS_URL):
-                errors.append("REDIS_URL must be explicitly configured for production")
+                errors.append("REDIS_URL must be explicitly configured for deployed environments")
             if provider == "local":
-                errors.append("OBJECT_STORAGE_PROVIDER cannot be local in production")
+                errors.append("OBJECT_STORAGE_PROVIDER cannot be local in deployed environments")
             if not self.trusted_hosts:
-                errors.append("TRUSTED_HOSTS is required in production")
+                errors.append("TRUSTED_HOSTS is required in deployed environments")
             if "*" in self.trusted_hosts:
-                errors.append("TRUSTED_HOSTS cannot include * in production")
+                errors.append("TRUSTED_HOSTS cannot include * in deployed environments")
             if "*" in self.cors_allowed_origins:
-                errors.append("CORS_ALLOWED_ORIGINS cannot include * in production")
+                errors.append("CORS_ALLOWED_ORIGINS cannot include * in deployed environments")
             if provider != "local" and not self.object_storage_bucket:
                 errors.append("OBJECT_STORAGE_BUCKET is required for managed object storage")
             if provider in {"minio", "oss", "cos"} and not self.object_storage_endpoint_url:
@@ -448,32 +457,32 @@ class Settings:
             if provider != "local" and not self.object_storage_secret_access_key:
                 errors.append("OBJECT_STORAGE_SECRET_ACCESS_KEY is required for managed object storage")
             if not self.auth_jwt_private_key_b64:
-                errors.append("AUTH_JWT_PRIVATE_KEY_B64 is required in production")
+                errors.append("AUTH_JWT_PRIVATE_KEY_B64 is required in deployed environments")
             if not self.auth_jwt_issuer:
-                errors.append("AUTH_JWT_ISSUER is required in production")
+                errors.append("AUTH_JWT_ISSUER is required in deployed environments")
             if not self.auth_jwt_product_audience:
-                errors.append("AUTH_JWT_PRODUCT_AUDIENCE is required in production")
+                errors.append("AUTH_JWT_PRODUCT_AUDIENCE is required in deployed environments")
             if not self.auth_jwt_runtime_audience:
-                errors.append("AUTH_JWT_RUNTIME_AUDIENCE is required in production")
+                errors.append("AUTH_JWT_RUNTIME_AUDIENCE is required in deployed environments")
             if len(self.auth_email_token_key.encode("utf-8")) < 32:
                 errors.append("AUTH_EMAIL_TOKEN_KEY must be at least 32 bytes in production")
             if not self.auth_email_from or not self.auth_smtp_host:
-                errors.append("AUTH_EMAIL_FROM and AUTH_SMTP_HOST are required in production")
+                errors.append("AUTH_EMAIL_FROM and AUTH_SMTP_HOST are required in deployed environments")
             if not self.auth_google_client_id:
-                errors.append("AUTH_GOOGLE_CLIENT_ID is required in production")
+                errors.append("AUTH_GOOGLE_CLIENT_ID is required in deployed environments")
             if not self.service_api_key:
-                errors.append("SERVICE_API_KEY is required in production for protected operational endpoints")
+                errors.append("SERVICE_API_KEY is required in deployed environments for protected operational endpoints")
             if not self.agent_runtime_service_api_key:
-                errors.append("AGENT_RUNTIME_SERVICE_API_KEY is required in production")
+                errors.append("AGENT_RUNTIME_SERVICE_API_KEY is required in deployed environments")
             if not self.agent_model_asset_public_base_url:
                 errors.append(
                     "AGENT_MODEL_ASSET_PUBLIC_BASE_URL is required "
                     "in production"
                 )
             if self.voice_provider == "local_stub":
-                errors.append("VOICE_PROVIDER=local_stub cannot be used in production")
+                errors.append("VOICE_PROVIDER=local_stub cannot be used in deployed environments")
             if self.vision_provider == "local_stub":
-                errors.append("VISION_PROVIDER=local_stub cannot be used in production")
+                errors.append("VISION_PROVIDER=local_stub cannot be used in deployed environments")
 
         if errors:
             raise ValueError("; ".join(errors))

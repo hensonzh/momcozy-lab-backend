@@ -104,10 +104,10 @@ async def _increment_counter(*, request: Request, key: str, window_seconds: int)
         try:
             return int(cast(int, await redis_client.eval(_INCREMENT_WITH_TTL, 1, key, window_seconds)))
         except Exception:
-            if request.app.state.settings.is_production:
+            if request.app.state.settings.is_deployed:
                 return 1_000_000_000
 
-    if request.app.state.settings.is_production and redis_client is None:
+    if request.app.state.settings.is_deployed and redis_client is None:
         return 1_000_000_000
     store = cast(InMemoryRateLimitStore | None, getattr(request.app.state, "rate_limit_store", None))
     if store is None:

@@ -59,7 +59,7 @@ Run storage checks after MinIO starts:
 
 ```bash
 make backend-local-minio
-set -a; . env/compose.local.env.example; set +a
+set -a; . env/local.env.example; set +a
 python scripts/check_object_storage_profile.py
 python scripts/check_product_asset_storage.py
 ```

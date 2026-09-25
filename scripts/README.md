@@ -7,7 +7,7 @@ Agent Runtime worker、记忆、回放、评测和恢复脚本属于独立 Agent
 基础设施的脚本使用 `Settings.from_env()`，执行前加载对应私有 env：
 
 ```bash
-set -a; . env/compose.local.env; set +a
+set -a; . env/local.env; set +a
 ```
 
 ## 推荐入口

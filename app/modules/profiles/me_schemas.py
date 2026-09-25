@@ -62,14 +62,14 @@ class RecordOrder(StrictModel):
 class ObservationFields(StrictModel):
     feeding_record_id: UUID | None = None
     canonical_record_id: str | None = None
-    side: Literal["左侧", "右侧", "两侧"] | None = None
-    phase: Literal["刚开始含奶时", "喂奶过程中", "喂奶后", "泵奶时"] | None = None
-    impact: Literal["可以继续喂", "需要暂停", "无法继续"] | None = None
+    side: Literal["左侧", "右侧", "两侧", "Left side", "Right side", "Both sides"] | None = None
+    phase: Literal["刚开始含奶时", "喂奶过程中", "喂奶后", "泵奶时", "When latching", "During feeding", "After feeding", "While pumping"] | None = None
+    impact: Literal["可以继续喂", "需要暂停", "无法继续", "Could continue", "Needed a break", "Could not continue"] | None = None
     carer: str | None = Field(default=None, max_length=80)
-    swallow: Literal["有", "没有", "不确定"] | None = None
+    swallow: Literal["有", "没有", "不确定", "Yes", "No", "Not sure"] | None = None
     pain: int | None = Field(default=None, ge=0, le=10)
     note: str = Field(default="", max_length=500)
-    action: Literal["添加一袋", "取用一袋"] | None = None
+    action: Literal["添加一袋", "取用一袋", "Add a bag", "Use a bag"] | None = None
     volume_ml: float | None = Field(default=None, gt=0, le=3000, allow_inf_nan=False)
     duration_minutes: int | None = Field(default=None, ge=1, le=240)
 
@@ -91,11 +91,11 @@ class Observation(StrictModel):
     @model_validator(mode="after")
     def value_matches_kind(self) -> "Observation":
         options = {
-            "energy": ["有力气", "还撑得住", "很疲惫"],
-            "sleep": ["少于 3 小时", "3–4 小时", "4–5 小时", "5–6 小时", "6 小时以上", "不确定"],
-            "mood": ["不太好", "一般", "不错"],
-            "latch": ["含得稳", "容易松开", "含不住"],
-            "bottle": ["愿意吃", "愿意吃一些", "不太愿意", "不愿意吃"],
+            "energy": ["有力气", "还撑得住", "很疲惫", "Energized", "Managing", "Exhausted"],
+            "sleep": ["少于 3 小时", "3–4 小时", "4–5 小时", "5–6 小时", "6 小时以上", "不确定", "Less than 3 hours", "3–4 hours", "4–5 hours", "5–6 hours", "Over 6 hours", "Not sure"],
+            "mood": ["不太好", "一般", "不错", "Having a hard day", "Okay", "Good"],
+            "latch": ["含得稳", "容易松开", "含不住", "Stayed latched", "Came off easily", "Could not latch"],
+            "bottle": ["愿意吃", "愿意吃一些", "不太愿意", "不愿意吃", "Fed willingly", "Took some", "Reluctant", "Refused"],
         }
         if self.kind in options and self.value not in options[self.kind]:
             raise ValueError("invalid observation value")

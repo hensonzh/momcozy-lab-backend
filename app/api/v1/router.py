@@ -80,7 +80,7 @@ async def live() -> dict[str, str]:
 @router.get("/health/ready")
 async def ready(request: Request) -> dict[str, Any]:
     settings = request.app.state.settings
-    if not (settings.is_production or settings.readiness_check_infrastructure):
+    if not (settings.is_deployed or settings.readiness_check_infrastructure):
         return {"status": "ok"}
 
     checks = {
@@ -98,7 +98,7 @@ async def metrics(request: Request, service_key: str | None = Header(default=Non
 
 def _authorize_metrics(*, request: Request, service_key: str | None) -> None:
     settings = cast(Settings, request.app.state.settings)
-    if not (settings.is_production or settings.metrics_require_service_key):
+    if not (settings.is_deployed or settings.metrics_require_service_key):
         return
     if not service_key:
         raise ApiError(code="authentication_required", message="X-Service-Key is required.", status=401)

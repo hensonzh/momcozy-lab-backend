@@ -1,0 +1,247 @@
+name: ${MOMCOZY_BACKEND_COMPOSE_PROJECT:?Set MOMCOZY_BACKEND_COMPOSE_PROJECT}
+
+x-backend-image: &backend-image
+  image: ${MOMCOZY_BACKEND_IMAGE:?Set MOMCOZY_BACKEND_IMAGE to an immutable digest reference}
+  env_file:
+    - ${MOMCOZY_BACKEND_ENV_FILE:?Set MOMCOZY_BACKEND_ENV_FILE}
+  environment:
+    APP_ENV: ${APP_ENV:?Set APP_ENV}
+    AUTH_REQUIRE_ACTIVE_SESSION: "true"
+    DATABASE_URL: postgresql+asyncpg://${MOMCOZY_PRODUCT_POSTGRES_USER:?Set MOMCOZY_PRODUCT_POSTGRES_USER}:${MOMCOZY_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_PRODUCT_POSTGRES_PASSWORD}@postgres:5432/${MOMCOZY_PRODUCT_POSTGRES_DB:?Set MOMCOZY_PRODUCT_POSTGRES_DB}
+    REDIS_URL: redis://product-backend:${MOMCOZY_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_PRODUCT_REDIS_PASSWORD}@redis:6379/0
+    OBJECT_STORAGE_BUCKET: ${MOMCOZY_PRODUCT_MINIO_BUCKET:?Set MOMCOZY_PRODUCT_MINIO_BUCKET}
+    OBJECT_STORAGE_ENDPOINT_URL: http://minio:9000
+    OBJECT_STORAGE_ACCESS_KEY_ID: ${MOMCOZY_PRODUCT_MINIO_ACCESS_KEY:?Set MOMCOZY_PRODUCT_MINIO_ACCESS_KEY}
+    OBJECT_STORAGE_SECRET_ACCESS_KEY: ${MOMCOZY_PRODUCT_MINIO_SECRET_KEY:?Set MOMCOZY_PRODUCT_MINIO_SECRET_KEY}
+    MOMCOZY_POSTGRES_ADMIN_PASSWORD: ""
+    MOMCOZY_PRODUCT_POSTGRES_PASSWORD: ""
+    MOMCOZY_AGENT_POSTGRES_PASSWORD: ""
+    MOMCOZY_REDIS_ADMIN_PASSWORD: ""
+    MOMCOZY_PRODUCT_REDIS_PASSWORD: ""
+    MOMCOZY_AGENT_REDIS_PASSWORD: ""
+    MOMCOZY_MINIO_ROOT_USER: ""
+    MOMCOZY_MINIO_ROOT_PASSWORD: ""
+    MOMCOZY_PRODUCT_MINIO_ACCESS_KEY: ""
+    MOMCOZY_PRODUCT_MINIO_SECRET_KEY: ""
+    MOMCOZY_AGENT_MINIO_ACCESS_KEY: ""
+    MOMCOZY_AGENT_MINIO_SECRET_KEY: ""
+  networks:
+    - deployment
+
+services:
+  api:
+    <<: *backend-image
+    restart: unless-stopped
+    init: true
+    cpus: 1.0
+    mem_limit: 1g
+    ports:
+      - "${MOMCOZY_BACKEND_API_BIND:?Set MOMCOZY_BACKEND_API_BIND}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      deployment:
+        aliases:
+          - product-backend
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/live', timeout=2)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  migrate:
+    <<: *backend-image
+    command: python -m alembic -c alembic.ini upgrade head
+    profiles: [tools]
+    cpus: 0.5
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notification-worker:
+    <<: *backend-image
+    command: python -m app.workers.notifications
+    volumes:
+      - ${MOMCOZY_PUSH_SECRETS_DIR:-./.local/push-secrets}:/run/momcozy-push:ro
+    init: true
+    restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth-email-worker:
+    <<: *backend-image
+    command: python -m scripts.deliver_auth_emails
+    restart: unless-stopped
+    init: true
+    cpus: 0.25
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  care-report-worker:
+    <<: *backend-image
+    command: python -m app.workers.care_reports
+    profiles: [reports]
+    restart: unless-stopped
+    init: true
+    cpus: 0.5
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  care-video-worker:
+    <<: *backend-image
+    command: python -m app.workers.care_video
+    profiles: [consultations]
+    restart: unless-stopped
+    init: true
+    cpus: 0.5
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1536m
+    environment:
+      POSTGRES_USER: ${MOMCOZY_POSTGRES_ADMIN_USER:?Set MOMCOZY_POSTGRES_ADMIN_USER}
+      POSTGRES_PASSWORD: ${MOMCOZY_POSTGRES_ADMIN_PASSWORD:?Set MOMCOZY_POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_DB: postgres
+      MOMCOZY_PRODUCT_POSTGRES_DB: ${MOMCOZY_PRODUCT_POSTGRES_DB:?Set MOMCOZY_PRODUCT_POSTGRES_DB}
+      MOMCOZY_PRODUCT_POSTGRES_USER: ${MOMCOZY_PRODUCT_POSTGRES_USER:?Set MOMCOZY_PRODUCT_POSTGRES_USER}
+      MOMCOZY_PRODUCT_POSTGRES_PASSWORD: ${MOMCOZY_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_PRODUCT_POSTGRES_PASSWORD}
+      MOMCOZY_AGENT_POSTGRES_DB: ${MOMCOZY_AGENT_POSTGRES_DB:?Set MOMCOZY_AGENT_POSTGRES_DB}
+      MOMCOZY_AGENT_POSTGRES_USER: ${MOMCOZY_AGENT_POSTGRES_USER:?Set MOMCOZY_AGENT_POSTGRES_USER}
+      MOMCOZY_AGENT_POSTGRES_PASSWORD: ${MOMCOZY_AGENT_POSTGRES_PASSWORD:?Set MOMCOZY_AGENT_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/shared/init-postgres.sh:/docker-entrypoint-initdb.d/10-init-momcozy-databases.sh:ro
+    networks:
+      deployment:
+        aliases: [postgres]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test \"$$(psql --username \"$$POSTGRES_USER\" --dbname \"$$POSTGRES_DB\" --tuples-only --no-align --command \"SELECT count(*) FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE (d.datname = '$$MOMCOZY_PRODUCT_POSTGRES_DB' AND r.rolname = '$$MOMCOZY_PRODUCT_POSTGRES_USER') OR (d.datname = '$$MOMCOZY_AGENT_POSTGRES_DB' AND r.rolname = '$$MOMCOZY_AGENT_POSTGRES_USER');\")\" = \"2\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 256m
+    command: ["/usr/local/bin/start-momcozy-redis"]
+    environment:
+      MOMCOZY_REDIS_ADMIN_PASSWORD: ${MOMCOZY_REDIS_ADMIN_PASSWORD:?Set MOMCOZY_REDIS_ADMIN_PASSWORD}
+      MOMCOZY_PRODUCT_REDIS_PASSWORD: ${MOMCOZY_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_PRODUCT_REDIS_PASSWORD}
+      MOMCOZY_AGENT_REDIS_PASSWORD: ${MOMCOZY_AGENT_REDIS_PASSWORD:?Set MOMCOZY_AGENT_REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+      - ./deploy/shared/start-redis.sh:/usr/local/bin/start-momcozy-redis:ro
+    tmpfs:
+      - /run/redis:mode=0700
+    networks:
+      deployment:
+        aliases: [redis]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --user deployment-admin --pass \"$$MOMCOZY_REDIS_ADMIN_PASSWORD\" --no-auth-warning ping | grep -qx PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 1g
+    command: ["server", "/data", "--address", ":9000"]
+    environment:
+      MINIO_ROOT_USER: ${MOMCOZY_MINIO_ROOT_USER:?Set MOMCOZY_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MOMCOZY_MINIO_ROOT_PASSWORD:?Set MOMCOZY_MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      deployment:
+        aliases: [minio]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MOMCOZY_MINIO_ROOT_USER:?Set MOMCOZY_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MOMCOZY_MINIO_ROOT_PASSWORD:?Set MOMCOZY_MINIO_ROOT_PASSWORD}
+      PRODUCT_BUCKET: ${MOMCOZY_PRODUCT_MINIO_BUCKET:?Set MOMCOZY_PRODUCT_MINIO_BUCKET}
+      PRODUCT_MINIO_ACCESS_KEY: ${MOMCOZY_PRODUCT_MINIO_ACCESS_KEY:?Set MOMCOZY_PRODUCT_MINIO_ACCESS_KEY}
+      PRODUCT_MINIO_SECRET_KEY: ${MOMCOZY_PRODUCT_MINIO_SECRET_KEY:?Set MOMCOZY_PRODUCT_MINIO_SECRET_KEY}
+      AGENT_BUCKET: ${MOMCOZY_AGENT_MINIO_BUCKET:?Set MOMCOZY_AGENT_MINIO_BUCKET}
+      AGENT_MINIO_ACCESS_KEY: ${MOMCOZY_AGENT_MINIO_ACCESS_KEY:?Set MOMCOZY_AGENT_MINIO_ACCESS_KEY}
+      AGENT_MINIO_SECRET_KEY: ${MOMCOZY_AGENT_MINIO_SECRET_KEY:?Set MOMCOZY_AGENT_MINIO_SECRET_KEY}
+    volumes:
+      - ./deploy/shared/minio-product-policy.json:/policies/product-backend.template.json:ro
+      - ./deploy/shared/minio-agent-policy.json:/policies/agent-runtime.template.json:ro
+    networks: [deployment]
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        sed "s/__PRODUCT_BUCKET__/$${PRODUCT_BUCKET}/g" /policies/product-backend.template.json > /tmp/product-backend.json
+        sed "s/__AGENT_BUCKET__/$${AGENT_BUCKET}/g" /policies/agent-runtime.template.json > /tmp/agent-runtime.json
+        mc alias set deployment http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "deployment/$${PRODUCT_BUCKET}"
+        mc mb --ignore-existing "deployment/$${AGENT_BUCKET}"
+        mc admin policy create deployment product-backend /tmp/product-backend.json
+        mc admin policy create deployment agent-runtime /tmp/agent-runtime.json
+        mc admin user add deployment "$${PRODUCT_MINIO_ACCESS_KEY}" "$${PRODUCT_MINIO_SECRET_KEY}"
+        mc admin user add deployment "$${AGENT_MINIO_ACCESS_KEY}" "$${AGENT_MINIO_SECRET_KEY}"
+        mc admin policy attach deployment product-backend --user "$${PRODUCT_MINIO_ACCESS_KEY}"
+        mc admin policy attach deployment agent-runtime --user "$${AGENT_MINIO_ACCESS_KEY}"
+    profiles: [tools]
+    cpus: 0.25
+    mem_limit: 256m
+    restart: "no"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  deployment:
+    name: ${MOMCOZY_NETWORK_NAME:?Set MOMCOZY_NETWORK_NAME}

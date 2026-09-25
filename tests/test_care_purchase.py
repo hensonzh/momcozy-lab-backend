@@ -27,6 +27,23 @@ from app.modules.care.service import CareService
 from app.modules.users.models import User
 
 
+def test_service_catalog_copy_is_english_for_app_users():
+    import re
+    from app.modules.care.catalog import CATALOG
+
+    for package in CATALOG:
+        visible = [
+            package.name,
+            package.subtitle,
+            package.description,
+            *package.highlights,
+            *package.expert_services,
+            *package.continuous_services,
+        ]
+        assert all(not re.search(r"[\u3400-\u9fff]", value) for value in visible)
+    assert CATALOG[0].name == "Feeding Confidence"
+
+
 def test_strict_purchase_contract_excludes_patient_and_card_overrides():
     with pytest.raises(ValidationError):
         EligibilityWrite(package_id="feeding-confidence", region="CA", acknowledges_non_emergency=False)

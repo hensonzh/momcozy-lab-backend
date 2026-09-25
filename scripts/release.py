@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage, bootstrap, deploy, restart, or roll back Product Backend test."""
+"""Stage, bootstrap, deploy, restart, or roll back Product Backend."""
 
 from __future__ import annotations
 
@@ -20,11 +20,13 @@ from typing import IO, Any, Sequence, cast
 
 SERVICE_NAME = "product-backend"
 IMAGE_REPOSITORY = "ghcr.io/hensonzh/momcozy-lab-backend"
-COMPOSE_PROJECT = "momcozy-lab-backend-test"
-TEST_NETWORK = "momcozy-lab-test"
-EXPECTED_RELEASE_ROOT = Path("/opt/momcozy-lab")
+DEPLOY_ENVIRONMENTS = frozenset({"staging", "production"})
+RELEASE_ROOTS = {
+    "staging": Path("/opt/momcozy-lab"),  # Existing host path; no staging data migration.
+    "production": Path("/opt/momcozy-lab-production"),
+}
 OPENAPI_PATH = Path("docs/openapi.generated.json")
-COMPOSE_PATH = Path("docker-compose.test.yml")
+COMPOSE_PATH = Path("docker-compose.deploy.yml")
 FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_REF_PATTERN = re.compile(
@@ -63,6 +65,7 @@ class BackendReleaseSpec:
     release_root: Path
     public_url: str
     ca_file: Path
+    environment: str = "staging"
 
 
 class CommandRunner:
@@ -88,6 +91,13 @@ class CommandRunner:
         )
 
 
+def validate_environment(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized not in DEPLOY_ENVIRONMENTS:
+        raise ValueError("environment must be staging or production")
+    return normalized
+
+
 def validate_commit_sha(value: str) -> str:
     normalized = value.strip().lower()
     if not FULL_SHA_PATTERN.fullmatch(normalized):
@@ -104,10 +114,11 @@ def validate_image_ref(value: str) -> str:
     return normalized
 
 
-def validate_release_root(value: Path) -> Path:
+def validate_release_root(value: Path, environment: str) -> Path:
     normalized = value.expanduser().resolve()
-    if normalized != EXPECTED_RELEASE_ROOT:
-        raise ValueError(f"release root must be {EXPECTED_RELEASE_ROOT}")
+    expected = RELEASE_ROOTS[validate_environment(environment)]
+    if normalized != expected:
+        raise ValueError(f"{environment} release root must be {expected}")
     return normalized
 
 
@@ -119,16 +130,18 @@ def build_release_manifest(
     openapi_sha256: str,
     public_url: str,
     released_at: str,
+    environment: str = "staging",
 ) -> dict[str, Any]:
     validate_image_ref(image_ref)
     validate_commit_sha(commit_sha)
+    environment = validate_environment(environment)
     _validate_sha256(openapi_sha256, "OpenAPI SHA256")
     if not SAFE_REVISION_PATTERN.fullmatch(migration_revision):
         raise ValueError("migration revision contains unsafe characters")
     return {
         "schema_version": 1,
         "service": SERVICE_NAME,
-        "environment": "test",
+        "environment": environment,
         "commit": commit_sha,
         "image_ref": image_ref,
         "image_digest": image_ref.rsplit("@", maxsplit=1)[1],
@@ -158,8 +171,9 @@ def stage_release_snapshot(
     commit_sha: str,
     release_root: Path,
     attempt_id: str,
+    environment: str,
 ) -> Path:
-    root = validate_release_root(release_root)
+    root = validate_release_root(release_root, environment)
     commit = validate_commit_sha(commit_sha)
     _validate_sha256(archive_sha256, "archive SHA256")
     if not SAFE_ATTEMPT_PATTERN.fullmatch(attempt_id):
@@ -247,16 +261,16 @@ def build_deploy_commands(spec: BackendReleaseSpec) -> list[list[str]]:
             "--force-recreate",
             *_runtime_services(spec),
         ],
-        _local_readiness_command(),
+        _local_readiness_command(spec),
         _public_readiness_command(spec.public_url, spec.ca_file),
     ]
 
 
 def bootstrap(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
-    """Create shared test infrastructure without deploying application code."""
+    """Create shared deployment infrastructure without deploying application code."""
     _validate_spec_files(spec)
-    _validate_env_file(spec.env_file)
-    _check_collision_boundaries(runner)
+    _validate_env_file(spec.env_file, spec.environment)
+    _check_collision_boundaries(spec, runner)
     env = _command_env(spec)
     compose = _compose_base(spec)
     runner.run(["docker", "pull", spec.image_ref], env=env)
@@ -303,13 +317,13 @@ def bootstrap(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
         cwd=spec.repo_dir,
         env=env,
     )
-    print("Product Backend shared test infrastructure is healthy and initialized.")
+    print("Product Backend shared deployment infrastructure is healthy and initialized.")
 
 
 def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
     _validate_spec_files(spec)
-    _validate_env_file(spec.env_file)
-    _check_collision_boundaries(runner)
+    _validate_env_file(spec.env_file, spec.environment)
+    _check_collision_boundaries(spec, runner)
     env = _command_env(spec)
     commands = build_deploy_commands(spec)
 
@@ -320,9 +334,11 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
     runner.run(commands[3], cwd=spec.repo_dir, env=env)
 
     image_head = _read_image_migration_head(spec, runner, env)
+    deployment = _deployment_values(spec)
     database_revision = _read_database_revision(
         postgres_container=infrastructure["postgres"],
-        database="momcozy_test",
+        database=deployment["MOMCOZY_PRODUCT_POSTGRES_DB"],
+        username=deployment["MOMCOZY_POSTGRES_ADMIN_USER"],
         runner=runner,
     )
     if database_revision != image_head:
@@ -330,7 +346,9 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
         _write_secure_backup(
             runner=runner,
             command=_pg_dump_command(
-                infrastructure["postgres"], database="momcozy_test"
+                infrastructure["postgres"],
+                database=deployment["MOMCOZY_PRODUCT_POSTGRES_DB"],
+                username=deployment["MOMCOZY_POSTGRES_ADMIN_USER"],
             ),
             backup_path=backup_path,
             cwd=spec.repo_dir,
@@ -351,7 +369,8 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
         )
         database_revision = _read_database_revision(
             postgres_container=infrastructure["postgres"],
-            database="momcozy_test",
+            database=deployment["MOMCOZY_PRODUCT_POSTGRES_DB"],
+            username=deployment["MOMCOZY_POSTGRES_ADMIN_USER"],
             runner=runner,
         )
         if database_revision != image_head:
@@ -381,30 +400,32 @@ def deploy(spec: BackendReleaseSpec, runner: CommandRunner) -> Path:
                     f"{restore_error}"
                 ) from deploy_error
         raise
-    print(f"Product Backend test release promoted: {manifest_path}")
+    print(f"Product Backend release promoted: {manifest_path}")
     return manifest_path
 
 
 def restart_current(
     *,
+    environment: str,
     env_file: Path,
     release_root: Path,
     public_url: str,
     ca_file: Path,
     runner: CommandRunner,
 ) -> Path:
-    root = validate_release_root(release_root)
+    root = validate_release_root(release_root, environment)
     current_dir = _resolved_release_link(root / "current" / "backend")
     spec = _spec_from_manifest(
         current_dir,
+        environment=environment,
         env_file=env_file,
         release_root=root,
         public_url=public_url,
         ca_file=ca_file,
     )
     _validate_spec_files(spec)
-    _validate_env_file(spec.env_file)
-    _check_collision_boundaries(runner)
+    _validate_env_file(spec.env_file, spec.environment)
+    _check_collision_boundaries(spec, runner)
     env = _command_env(spec)
     _require_healthy_infrastructure(spec, runner, env)
     runner.run(["docker", "pull", spec.image_ref], env=env)
@@ -415,6 +436,7 @@ def restart_current(
 
 def rollback(
     *,
+    environment: str,
     env_file: Path,
     release_root: Path,
     public_url: str,
@@ -422,7 +444,7 @@ def rollback(
     confirm_schema_compatible: bool,
     runner: CommandRunner,
 ) -> Path:
-    root = validate_release_root(release_root)
+    root = validate_release_root(release_root, environment)
     if not confirm_schema_compatible:
         raise ValueError("rollback requires --confirm-schema-compatible")
     current_link = root / "current" / "backend"
@@ -431,6 +453,7 @@ def rollback(
     previous_dir = _resolved_release_link(previous_link)
     current = _spec_from_manifest(
         current_dir,
+        environment=environment,
         env_file=env_file,
         release_root=root,
         public_url=public_url,
@@ -438,14 +461,15 @@ def rollback(
     )
     previous = _spec_from_manifest(
         previous_dir,
+        environment=environment,
         env_file=env_file,
         release_root=root,
         public_url=public_url,
         ca_file=ca_file,
     )
     _validate_spec_files(previous)
-    _validate_env_file(previous.env_file)
-    _check_collision_boundaries(runner)
+    _validate_env_file(previous.env_file, previous.environment)
+    _check_collision_boundaries(previous, runner)
     env = _command_env(previous)
     _require_healthy_infrastructure(previous, runner, env)
     runner.run(["docker", "pull", previous.image_ref], env=env)
@@ -465,7 +489,7 @@ def rollback(
         raise
     _replace_symlink(previous_link, current_dir)
     _replace_symlink(current_link, previous_dir)
-    print(f"Product Backend test rolled back to {previous.commit_sha}")
+    print(f"Product Backend rolled back to {previous.commit_sha}")
     return previous_dir / "release-manifest.json"
 
 
@@ -518,9 +542,10 @@ def _command_env(spec: BackendReleaseSpec) -> dict[str, str]:
 
 
 def _validate_spec_files(spec: BackendReleaseSpec) -> None:
+    validate_environment(spec.environment)
     validate_commit_sha(spec.commit_sha)
     validate_image_ref(spec.image_ref)
-    root = validate_release_root(spec.release_root)
+    root = validate_release_root(spec.release_root, spec.environment)
     expected_repo_dir = root / "releases" / "backend" / spec.commit_sha
     if spec.repo_dir.resolve() != expected_repo_dir:
         raise ValueError(f"repo directory must be {expected_repo_dir}")
@@ -533,28 +558,50 @@ def _validate_spec_files(spec: BackendReleaseSpec) -> None:
         raise FileNotFoundError(spec.ca_file)
     if not spec.public_url.startswith("https://"):
         raise ValueError("public URL must use HTTPS")
+    values = _read_env_values(spec.env_file)
+    expected_public_url = values.get("MOMCOZY_BACKEND_PUBLIC_URL", "").rstrip("/")
+    if expected_public_url and spec.public_url.rstrip("/") != expected_public_url:
+        raise ValueError("public URL does not match MOMCOZY_BACKEND_PUBLIC_URL")
 
 
-def _validate_env_file(path: Path) -> None:
+def _validate_env_file(path: Path, expected_environment: str) -> None:
     mode = path.stat().st_mode & 0o777
     if mode & 0o077:
-        raise PermissionError(f"test env must not be group/world readable: {mode:o}")
+        raise PermissionError(f"deployment env must not be group/world readable: {mode:o}")
     values = _read_env_values(path)
+    environment = validate_environment(expected_environment)
+    if values.get("APP_ENV", "").strip().lower() != environment:
+        raise ValueError(f"deployment env APP_ENV must be {environment}")
     if "MOMCOZY_BACKEND_IMAGE" in values:
         raise ValueError("MOMCOZY_BACKEND_IMAGE is release-owned and must not be in deploy.env")
     required = (
-        "MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD",
-        "MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD",
-        "MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD",
-        "MOMCOZY_TEST_REDIS_ADMIN_PASSWORD",
-        "MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD",
-        "MOMCOZY_TEST_AGENT_REDIS_PASSWORD",
-        "MOMCOZY_TEST_MINIO_ROOT_USER",
-        "MOMCOZY_TEST_MINIO_ROOT_PASSWORD",
-        "MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY",
-        "MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY",
-        "MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY",
-        "MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY",
+        "APP_ENV",
+        "MOMCOZY_BACKEND_COMPOSE_PROJECT",
+        "MOMCOZY_AGENT_COMPOSE_PROJECT",
+        "MOMCOZY_NETWORK_NAME",
+        "MOMCOZY_BACKEND_API_BIND",
+        "MOMCOZY_AGENT_API_BIND",
+        "MOMCOZY_BACKEND_PUBLIC_URL",
+        "MOMCOZY_AGENT_PUBLIC_URL",
+        "MOMCOZY_POSTGRES_ADMIN_USER",
+        "MOMCOZY_PRODUCT_POSTGRES_DB",
+        "MOMCOZY_PRODUCT_POSTGRES_USER",
+        "MOMCOZY_AGENT_POSTGRES_DB",
+        "MOMCOZY_AGENT_POSTGRES_USER",
+        "MOMCOZY_PRODUCT_MINIO_BUCKET",
+        "MOMCOZY_AGENT_MINIO_BUCKET",
+        "MOMCOZY_POSTGRES_ADMIN_PASSWORD",
+        "MOMCOZY_PRODUCT_POSTGRES_PASSWORD",
+        "MOMCOZY_AGENT_POSTGRES_PASSWORD",
+        "MOMCOZY_REDIS_ADMIN_PASSWORD",
+        "MOMCOZY_PRODUCT_REDIS_PASSWORD",
+        "MOMCOZY_AGENT_REDIS_PASSWORD",
+        "MOMCOZY_MINIO_ROOT_USER",
+        "MOMCOZY_MINIO_ROOT_PASSWORD",
+        "MOMCOZY_PRODUCT_MINIO_ACCESS_KEY",
+        "MOMCOZY_PRODUCT_MINIO_SECRET_KEY",
+        "MOMCOZY_AGENT_MINIO_ACCESS_KEY",
+        "MOMCOZY_AGENT_MINIO_SECRET_KEY",
         "AUTH_JWT_PRIVATE_KEY_B64",
         "AUTH_INVITE_CODES",
         "SERVICE_API_KEY",
@@ -562,11 +609,27 @@ def _validate_env_file(path: Path) -> None:
     )
     missing = [name for name in required if not values.get(name, "").strip()]
     if missing:
-        raise ValueError(f"test env is missing required values: {', '.join(missing)}")
+        raise ValueError(f"deployment env is missing required values: {', '.join(missing)}")
+    secret_names = (
+        "MOMCOZY_POSTGRES_ADMIN_PASSWORD",
+        "MOMCOZY_PRODUCT_POSTGRES_PASSWORD",
+        "MOMCOZY_AGENT_POSTGRES_PASSWORD",
+        "MOMCOZY_REDIS_ADMIN_PASSWORD",
+        "MOMCOZY_PRODUCT_REDIS_PASSWORD",
+        "MOMCOZY_AGENT_REDIS_PASSWORD",
+        "MOMCOZY_MINIO_ROOT_USER",
+        "MOMCOZY_MINIO_ROOT_PASSWORD",
+        "MOMCOZY_PRODUCT_MINIO_ACCESS_KEY",
+        "MOMCOZY_PRODUCT_MINIO_SECRET_KEY",
+        "MOMCOZY_AGENT_MINIO_ACCESS_KEY",
+        "MOMCOZY_AGENT_MINIO_SECRET_KEY",
+        "AUTH_JWT_PRIVATE_KEY_B64",
+        "AUTH_INVITE_CODES",
+        "SERVICE_API_KEY",
+        "AGENT_RUNTIME_SERVICE_API_KEY",
+    )
     unsafe = [
-        name
-        for name in required
-        if _is_known_placeholder(values[name])
+        name for name in secret_names if _is_known_placeholder(values[name])
     ]
     if any(
         _is_known_placeholder(code)
@@ -574,37 +637,37 @@ def _validate_env_file(path: Path) -> None:
     ) and "AUTH_INVITE_CODES" not in unsafe:
         unsafe.append("AUTH_INVITE_CODES")
     if unsafe:
-        raise ValueError(f"test env contains placeholder values: {', '.join(unsafe)}")
+        raise ValueError(f"deployment env contains placeholder values: {', '.join(unsafe)}")
     _require_distinct(
         values,
         (
-            "MOMCOZY_TEST_POSTGRES_ADMIN_PASSWORD",
-            "MOMCOZY_TEST_PRODUCT_POSTGRES_PASSWORD",
-            "MOMCOZY_TEST_AGENT_POSTGRES_PASSWORD",
+            "MOMCOZY_POSTGRES_ADMIN_PASSWORD",
+            "MOMCOZY_PRODUCT_POSTGRES_PASSWORD",
+            "MOMCOZY_AGENT_POSTGRES_PASSWORD",
         ),
     )
     _require_distinct(
         values,
         (
-            "MOMCOZY_TEST_REDIS_ADMIN_PASSWORD",
-            "MOMCOZY_TEST_PRODUCT_REDIS_PASSWORD",
-            "MOMCOZY_TEST_AGENT_REDIS_PASSWORD",
+            "MOMCOZY_REDIS_ADMIN_PASSWORD",
+            "MOMCOZY_PRODUCT_REDIS_PASSWORD",
+            "MOMCOZY_AGENT_REDIS_PASSWORD",
         ),
     )
     _require_distinct(
         values,
         (
-            "MOMCOZY_TEST_MINIO_ROOT_USER",
-            "MOMCOZY_TEST_PRODUCT_MINIO_ACCESS_KEY",
-            "MOMCOZY_TEST_AGENT_MINIO_ACCESS_KEY",
+            "MOMCOZY_MINIO_ROOT_USER",
+            "MOMCOZY_PRODUCT_MINIO_ACCESS_KEY",
+            "MOMCOZY_AGENT_MINIO_ACCESS_KEY",
         ),
     )
     _require_distinct(
         values,
         (
-            "MOMCOZY_TEST_MINIO_ROOT_PASSWORD",
-            "MOMCOZY_TEST_PRODUCT_MINIO_SECRET_KEY",
-            "MOMCOZY_TEST_AGENT_MINIO_SECRET_KEY",
+            "MOMCOZY_MINIO_ROOT_PASSWORD",
+            "MOMCOZY_PRODUCT_MINIO_SECRET_KEY",
+            "MOMCOZY_AGENT_MINIO_SECRET_KEY",
         ),
     )
     _require_distinct(values, ("SERVICE_API_KEY", "AGENT_RUNTIME_SERVICE_API_KEY"))
@@ -615,6 +678,7 @@ def _is_known_placeholder(value: str) -> bool:
     return (
         normalized.lower() in KNOWN_SECRET_PLACEHOLDERS
         or (normalized.startswith("${") and normalized.endswith("}"))
+        or normalized.upper().startswith("REPLACE_WITH_")
         or normalized == "0" * 64
     )
 
@@ -622,7 +686,7 @@ def _is_known_placeholder(value: str) -> bool:
 def _require_distinct(values: dict[str, str], names: Sequence[str]) -> None:
     selected = [values[name].strip() for name in names]
     if len(selected) != len(set(selected)):
-        raise ValueError(f"test credentials must be distinct: {', '.join(names)}")
+        raise ValueError(f"deployment credentials must be distinct: {', '.join(names)}")
 
 
 def _read_env_values(path: Path) -> dict[str, str]:
@@ -636,7 +700,15 @@ def _read_env_values(path: Path) -> dict[str, str]:
     return values
 
 
-def _check_collision_boundaries(runner: CommandRunner) -> None:
+def _check_collision_boundaries(
+    spec: BackendReleaseSpec, runner: CommandRunner
+) -> None:
+    values = _deployment_values(spec)
+    compose_project = values["MOMCOZY_BACKEND_COMPOSE_PROJECT"]
+    network_name = values["MOMCOZY_NETWORK_NAME"]
+    host, port = _loopback_bind(values["MOMCOZY_BACKEND_API_BIND"])
+    published_port = f"{host}:{port}->"
+
     containers = runner.run(
         ["docker", "ps", "--format", "{{json .}}"],
         capture_output=True,
@@ -648,29 +720,29 @@ def _check_collision_boundaries(runner: CommandRunner) -> None:
         item = json.loads(line)
         ports = str(item.get("Ports", ""))
         labels = str(item.get("Labels", ""))
-        if "127.0.0.1:8001->" in ports and (
-            f"com.docker.compose.project={COMPOSE_PROJECT}" not in labels
+        if published_port in ports and (
+            f"com.docker.compose.project={compose_project}" not in labels
         ):
-            raise RuntimeError("127.0.0.1:8001 is owned by another container")
-        if "127.0.0.1:8001->" in ports:
+            raise RuntimeError(f"{host}:{port} is owned by another container")
+        if published_port in ports:
             port_owned_by_compose = True
 
     listeners = runner.run(
-        ["ss", "-H", "-ltn", "sport = :8001"],
+        ["ss", "-H", "-ltn", "sport", "=", f":{port}"],
         capture_output=True,
         check=False,
     )
     if listeners.returncode != 0:
-        raise RuntimeError("could not inspect host listener 127.0.0.1:8001")
+        raise RuntimeError(f"could not inspect host listener {host}:{port}")
     if (listeners.stdout or "").strip() and not port_owned_by_compose:
-        raise RuntimeError("127.0.0.1:8001 is owned by a non-Docker process")
+        raise RuntimeError(f"{host}:{port} is owned by a non-Docker process")
 
     network = runner.run(
         [
             "docker",
             "network",
             "inspect",
-            TEST_NETWORK,
+            network_name,
             "--format",
             '{{ index .Labels "com.docker.compose.project" }}',
         ],
@@ -679,8 +751,27 @@ def _check_collision_boundaries(runner: CommandRunner) -> None:
     )
     if network.returncode == 0:
         owner = (network.stdout or "").strip()
-        if owner != COMPOSE_PROJECT:
-            raise RuntimeError(f"{TEST_NETWORK} is owned by {owner}")
+        if owner != compose_project:
+            raise RuntimeError(f"{network_name} is owned by {owner}")
+
+
+def _deployment_values(spec: BackendReleaseSpec) -> dict[str, str]:
+    values = _read_env_values(spec.env_file)
+    if values.get("APP_ENV", "").strip().lower() != spec.environment:
+        raise ValueError(
+            f"deployment env APP_ENV must be {spec.environment}"
+        )
+    return values
+
+
+def _loopback_bind(value: str) -> tuple[str, int]:
+    match = re.fullmatch(r"(127\.0\.0\.1):([0-9]{1,5})", value.strip())
+    if not match:
+        raise ValueError("deployment API bind must use 127.0.0.1:<port>")
+    port = int(match.group(2))
+    if not 1 <= port <= 65535:
+        raise ValueError("deployment API bind port is invalid")
+    return match.group(1), port
 
 
 def _require_healthy_infrastructure(
@@ -788,11 +879,13 @@ def _read_database_revision(
     *,
     postgres_container: str,
     database: str,
+    username: str,
     runner: CommandRunner,
 ) -> str:
     existence = _psql_query(
         postgres_container,
         database=database,
+        username=username,
         sql="SELECT to_regclass('public.alembic_version') IS NOT NULL",
         runner=runner,
     ).lower()
@@ -803,6 +896,7 @@ def _read_database_revision(
     revision = _psql_query(
         postgres_container,
         database=database,
+        username=username,
         sql="SELECT version_num FROM alembic_version",
         runner=runner,
     )
@@ -815,6 +909,7 @@ def _psql_query(
     postgres_container: str,
     *,
     database: str,
+    username: str,
     sql: str,
     runner: CommandRunner,
 ) -> str:
@@ -825,7 +920,7 @@ def _psql_query(
             postgres_container,
             "psql",
             "--username",
-            "momcozy_test_admin",
+            username,
             "--dbname",
             database,
             "--tuples-only",
@@ -838,14 +933,16 @@ def _psql_query(
     return (result.stdout or "").strip()
 
 
-def _pg_dump_command(postgres_container: str, *, database: str) -> list[str]:
+def _pg_dump_command(
+    postgres_container: str, *, database: str, username: str
+) -> list[str]:
     return [
         "docker",
         "exec",
         postgres_container,
         "pg_dump",
         "--username",
-        "momcozy_test_admin",
+        username,
         "--dbname",
         database,
         "--format",
@@ -915,7 +1012,9 @@ def _write_and_promote_manifest(
         released_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace(
             "+00:00", "Z"
         ),
+        environment=spec.environment,
     )
+    manifest = {**manifest, "environment": spec.environment}
     manifest_path = spec.repo_dir / "release-manifest.json"
     _write_json_atomic(manifest_path, manifest)
     _write_json_atomic(
@@ -934,6 +1033,7 @@ def _current_release_spec(spec: BackendReleaseSpec) -> BackendReleaseSpec | None
         return None
     return _spec_from_manifest(
         current.resolve(),
+        environment=spec.environment,
         env_file=spec.env_file,
         release_root=spec.release_root,
         public_url=spec.public_url,
@@ -944,12 +1044,16 @@ def _current_release_spec(spec: BackendReleaseSpec) -> BackendReleaseSpec | None
 def _spec_from_manifest(
     repo_dir: Path,
     *,
+    environment: str,
     env_file: Path,
     release_root: Path,
     public_url: str,
     ca_file: Path,
 ) -> BackendReleaseSpec:
     manifest = _read_manifest(repo_dir / "release-manifest.json")
+    expected_environment = validate_environment(environment)
+    if manifest.get("environment") != expected_environment:
+        raise ValueError("release manifest environment does not match requested environment")
     return BackendReleaseSpec(
         image_ref=validate_image_ref(str(manifest["image_ref"])),
         commit_sha=validate_commit_sha(str(manifest["commit"])),
@@ -958,6 +1062,7 @@ def _spec_from_manifest(
         release_root=release_root.resolve(),
         public_url=public_url,
         ca_file=ca_file.resolve(),
+        environment=validate_environment(environment),
     )
 
 
@@ -995,11 +1100,15 @@ def _start_backend(spec: BackendReleaseSpec, runner: CommandRunner) -> None:
         cwd=spec.repo_dir,
         env=env,
     )
-    runner.run(_local_readiness_command())
+    runner.run(_local_readiness_command(spec))
     runner.run(_public_readiness_command(spec.public_url, spec.ca_file))
 
 
-def _local_readiness_command() -> list[str]:
+def _local_readiness_command(spec: BackendReleaseSpec) -> list[str]:
+    values = _read_env_values(spec.env_file) if spec.env_file.is_file() else {}
+    host, port = _loopback_bind(
+        values.get("MOMCOZY_BACKEND_API_BIND", "127.0.0.1:8001")
+    )
     return [
         "curl",
         "--fail",
@@ -1010,7 +1119,7 @@ def _local_readiness_command() -> list[str]:
         "--retry-all-errors",
         "--retry-delay",
         "3",
-        "http://127.0.0.1:8001/v1/health/ready",
+        f"http://{host}:{port}/v1/health/ready",
     ]
 
 
@@ -1141,18 +1250,20 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 
 def _add_common_release_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--environment", choices=sorted(DEPLOY_ENVIRONMENTS), required=True)
     parser.add_argument("--image-ref", required=True)
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--repo-dir", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, required=True)
-    parser.add_argument("--release-root", type=Path, default=EXPECTED_RELEASE_ROOT)
+    parser.add_argument("--release-root", type=Path, required=True)
     parser.add_argument("--public-url", required=True)
     parser.add_argument("--ca-file", type=Path, required=True)
 
 
 def _add_current_release_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--environment", choices=sorted(DEPLOY_ENVIRONMENTS), required=True)
     parser.add_argument("--env-file", type=Path, required=True)
-    parser.add_argument("--release-root", type=Path, default=EXPECTED_RELEASE_ROOT)
+    parser.add_argument("--release-root", type=Path, required=True)
     parser.add_argument("--public-url", required=True)
     parser.add_argument("--ca-file", type=Path, required=True)
 
@@ -1167,10 +1278,11 @@ def _parser() -> argparse.ArgumentParser:
     image_manifest.add_argument("--output", type=Path, required=True)
 
     snapshot = subparsers.add_parser("stage-snapshot")
+    snapshot.add_argument("--environment", choices=sorted(DEPLOY_ENVIRONMENTS), required=True)
     snapshot.add_argument("--archive", type=Path, required=True)
     snapshot.add_argument("--archive-sha256", required=True)
     snapshot.add_argument("--commit-sha", required=True)
-    snapshot.add_argument("--release-root", type=Path, default=EXPECTED_RELEASE_ROOT)
+    snapshot.add_argument("--release-root", type=Path, required=True)
     snapshot.add_argument("--attempt-id", required=True)
 
     _add_common_release_arguments(subparsers.add_parser("bootstrap"))
@@ -1188,9 +1300,10 @@ def _release_spec_from_args(args: argparse.Namespace) -> BackendReleaseSpec:
         commit_sha=validate_commit_sha(args.commit_sha),
         repo_dir=args.repo_dir.resolve(),
         env_file=args.env_file.resolve(),
-        release_root=validate_release_root(args.release_root),
+        release_root=validate_release_root(args.release_root, args.environment),
         public_url=args.public_url,
         ca_file=args.ca_file.resolve(),
+        environment=validate_environment(args.environment),
     )
 
 
@@ -1213,6 +1326,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 commit_sha=args.commit_sha,
                 release_root=args.release_root,
                 attempt_id=args.attempt_id,
+                environment=args.environment,
             )
             return 0
         runner = CommandRunner()
@@ -1224,6 +1338,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "restart-current":
             restart_current(
+                environment=args.environment,
                 env_file=args.env_file,
                 release_root=args.release_root,
                 public_url=args.public_url,
@@ -1232,6 +1347,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 0
         rollback(
+            environment=args.environment,
             env_file=args.env_file,
             release_root=args.release_root,
             public_url=args.public_url,
