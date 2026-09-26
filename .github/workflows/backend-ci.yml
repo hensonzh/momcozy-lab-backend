@@ -51,12 +51,8 @@ jobs:
           python scripts/export_api_surface_catalog.py --openapi-input /tmp/openapi.generated.json --output /tmp/api-surface-catalog.md
           diff -u docs/api-surface-catalog.md /tmp/api-surface-catalog.md
 
-      - name: Publish Product OpenAPI contract
-        uses: actions/upload-artifact@v4
-        with:
-          name: momcozy-product-openapi
-          path: docs/openapi.generated.json
-
+      # The checked-in OpenAPI snapshot remains the contract. Do not upload it as
+      # a second artifact: GitHub artifact quota can block an otherwise verified release.
       - name: Scan backend for legacy runtime references
         run: |
           ! grep -R -E 'previous_response_id|ChatSession|ENTRY_API_KEY|query_params.get\("user_id"|momcozy_agent' \
@@ -160,7 +156,12 @@ jobs:
             --wait \
             --wait-timeout 90 \
             api
-          curl --fail --silent http://127.0.0.1:8000/v1/health/ready >/dev/null
+          docker compose \
+            -f docker-compose.local.yml \
+            -f docker-compose.ci.yml \
+            exec --no-TTY api \
+            python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/ready', timeout=5)" \
+            >/dev/null
 
       - name: Show Compose logs on failure
         if: failure()
@@ -188,32 +189,13 @@ jobs:
 
       - name: Push the immutable commit tag
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        id: push
         run: |
           test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' momcozy-lab-backend:ci)" = "${GITHUB_SHA}"
           docker tag momcozy-lab-backend:ci "${IMMUTABLE_IMAGE_TAG}"
-          docker push "${IMMUTABLE_IMAGE_TAG}" | tee /tmp/backend-image-push.log
-          digest="$(sed -n 's/^.*digest: \(sha256:[0-9a-f]\{64\}\).*$/\1/p' /tmp/backend-image-push.log | tail -n 1)"
-          test -n "${digest}"
-          printf 'digest=%s\n' "${digest}" >> "${GITHUB_OUTPUT}"
+          docker push "${IMMUTABLE_IMAGE_TAG}"
 
-      - name: Write the immutable image manifest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          python scripts/release.py image-manifest \
-            --image-ref "ghcr.io/${GITHUB_REPOSITORY}@${IMAGE_DIGEST}" \
-            --commit-sha "${GITHUB_SHA}" \
-            --output backend-image-manifest.json
-
-      - name: Upload the image manifest
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-image-manifest-${{ github.sha }}
-          path: backend-image-manifest.json
-          retention-days: 30
+      # Delivery resolves the immutable tag's digest directly from GHCR after
+      # a successful CI run; no quota-bound artifact is required.
 
   postgres-migration:
     runs-on: ubuntu-latest
@@ -347,7 +329,7 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data --address ":9000"
+            quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z server /data --address ":9000"
           for i in {1..30}; do
             if curl -fs http://localhost:9000/minio/health/live; then
               exit 0

@@ -88,14 +88,14 @@ def test_deploy_compose_only_consumes_an_explicit_release_image() -> None:
     assert "build:" not in compose
 
 
-def test_ci_publishes_one_sha_tagged_image_and_records_its_digest() -> None:
+def test_ci_publishes_one_sha_tagged_image_without_quota_bound_artifacts() -> None:
     workflow = CI_WORKFLOW.read_text()
     assert "Push the immutable commit tag" in workflow
     assert "docker/build-push-action@" in workflow
     assert "ghcr.io/${{ github.repository }}:${{ github.sha }}" in workflow
     assert "org.opencontainers.image.revision=${{ github.sha }}" in workflow
-    assert "backend-image-manifest-${{ github.sha }}" in workflow
-    assert "python scripts/release.py image-manifest" in workflow
+    assert 'docker push "${IMMUTABLE_IMAGE_TAG}"' in workflow
+    assert "actions/upload-artifact" not in workflow
 
 
 def test_delivery_is_environment_scoped_serial_and_host_key_checked() -> None:

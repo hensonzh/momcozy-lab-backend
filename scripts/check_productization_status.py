@@ -169,7 +169,7 @@ def _check_ci_workflow(root: Path) -> list[CheckResult]:
         "docker-compose.ci.yml",
         "docker-compose.deploy.yml",
         "--env-file env/staging.env.example",
-        "python scripts/release.py image-manifest",
+        'docker push "${IMMUTABLE_IMAGE_TAG}"',
         "openssl genpkey",
         "momcozy-lab-backend:ci",
         "--profile tools run --rm migrate",
@@ -181,6 +181,7 @@ def _check_ci_workflow(root: Path) -> list[CheckResult]:
         "run_agent_fact_eval.py",
         "redis-runtime-controls",
         "check_redis_runtime_controls.py",
+        "actions/upload-artifact",
     ]
     return [*_required_phrases(workflow, required), *_retired_phrases(workflow, retired)]
 
@@ -203,6 +204,7 @@ def _check_makefile(root: Path) -> list[CheckResult]:
         "backend-agent-recover-stuck-runs",
         "run_agent_fact_eval.py",
         "check_redis_runtime_controls.py",
+        "actions/upload-artifact",
         "publish_pump_models_reference.py",
     ]
     return [*_required_phrases(makefile, required), *_retired_phrases(makefile, retired)]

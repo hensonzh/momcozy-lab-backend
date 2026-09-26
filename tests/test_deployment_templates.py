@@ -113,7 +113,10 @@ def test_ci_and_delivery_use_canonical_entrypoints() -> None:
 
     assert "docker-compose.deploy.yml" in ci
     assert "env/staging.env.example" in ci
-    assert "python scripts/release.py image-manifest" in ci
+    assert 'docker push "${IMMUTABLE_IMAGE_TAG}"' in ci
+    assert "actions/upload-artifact" not in ci
+    assert "gh api --paginate" in delivery
+    assert "--status success" in delivery
     assert "scripts/test_release.py" not in ci + delivery
     assert "name: ${{ inputs.environment }}" in delivery
     assert "options:\n          - staging\n          - production" in delivery

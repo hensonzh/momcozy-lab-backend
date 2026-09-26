@@ -28,7 +28,15 @@ def test_profile_contract_rejects_retired_fields_and_values(extra):
 
 
 @postgres
-def test_profiles_are_owner_scoped_idempotent_and_versioned_with_calendar_birth_dates():
+def test_profiles_are_owner_scoped_idempotent_and_versioned_with_calendar_birth_dates(monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 9, 10, 14, 30, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+    # Profile validation and idempotency expiry must share the same test clock.
+    monkeypatch.setattr("app.modules.audit.service.datetime", FrozenDateTime)
     async def run():
         async with database() as (sessions, booking, clock, provider, owners, episodes):
             now = datetime(2026, 9, 10, 14, 30, tzinfo=timezone.utc)

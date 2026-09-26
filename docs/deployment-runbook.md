@@ -68,7 +68,7 @@ does not publish a mutable image tag and does not deploy Agent Runtime.
 
 Run the same workflow with `operation=deploy`. The workflow:
 
-1. resolves the successful CI image manifest for the requested full commit;
+1. verifies successful CI for the requested full commit and resolves its immutable image digest from GHCR;
 2. transfers an immutable `git archive` snapshot and `scripts/release.py`;
 3. acquires the environment release lock;
 4. validates the private env and Compose rendering;
