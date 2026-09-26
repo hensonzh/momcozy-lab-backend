@@ -10,7 +10,7 @@ from app.modules.audit.service import AuditService, IdempotencyService
 from app.modules.baby.profile_schemas import BabyProfileUpdate, BabyProfileWrite
 from app.modules.baby.profile_service import BabyProfileService
 from app.modules.baby.repository import BabyRecordRepository
-from test_care_booking import database, postgres
+from product_database import database, postgres
 
 
 def service(session, now):

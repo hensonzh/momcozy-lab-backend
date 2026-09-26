@@ -1,6 +1,5 @@
 from test_baby_records import babies, service
-from test_care_booking import database, postgres
-from app.modules.reports.baby_source_text import baby_record_text
+from product_database import database, postgres
 import asyncio
 from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
@@ -53,8 +52,6 @@ def test_daily_status_commits_all_tabs_and_replays_once_in_the_correct_day():
                 assert replay.id == record_id
                 assert replay.observation == body.observation
                 assert replay.occurred_at is None
-                text = baby_record_text(replay, 'Asia/Shanghai')
-                assert 'Calm and content' in text and 'Wet diapers today: 5' in text and 'do not add repeated submissions' in text
                 day = body.observation.recorded_on
                 result = await api.list(owners[0], first, day, day + timedelta(days=1), timezone_name='Asia/Shanghai', kind='daily_status', offset=0, limit=100)
                 assert result.total == 1

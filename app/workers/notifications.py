@@ -5,22 +5,17 @@ import logging
 import secrets
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from time import monotonic
 
 import httpx
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..core.errors import ApiError
 from ..core.settings import Settings
 from ..infrastructure.db.session import create_db_engine, create_session_factory
 from ..infrastructure.push.provider import PushMessage, PushProvider, PushResult, build_push_provider
 from ..modules.auth.models import DeviceSession
-from ..modules.care.event_models import CareServiceEvent
-from ..modules.care.models import CareEpisode
-from ..modules.notifications.lifecycle import NotificationLifecycleService, REMINDER_LEAD
-from ..modules.notifications.models import Notification, NotificationDelivery, NotificationEventReceipt, PushInstallation
+from ..modules.notifications.models import Notification, NotificationDelivery, PushInstallation
+from ..modules.notifications.lifecycle import NotificationLifecycleService
 from ..modules.notifications.repository import NotificationsRepository
 from ..modules.notifications.push_registration import SEND_PERMISSIONS, active_installations, token_cipher
 from ..modules.users.models import User
@@ -32,23 +27,6 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-async def project_next_event(sessions: async_sessionmaker[AsyncSession], *, push_available: bool,
-                             now: Callable[[], datetime] = utc_now) -> bool:
-    async with sessions.begin() as session:
-        # Business writes lock User before inserting/deduplicating their event.
-        # Keep that order here too; locking an event first can deadlock a replay.
-        event = await session.scalar(select(CareServiceEvent).join(CareEpisode, CareEpisode.id == CareServiceEvent.episode_id)
-            .join(User, User.id == CareEpisode.owner_user_id).where(~select(NotificationEventReceipt.event_id)
-            .where(NotificationEventReceipt.event_id == CareServiceEvent.id).exists())
-            .order_by(CareServiceEvent.occurred_at, CareServiceEvent.id).with_for_update(of=User, skip_locked=True).limit(1))
-        if event is None:
-            return False
-        await NotificationLifecycleService(session, push_available=push_available, now=now).project_care_event(event)
-        await session.execute(insert(NotificationEventReceipt).values(event_id=event.id, processed_at=now())
-            .on_conflict_do_nothing())
-        return True
-
-
 async def reconcile_notification(session: AsyncSession, value: Notification, *, push_available: bool,
                                   now: Callable[[], datetime]) -> bool:
     """Called under the owner's row lock, also immediately before every send."""
@@ -56,31 +34,7 @@ async def reconcile_notification(session: AsyncSession, value: Notification, *, 
     if value.status == "archived":
         value.send_status, value.canceled_at = "canceled", now()
         return False
-    if value.related_resource_type == "appointment" and value.related_resource_id:
-        try:
-            appointment = await service._appointment(value.owner_user_id, value.related_resource_id, lock=True)
-        except ApiError:
-            value.send_status, value.canceled_at = "canceled", now()
-            return False
-        if value.notification_type in {"appointment_created", "appointment_reminder"} and appointment.status != "confirmed":
-            value.send_status, value.canceled_at = "canceled", now()
-            return False
-        if value.notification_type == "consultation_started" and appointment.status != "in_progress":
-            value.send_status, value.canceled_at = "canceled", now()
-            return False
-        if value.notification_type == "appointment_reminder" and value.trigger_at != appointment.starts_at - REMINDER_LEAD:
-            await service._reminder(appointment)
-            return False
-        episode = await session.get(CareEpisode, appointment.episode_id)
-    elif value.related_resource_type == "service" and value.related_resource_id:
-        episode = await session.get(CareEpisode, value.related_resource_id)
-    else:
-        value.send_status, value.canceled_at = "canceled", now()
-        return False
-    if episode is None or episode.owner_user_id != value.owner_user_id:
-        value.send_status, value.canceled_at = "canceled", now()
-        return False
-    if value.notification_type == "appointment_reminder" and episode.status != "active":
+    if value.related_resource_type != "agent_conversation":
         value.send_status, value.canceled_at = "canceled", now()
         return False
     if value.expires_at is not None and value.expires_at <= now():
@@ -166,47 +120,18 @@ async def process_next(sessions: async_sessionmaker[AsyncSession], provider: Pus
         return True
 
 
-async def reconcile_reminders(sessions: async_sessionmaker[AsyncSession], *, push_available: bool,
-                              now: Callable[[], datetime] = utc_now) -> None:
-    after = None
-    while True:
-        async with sessions() as session:
-            query = select(Notification.id, Notification.owner_user_id).where(
-                Notification.notification_type == "appointment_reminder", Notification.send_status.in_(["scheduled", "disabled"]))
-            if after is not None:
-                query = query.where(Notification.id > after)
-            candidates = list((await session.execute(query.order_by(Notification.id).limit(100))).all())
-        if not candidates:
-            return
-        for identifier, owner_id in candidates:
-            async with sessions.begin() as session:
-                owner = await session.scalar(select(User).where(User.id == owner_id).with_for_update(skip_locked=True))
-                if owner is None:
-                    continue
-                value = await session.get(Notification, identifier)
-                if value is None or value.send_status not in {"scheduled", "disabled"}:
-                    continue
-                await reconcile_notification(session, value, push_available=push_available, now=now)
-        after = candidates[-1][0]
-
-
 async def run() -> None:
     settings = Settings.from_env()
     settings.validate_for_startup()
     engine = create_db_engine(settings)
     sessions = create_session_factory(engine)
-    next_reconcile = 0.0
     try:
         async with httpx.AsyncClient() as client:
             provider = build_push_provider(settings, client)
             while True:
                 try:
-                    projected = await project_next_event(sessions, push_available=provider is not None)
                     sent = await process_next(sessions, provider, token_key=settings.push_token_key)
-                    if monotonic() >= next_reconcile:
-                        await reconcile_reminders(sessions, push_available=provider is not None)
-                        next_reconcile = monotonic() + 30
-                    if not projected and not sent:
+                    if not sent:
                         await asyncio.sleep(1)
                 except Exception:
                     # Do not include exception text: transport errors may contain tokens.

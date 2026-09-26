@@ -17,12 +17,20 @@ class SignupRequest(BaseModel):
 class EmailRegisterRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=8, max_length=128)
+    # Old clients may send a password; it is not stored before mailbox proof.
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class RegistrationCodeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(min_length=3, max_length=320)
+    token: str = Field(min_length=1, max_length=256)
 
 
 class EmailChallengeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     password: str = Field(min_length=8, max_length=128)
+    confirm_password: str | None = Field(default=None, min_length=8, max_length=128)
     email: str = Field(min_length=3, max_length=320)
     token: str = Field(min_length=1, max_length=256)
     device_id: str = Field(default="", max_length=120)
@@ -38,16 +46,6 @@ class PasswordResetConfirmRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     token: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=8, max_length=128)
-
-
-class GoogleLoginRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    id_token: str = Field(min_length=20, max_length=8192)
-    device_id: str = Field(default="", max_length=120)
-
-
-class GoogleLinkRequest(GoogleLoginRequest):
-    password: str = Field(min_length=1, max_length=128)
 
 
 class LoginRequest(BaseModel):

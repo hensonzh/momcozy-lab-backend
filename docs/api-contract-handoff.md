@@ -36,7 +36,10 @@ Update flow for API changes:
 ## Auth
 
 - `POST /v1/auth/invite-login`
-- `POST /v1/auth/signup`
+- `POST /v1/auth/register` (email only; request verification code)
+- `POST /v1/auth/verify-registration-code` (check code, no session)
+- `POST /v1/auth/verify-email` (set password and consume code)
+- `POST /v1/auth/signup` (legacy compatibility)
 - `POST /v1/auth/login`
 - `POST /v1/auth/refresh`
 - `POST /v1/auth/logout`
@@ -59,6 +62,22 @@ must not be used by mobile clients.
 Product Backend API authentication also checks the active device session. The Agent
 Runtime does not call the Product Backend on every request, so logout or session
 revocation reaches it no later than the 15-minute access-token expiry.
+
+## Postpartum onboarding (not yet deployed)
+
+- `GET /v1/onboarding/me`: authenticated owner's confirmation state; no-store.
+- `PUT /v1/onboarding/me/profile`: atomically save name, age, required delivery
+  date, delivery count (including this birth), optional current delivery method,
+  infant count and infant profiles. `has_cesarean_history` describes births
+  **before** this one; it is false on a first delivery, even if this birth was
+  cesarean. Identical retries return the confirmed infant without creating
+  duplicates; changed submissions after confirmation return `409` and should
+  be made through profile editing instead.
+
+The App gate is disabled by default. This local contract and generated OpenAPI
+do not imply the public staging endpoint has been deployed. The separate
+`/v1/onboarding/me/release-reset` call is not yet implemented; do not enable
+the App release-reset capability against this Backend.
 
 ## Admin Invite Codes
 
@@ -132,25 +151,13 @@ File upload uses multipart form data at `POST /v1/files/upload`. File metadata
 is owner-scoped and object bytes are stored through the configured object
 storage provider.
 
-## Schedule Projection And Care Plan Progress
+## Personal Schedule
 
 Schedule resources are owner-scoped and never accept a mobile-provided
-`user_id` as authority. The mobile app reads one projection that combines
-personal entries, appointments, episodes, and the latest published Care Plan:
-
-- `GET /v1/schedule?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&timezone=...`
-  returns the bounded calendar window and a `has_more` cursor hint.
-- `POST /v1/schedule/personal` creates an idempotent personal entry.
-- `PATCH /v1/schedule/personal/{task_id}` uses `expected_updated_at` for
-  optimistic concurrency; `DELETE` uses the same timestamp in the query.
-- `PUT /v1/care/plan-publications/{publication_id}/tasks/{source_key}` accepts
-  the typed task state and `expected_version`, then returns the complete
-  authoritative publication. A stale write returns `version_conflict` and the
-  client reloads the schedule.
-
-The old `/v1/plans` surface remains deprecated. New Flutter clients use
-`/v1/schedule` and `/v1/care`. Prenatal plans, pregnancy cards and diaries have
-been removed; Runtime business tools are unavailable.
+`user_id` as authority. `GET /v1/schedule` returns personal calendar entries
+for a bounded date range, plus `has_more`. `POST /v1/schedule/personal` creates
+an idempotent entry. `PATCH` and `DELETE` use `expected_updated_at` to avoid
+losing concurrent changes. The separate `/v1/plans` surface remains deprecated.
 
 ## Product Assets
 

@@ -35,7 +35,7 @@ router = SurfaceAPIRouter(
         owner="plans",
         clients=["legacy-flutter"],
         stability="deprecated",
-        notes="Use /v1/schedule and /v1/care plan publications for the current product.",
+        notes="Use /v1/schedule for personal schedule entries.",
     ),
 )
 

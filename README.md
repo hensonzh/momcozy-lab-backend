@@ -2,7 +2,7 @@
 
 This repository contains Product Backend (backend/) and owns business data,
 authentication, files, notifications, plans, profiles, records, diary, support,
-voice, vision and IBCLC care workflows. Agent Runtime orchestration, model providers, conversation state, tools, skills,
+voice and vision workflows. Agent Runtime orchestration, model providers, conversation state, tools, skills,
 workers, memory, and evals live in the independent Agent Runtime repository.
 
 Human-facing documentation uses the canonical service names `Product Backend
@@ -30,14 +30,6 @@ records, plus legacy diary/plan adapters retained only for migration
 compatibility. The source of truth is the generated [API surface catalog](docs/api-surface-catalog.md);
 integration rules are in [API contract handoff](docs/api-contract-handoff.md).
 
-The independent Flutter IBCLC entrypoint uses [workbench MFA authentication](docs/workbench-auth.md) and shared [clinical documentation](docs/care-documentation.md).
-
-Care appointments, intake, consent and consultation rooms are Product Backend business data.
-The optional `care-video-worker` provisions and closes LiveKit rooms from durable commands;
-its configuration and verification are documented in [Consultation rooms](docs/consultation-rooms.md).
-The optional `care-report-worker` schedules and persists authorized service reports;
-the Runtime performs structured generation, and assigned experts review in the workbench.
-See [Care reports](docs/care-reports.md) for credentials, worker startup and validation limits.
 
 ## Repository Shape
 

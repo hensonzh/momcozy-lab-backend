@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 
 from .errors import ErrorEnvelope
 from .logging import log_http_request
-from .rate_limit import AUTH_ENTRY_PATHS, RATE_LIMIT_EXEMPT_PATHS, WORKBENCH_LOGIN_PATHS, RateLimitDecision, check_rate_limit
+from .rate_limit import AUTH_ENTRY_PATHS, RATE_LIMIT_EXEMPT_PATHS, RateLimitDecision, check_rate_limit
 from .request_id import REQUEST_ID_HEADER, normalize_request_id
 from .settings import Settings
 
@@ -49,7 +49,7 @@ def install_http_middleware(app: FastAPI) -> None:
         _apply_security_headers(response=response, settings=settings)
         if request.url.path.startswith(("/v1/auth/", "/v1/notifications")):
             response.headers["Cache-Control"] = "private, no-store"
-        if (settings.rate_limit_enabled or request.url.path in WORKBENCH_LOGIN_PATHS | AUTH_ENTRY_PATHS) and request.url.path not in RATE_LIMIT_EXEMPT_PATHS:
+        if (settings.rate_limit_enabled or request.url.path in AUTH_ENTRY_PATHS) and request.url.path not in RATE_LIMIT_EXEMPT_PATHS:
             response.headers["X-RateLimit-Limit"] = str(rate_limit_decision.limit)
             response.headers["X-RateLimit-Remaining"] = str(rate_limit_decision.remaining)
         return response

@@ -49,12 +49,12 @@ class Concern(StrictModel):
 
 
 class RecordOrder(StrictModel):
-    order: list[Metric] = Field(min_length=4, max_length=11)
+    order: list[Metric] = Field(min_length=3, max_length=11)
 
     @field_validator("order")
     @classmethod
     def unique_order(cls, value: list[Metric]) -> list[Metric]:
-        if len(set(value)) != len(value) or not {"feed", "energy", "sleep", "mood"}.issubset(value):
+        if len(set(value)) != len(value) or not {"feed", "energy", "sleep"}.issubset(value):
             raise ValueError("order must contain each daily metric exactly once")
         return value
 
@@ -91,7 +91,7 @@ class Observation(StrictModel):
     @model_validator(mode="after")
     def value_matches_kind(self) -> "Observation":
         options = {
-            "energy": ["有力气", "还撑得住", "很疲惫", "Energized", "Managing", "Exhausted"],
+            "energy": ["有力气", "还撑得住", "很疲惫", "Energized", "Managing", "Exhausted", "Doing well", "Getting by", "Feeling worn down", "Worn down"],
             "sleep": ["少于 3 小时", "3–4 小时", "4–5 小时", "5–6 小时", "6 小时以上", "不确定", "Less than 3 hours", "3–4 hours", "4–5 hours", "5–6 hours", "Over 6 hours", "Not sure"],
             "mood": ["不太好", "一般", "不错", "Having a hard day", "Okay", "Good"],
             "latch": ["含得稳", "容易松开", "含不住", "Stayed latched", "Came off easily", "Could not latch"],

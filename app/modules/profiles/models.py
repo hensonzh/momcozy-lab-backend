@@ -57,8 +57,8 @@ class MaternalProfile(Base):
             name="ck_maternal_profiles_delivery_method",
         ),
         CheckConstraint(
-            "latest_delivery_method <> 'cesarean' OR has_cesarean_history IS TRUE",
-            name="cesarean_history",
+            "delivery_count IS NULL OR delivery_count <> 1 OR has_cesarean_history IS NOT TRUE",
+            name="first_delivery_prior_cesarean",
         ),
     )
 

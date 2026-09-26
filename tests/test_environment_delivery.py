@@ -156,13 +156,11 @@ def test_collision_gate_rejects_an_existing_unowned_network(tmp_path: Path) -> N
         _check_collision_boundaries(spec, runner)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("provider", ["disabled", "sandbox", "livekit"])
-@pytest.mark.parametrize("reports", [False, True])
 def test_deploy_plan_switches_only_enabled_application_services(
-    tmp_path: Path, provider: str, reports: bool
+    tmp_path: Path
 ) -> None:
     env_file = tmp_path / "backend.env"
-    _write_plan_env(env_file, provider=provider, reports=reports)
+    _write_plan_env(env_file)
     spec = BackendReleaseSpec(
         image_ref=IMAGE_REF,
         commit_sha=COMMIT_SHA,
@@ -177,8 +175,6 @@ def test_deploy_plan_switches_only_enabled_application_services(
     start = next(command for command in commands if "up" in command)
     stop = next(command for command in commands if "stop" in command)
     assert all(name in start for name in ("api", "notification-worker", "auth-email-worker"))
-    assert ("care-video-worker" in start) is (provider != "disabled")
-    assert ("care-report-worker" in start) is reports
     assert all(name in stop for name in release.RUNTIME_SERVICES)
     assert all(name not in start + stop for name in ("postgres", "redis", "minio"))
 

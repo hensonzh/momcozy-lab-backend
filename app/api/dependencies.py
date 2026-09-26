@@ -46,7 +46,7 @@ async def authenticate_request_user(
     session_factory: Callable[[], AsyncContextManager[AsyncSession]] | None,
 ) -> CurrentUser:
     current_user = authenticate_access_token(token, settings)
-    if settings.is_deployed or settings.auth_require_active_session or "ibclc" in current_user.roles:
+    if settings.is_deployed or settings.auth_require_active_session:
         if session_factory is None:
             raise ApiError(code="auth_session_check_not_configured", message="Authentication session check is not configured.", status=500)
         await _require_active_device_session(current_user=current_user, session_factory=session_factory, settings=settings)
@@ -71,9 +71,6 @@ async def _require_active_device_session(
         user = await session.get(User, current_user.user_id)
         if user is None or user.status != AccountStatus.ACTIVE:
             raise ApiError(code="account_inactive", message="Account is not active.", status=403)
-        if "ibclc" in current_user.roles:
-            from ..modules.auth.workbench_access import workbench_session_roles
-            await workbench_session_roles(device_session, session, settings)
 
 
 def get_object_storage(request: Request) -> ObjectStorage:

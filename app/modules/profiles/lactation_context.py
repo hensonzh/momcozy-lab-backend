@@ -323,24 +323,18 @@ class LactationContextService:
             if existing_maternal is not None
             else None
         )
-        delivery_method = (
-            normalized["current_delivery_method"]
-            if "current_delivery_method" in normalized
-            else existing_maternal.latest_delivery_method
-            if existing_maternal is not None
-            else None
+        delivery_count = normalized.get(
+            "delivery_count",
+            existing_maternal.delivery_count if existing_maternal is not None else None,
         )
-        if delivery_method == "cesarean":
-            if normalized.get("has_cesarean_history") is False:
+        if delivery_count == 1:
+            if normalized.get("has_cesarean_history") is True:
                 raise ApiError(
                     code="validation_failed",
-                    message=(
-                        "has_cesarean_history cannot be false when "
-                        "current_delivery_method is cesarean."
-                    ),
+                    message="A first delivery cannot have a prior cesarean history.",
                     status=422,
                 )
-            normalized["has_cesarean_history"] = True
+            normalized["has_cesarean_history"] = False
         anticipated_birth_dates = anticipated_infant_birth_dates or {}
         for infant in resolved_infants:
             infant_birth_date = (

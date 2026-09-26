@@ -17,7 +17,7 @@ from app.modules.profiles.models import MaternalCurrentDeliveryInfant, MaternalP
 from app.modules.profiles.repository import ProfileRepository
 from app.modules.profiles.topical_records import TopicalRecordsQuery, TopicalRecordsService
 from app.modules.records.models import GrowthRecord
-from test_care_booking import database, postgres
+from product_database import database, postgres
 
 
 def _query(*, owner, baby=None, topic="growth", start="2026-09-01", end="2026-09-24", limit=20):

@@ -28,7 +28,7 @@ class Notification(Base):
     body: Mapped[str] = mapped_column(String(2000), default="", server_default="", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="unread", server_default="unread", nullable=False)
     source: Mapped[str] = mapped_column(String(64), default="system", server_default="system", nullable=False)
-    category: Mapped[str] = mapped_column(String(32), default="service_updates", server_default="service_updates", nullable=False)
+    category: Mapped[str] = mapped_column(String(32), default="agent_updates", server_default="agent_updates", nullable=False)
     # Inbox state and channel execution state are independent.
     send_status: Mapped[str] = mapped_column(String(24), default="in_app", server_default="in_app", nullable=False)
     trigger_type: Mapped[str] = mapped_column(String(16), default="immediate", server_default="immediate", nullable=False)
@@ -105,10 +105,3 @@ class NotificationPreference(Base):
     category: Mapped[str] = mapped_column(String(32), primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class NotificationEventReceipt(Base):
-    """Consumer checkpoint for the existing transactional care event stream."""
-    __tablename__ = "notification_event_receipts"
-    event_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("care_service_events.id"), primary_key=True)
-    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

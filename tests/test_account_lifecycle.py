@@ -14,14 +14,11 @@ from app.factory import create_app
 from app.infrastructure.db.base import Base
 from app.modules.auth.account_lifecycle import AccountLifecycleService
 from app.modules.auth.account_service import AuthAccountService, DeviceContext
-from app.modules.auth.google import GoogleClaims
 from app.modules.auth.models import AuthEmailDelivery, AccountDeletionRequest, DeviceSession, EmailChallenge, RefreshToken
 from app.modules.auth.passwords import verify_password
 from app.modules.auth.repository import AuthAccountRepository, AuthSessionRepository
 from app.modules.auth.router import get_account_lifecycle_service
 from app.modules.auth.service import AuthSessionService
-from app.modules.auth.workbench_models import WorkbenchLoginChallenge
-from app.modules.care.models import CareProvider
 from app.modules.users.models import AuthIdentity, User
 from tests.auth_key_material import auth_settings
 
@@ -40,14 +37,6 @@ class Mailbox:
         return self.messages[-1]['body'].split('\n\n')[1]
 
 
-class Google:
-    def __init__(self, email='google@example.com', subject='google-sub'):
-        self.email, self.subject = email, subject
-
-    async def verify(self, **_kwargs):
-        return GoogleClaims(subject=self.subject, email=self.email, email_verified=True)
-
-
 @asynccontextmanager
 async def account_case(database_url=None):
     admin = None
@@ -60,15 +49,15 @@ async def account_case(database_url=None):
     else:
         engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     async with engine.begin() as connection:
-        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__, AuthIdentity.__table__, DeviceSession.__table__, RefreshToken.__table__, EmailChallenge.__table__, AccountDeletionRequest.__table__, AuthEmailDelivery.__table__, CareProvider.__table__, WorkbenchLoginChallenge.__table__]))
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__, AuthIdentity.__table__, DeviceSession.__table__, RefreshToken.__table__, EmailChallenge.__table__, AccountDeletionRequest.__table__, AuthEmailDelivery.__table__]))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     clock = [datetime.now(timezone.utc)]
     mail = Mailbox()
-    settings = auth_settings(auth_email_token_key='test-only-' + 'x'*32, auth_google_client_id='google-client', auth_require_active_session=True)
-    def lifecycle(session, google=None):
+    settings = auth_settings(auth_email_token_key='test-only-' + 'x'*32, auth_require_active_session=True)
+    def lifecycle(session):
         repository = AuthAccountRepository(session)
         auth = AuthAccountService(account_repository=repository, session_service=AuthSessionService(repository=AuthSessionRepository(session)), settings=settings)
-        return AccountLifecycleService(accounts=repository, auth=auth, email_sender=mail, token_key=settings.auth_email_token_key, now=lambda: clock[0], google_verifier=google or Google())
+        return AccountLifecycleService(accounts=repository, auth=auth, email_sender=mail, token_key=settings.auth_email_token_key, now=lambda: clock[0])
     try:
         yield sessions, lifecycle, mail, clock, settings
     finally:
@@ -133,25 +122,66 @@ def test_duplicate_registration_never_replaces_password_and_expired_tokens_canno
     asyncio.run(run())
 
 
-def test_google_existing_email_requires_linking_and_deleted_user_cannot_return():
+def test_active_email_duplicate_registration_keeps_password_and_sends_no_verification():
     async def run():
-        async with account_case() as (sessions, lifecycle, _mail, _clock, _settings):
+        async with account_case() as (sessions, lifecycle, mail, _clock, _settings):
             async with sessions.begin() as session:
                 service = lifecycle(session)
-                first = await service.google_login(id_token='valid', device=DeviceContext())
-                second = await service.google_login(id_token='valid', device=DeviceContext())
-                assert first.user.id == second.user.id
+                await service.register(email='mia@example.com', password=PASSWORD)
+                await service.verify_email(email='mia@example.com', token=mail.token, password=PASSWORD, device=DeviceContext())
+            sent_before = len(mail.messages)
+            async with sessions.begin() as session:
+                result = await lifecycle(session).register(email='mia@example.com', password='attacker-password-123')
+                assert result.verification_required is True
+                assert len(mail.messages) == sent_before
+            async with sessions.begin() as session:
+                await lifecycle(session).auth.login(email='mia@example.com', password=PASSWORD)
                 assert await session.scalar(select(func.count()).select_from(User)) == 1
-                user = await service.accounts.get_user(user_id=first.user.id)
-                await service.delete_account(user=user)
-                assert user.status == 'deleted' and user.email is None
-                assert (await session.scalar(select(AccountDeletionRequest))).status == 'pending_erasure'
+    asyncio.run(run())
+
+
+def test_legacy_external_only_account_can_set_email_password_with_mailbox_proof():
+    async def run():
+        async with account_case() as (sessions, lifecycle, mail, clock, _settings):
+            async with sessions.begin() as session:
+                user = User(email='legacy@example.com', email_verified_at=clock[0])
+                session.add(user)
+                session.add(AuthIdentity(user=user, provider='google', subject='legacy-sub', email=user.email))
             async with sessions.begin() as session:
                 service = lifecycle(session)
-                await service.register(email='email@example.com', password=PASSWORD)
-                with pytest.raises(ApiError) as conflict:
-                    await lifecycle(session, Google(email='email@example.com', subject='different')).google_login(id_token='valid', device=DeviceContext())
-                assert conflict.value.code == 'account_link_required'
+                await service.register(email='legacy@example.com', password=PASSWORD)
+                assert mail.messages == []  # Duplicate registration does not grant access.
+                await service.request_password_reset(email='legacy@example.com')
+                code = mail.token
+            async with sessions.begin() as session:
+                await lifecycle(session).reset_password(email='legacy@example.com', token=code, new_password=PASSWORD)
+                identities = (await session.scalars(select(AuthIdentity))).all()
+                assert {identity.provider for identity in identities} == {'google', 'email'}
+                assert await session.scalar(select(func.count()).select_from(User)) == 1
+            async with sessions.begin() as session:
+                pair = await lifecycle(session).auth.login(email='legacy@example.com', password=PASSWORD)
+                assert pair.user.email == 'legacy@example.com'
+            async with sessions.begin() as session:
+                with pytest.raises(ApiError):
+                    await lifecycle(session).reset_password(email='legacy@example.com', token=code, new_password='another-password-123')
+    asyncio.run(run())
+
+
+def test_retired_external_routes_are_not_exposed_and_inactive_legacy_accounts_cannot_reset():
+    async def run():
+        async with account_case() as (sessions, lifecycle, mail, clock, settings):
+            app = create_app(settings)
+            assert '/v1/auth/google' not in app.openapi()['paths']
+            assert '/v1/auth/google/link' not in app.openapi()['paths']
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+                assert (await client.post('/v1/auth/google', json={})).status_code == 404
+            async with sessions.begin() as session:
+                user = User(email='inactive@example.com', email_verified_at=clock[0], status='suspended')
+                session.add(user)
+                session.add(AuthIdentity(user=user, provider='google', subject='inactive-sub', email=user.email))
+            async with sessions.begin() as session:
+                await lifecycle(session).request_password_reset(email='inactive@example.com')
+                assert mail.messages == []
     asyncio.run(run())
 
 
@@ -177,4 +207,98 @@ def test_http_failed_code_attempts_commit_and_old_signup_uses_verification():
                 assert rejected.headers['cache-control'] == 'private, no-store'
             async with sessions.begin() as session:
                 assert (await session.scalar(select(EmailChallenge))).attempts == 5
+    asyncio.run(run())
+
+
+def test_registration_verifies_mailbox_before_password_and_requires_matching_confirmation():
+    async def run():
+        async with account_case() as (sessions, lifecycle, mail, _clock, settings):
+            app = create_app(settings)
+            app.state.db_session_factory = sessions
+            from fastapi import Depends
+            from app.infrastructure.db.session import get_session
+
+            async def dependency(session=Depends(get_session)):
+                return lifecycle(session)
+
+            app.dependency_overrides[get_account_lifecycle_service] = dependency
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+                requested = await client.post('/v1/auth/register', json={'email': 'mia@example.com'})
+                assert requested.status_code == 202 and requested.json() == {'status': 'verification_required'}
+                code = mail.token
+                async with sessions.begin() as session:
+                    user = await AuthAccountRepository(session).get_user_by_email(email='mia@example.com')
+                    assert user is not None and user.status == 'email_unverified'
+                    identity = await session.scalar(select(AuthIdentity))
+                    assert identity is not None and not verify_password(PASSWORD, identity.password_hash)
+                bad = await client.post('/v1/auth/verify-registration-code', json={'email': 'mia@example.com', 'token': '00000000'})
+                assert bad.status_code == 401
+                checked = await client.post('/v1/auth/verify-registration-code', json={'email': 'mia@example.com', 'token': code})
+                assert checked.status_code == 200 and checked.json() == {'status': 'code_valid'}
+                mismatch = await client.post('/v1/auth/verify-email', json={
+                    'email': 'mia@example.com', 'token': code,
+                    'password': PASSWORD, 'confirm_password': 'different-password-123',
+                })
+                assert mismatch.status_code == 422
+                completed = await client.post('/v1/auth/verify-email', json={
+                    'email': 'mia@example.com', 'token': code,
+                    'password': PASSWORD, 'confirm_password': PASSWORD,
+                })
+                assert completed.status_code == 200 and completed.json()['access_token']
+                replay = await client.post('/v1/auth/verify-email', json={
+                    'email': 'mia@example.com', 'token': code,
+                    'password': PASSWORD, 'confirm_password': PASSWORD,
+                })
+                assert replay.status_code == 401
+    asyncio.run(run())
+
+
+def test_registration_code_check_has_bounded_attempts_and_does_not_activate_account():
+    async def run():
+        async with account_case() as (sessions, lifecycle, mail, _clock, settings):
+            app = create_app(settings)
+            app.state.db_session_factory = sessions
+            from fastapi import Depends
+            from app.infrastructure.db.session import get_session
+
+            async def dependency(session=Depends(get_session)):
+                return lifecycle(session)
+
+            app.dependency_overrides[get_account_lifecycle_service] = dependency
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as client:
+                assert (await client.post('/v1/auth/register', json={'email': 'mia@example.com'})).status_code == 202
+                code = mail.token
+                for _ in range(5):
+                    assert (await client.post('/v1/auth/verify-registration-code', json={'email': 'mia@example.com', 'token': '00000000'})).status_code == 401
+                assert (await client.post('/v1/auth/verify-registration-code', json={'email': 'mia@example.com', 'token': code})).status_code == 401
+                async with sessions.begin() as session:
+                    user = await AuthAccountRepository(session).get_user_by_email(email='mia@example.com')
+                    assert user is not None and user.status == 'email_unverified'
+                    challenge = await session.scalar(select(EmailChallenge))
+                    assert challenge.attempts == 5
+    asyncio.run(run())
+
+
+def test_registration_precheck_expires_without_issuing_a_session():
+    async def run():
+        async with account_case() as (sessions, lifecycle, mail, clock, _settings):
+            async with sessions.begin() as session:
+                await lifecycle(session).start_registration(email='mia@example.com')
+            code = mail.token
+            async with sessions.begin() as session:
+                await lifecycle(session).check_registration_code(email='mia@example.com', token=code)
+                user = await AuthAccountRepository(session).get_user_by_email(email='mia@example.com')
+                assert user is not None and user.status == 'email_unverified'
+                assert await session.scalar(select(func.count()).select_from(DeviceSession)) == 0
+            clock[0] += timedelta(minutes=16)
+            async with sessions.begin() as session:
+                with pytest.raises(ApiError) as rejected:
+                    await lifecycle(session).check_registration_code(email='mia@example.com', token=code)
+                assert rejected.value.code == 'invalid_or_expired_code'
+                with pytest.raises(ApiError):
+                    await lifecycle(session).verify_email(email='mia@example.com', token=code, password=PASSWORD, device=DeviceContext())
+            async with sessions.begin() as session:
+                user = await AuthAccountRepository(session).get_user_by_email(email='mia@example.com')
+                assert user is not None and user.status == 'email_unverified'
+                assert await session.scalar(select(func.count()).select_from(DeviceSession)) == 0
     asyncio.run(run())

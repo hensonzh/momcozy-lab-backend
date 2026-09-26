@@ -10,13 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...api.dependencies import require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
-from ..appointments.router import get_appointment_service
-from ..appointments.service import AppointmentService
 from ..audit.repository import AuditRepository
 from ..audit.service import AuditService, IdempotencyService
 from ..auth import CurrentUser
-from ..documentation.repository import DocumentationRepository
-from ..documentation.service import DocumentationService
 from .repository import ScheduleRepository
 from .schemas import PersonalScheduleRead, PersonalScheduleUpdate, PersonalScheduleWrite, SchedulePageRead
 from .service import ScheduleService
@@ -26,11 +22,10 @@ router = SurfaceAPIRouter(prefix="/schedule", tags=["schedule"],
 MutationKey = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=255)]
 
 
-def get_schedule_service(session: AsyncSession = Depends(get_session), appointments: AppointmentService = Depends(get_appointment_service)) -> ScheduleService:
+def get_schedule_service(session: AsyncSession = Depends(get_session)) -> ScheduleService:
     audit_repo = AuditRepository(session)
     audit = AuditService(repository=audit_repo)
-    docs = DocumentationService(DocumentationRepository(session), appointments, audit, IdempotencyService(repository=audit_repo))
-    return ScheduleService(ScheduleRepository(session), audit=audit, idempotency=IdempotencyService(repository=audit_repo), documentation=docs)
+    return ScheduleService(ScheduleRepository(session), audit=audit, idempotency=IdempotencyService(repository=audit_repo))
 
 
 @router.get("", response_model=SchedulePageRead)

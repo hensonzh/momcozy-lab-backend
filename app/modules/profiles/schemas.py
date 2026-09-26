@@ -75,7 +75,10 @@ class MaternalLactationProfileRead(BaseModel):
     delivery_count: int | None = None
     current_delivery_method: DeliveryMethod | None = None
     actual_delivery_date: date | None = None
-    has_cesarean_history: bool | None = None
+    has_cesarean_history: bool | None = Field(
+        default=None,
+        description="Whether a cesarean occurred before this delivery; false for a first delivery.",
+    )
     current_feeding_mode: FeedingMode | None = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -89,7 +92,10 @@ class MaternalLactationProfileUpdate(BaseModel):
     delivery_count: int | None = Field(default=None, ge=1, le=20)
     current_delivery_method: DeliveryMethod | None = None
     actual_delivery_date: date | None = None
-    has_cesarean_history: bool | None = None
+    has_cesarean_history: bool | None = Field(
+        default=None,
+        description="Whether a cesarean occurred before this delivery; not the current delivery method.",
+    )
     current_feeding_mode: FeedingMode | None = None
 
     model_config = ConfigDict(

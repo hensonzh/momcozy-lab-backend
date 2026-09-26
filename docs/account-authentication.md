@@ -1,31 +1,21 @@
 # Account and authentication implementation
 
-Scope: Email/password + Google sign-in for the overseas mobile App, using the
+Scope: Email/password for the overseas mobile App, using the
 existing Product Backend identities, RS256 tokens, and device sessions.
 
-Current acceptance scope: the user confirmed that Google OAuth and SMTP
-configuration are not yet prepared and requested completion of local
-implementation and validation first. That local phase is complete. Live provider
-acceptance and deployment are deferred until the project configuration is ready;
-they are not blockers for this phase. Platform verification currently covers
-Android; the iOS build remains unverified.
+Email delivery and deployment must be verified separately from local tests.
+Platform verification currently covers Android; the iOS build remains unverified.
 
 ## Architecture and acceptance checklist
 
 - [x] Canonical User email/status/verification/login timestamps; provider identities remain separate.
 - [x] Signup creates email_unverified user, generic duplicate response, verification email/code, expiry/resend.
 - [x] Email login validates password then status; only active users receive business sessions.
-- [x] Google SDK ID token verified server-side (signature, issuer, audience, expiry, subject, verified email).
-- [x] Existing same-email account requires explicit authenticated linking; concurrent signup cannot duplicate accounts.
 - [x] Password reset is purpose-bound, single-use, expiring and revokes every device session and pending expert MFA login challenge.
 - [x] Account status enforced in Product API and Runtime API, including existing tokens.
 - [x] IP/account rate limits, password hashing, no credential logs, production config validation.
 - [x] Mobile secure storage, startup restoration, refresh single-flight and logout race handling.
-- [x] English signup/login/verification/reset/Google cancelled/error UI and protected-route return path.
-- [x] Account view, Google linking and confirmed deletion entry point.
 - [x] Account deletion revokes sessions immediately, anonymizes authentication identity and tracks downstream erasure.
-- [x] Tests: migrations, actual DB state/concurrency, API, Google validation, Flutter controllers/widgets/guards.
-- [x] Configuration and runbook for email + Google clients and remaining operational prerequisites.
 
 ## Decisions
 
@@ -38,11 +28,8 @@ on migration; invite accounts remain compatible for the internal test channel.
 Account rate limits use the same normalized email as authentication, including
 Unicode domain normalization, so equivalent spellings share one account bucket.
 
-Google identities are keyed by `sub`, not email. Possessing a Google ID token for
-an email does not silently link it to another authentication identity. Linking
-requires a valid session and fresh password authentication for the existing email
-account. No Google access/refresh token is stored. Native SDKs own the OAuth flow;
-only the ID token is exchanged for a MomCozy session over HTTPS.
+Historical external identity rows remain attached to their users for recovery
+and audit. They no longer provide a sign-in or linking endpoint.
 
 User.status is the account status source of truth (`active`, `email_unverified`,
 `disabled`, `suspended`, `deleted`). Each request checks the active server-side
@@ -61,11 +48,8 @@ request requires acknowledgements from Product, Runtime and object storage.
 
 ## External configuration
 
-SMTP host/port/TLS credentials and sender; Google web server-client audience plus
-Android/iOS client registrations, signing fingerprints and iOS callback scheme.
-Secrets belong in deployment secrets. Google and email delivery are tested with
-local substitutes until the project's credentials are configured; a passing fake
-provider test does not prove a live provider integration.
+SMTP host/port/TLS credentials and verified sender belong in deployment secrets.
+Local substitutes do not prove live mailbox delivery.
 
 ## API and mobile flows
 
@@ -75,14 +59,14 @@ must never be placed in URLs or logs.
 
 | Method / path | Behavior |
 | --- | --- |
-| POST `/register` (`/signup` compatibility alias) | Email/password -> generic 202; no business token before mailbox proof. |
-| POST `/verify-email` | Email, 8-digit code, chosen password, device ID -> token pair. |
+| POST `/register` | Email only -> generic 202 and an 8-digit verification code for eligible pending accounts. A legacy password field is accepted but ignored; no user-chosen credential is stored before proof. |
+| POST `/verify-registration-code` | Email and code -> `code_valid` on success, without consuming the code, activating the account, or issuing a session. Invalid codes count toward the five-attempt limit. |
+| POST `/verify-email` | After the code check, email, same unexpired code, chosen password, matching `confirm_password`, device ID -> consume proof and issue token pair. Legacy clients may omit confirmation. |
+| POST `/signup` (legacy compatibility) | Old email/password request -> generic 202; password remains provisional until mailbox proof and may be replaced at `/verify-email`. New clients use `/register` instead. |
 | POST `/resend-verification` | Generic 202, minimum 60 seconds between sends. |
 | POST `/login` | Email/password -> active account's token pair; legacy PBKDF2 passwords remain valid. |
 | POST `/forgot-password` | Generic 202 for all emails. |
 | POST `/reset-password` | Email, purpose-bound code, new password -> revoke all sessions. |
-| POST `/google` | Google ID token -> verified existing/new Google identity's session. |
-| POST `/google/link` | Authenticated account + current password + Google ID token; exact normalized email match. |
 | POST `/refresh` | Rotate opaque refresh token; reuse revokes family and device session. |
 | POST `/logout` | Revoke authenticated device session. |
 | POST `/logout-session` | Refresh-token possession revokes its device session, including previously rotated tokens; generic success. |
@@ -90,12 +74,12 @@ must never be placed in URLs or logs.
 | DELETE `/me` | Revoke all sessions, anonymize authentication identifiers, create pending erasure request. |
 
 The overseas mobile UI uses `/login` for login/registration/verification/reset and
-`/account` for account details, explicit Google linking, logout and confirmed
+`/account` for account details, password recovery guidance, logout and confirmed
 deletion. Existing GoRouter protection preserves a safe relative return path.
 The internal test channel can retain its invite-only page using
 `--dart-define=MOMCOZY_INTERNAL_INVITE_LOGIN=true`; this is not the consumer default.
 
-A mailbox proof lets the owner choose a fresh password at verification time.
+A mailbox proof lets the owner choose a fresh password at verification time. The consumer App first requests a code with only an email, checks the code, then requires the new password twice. The pre-check is not a session or reservation: if the code expires or is exhausted before the final `/verify-email` call, the user must request another code.
 Repeated registration cannot replace a pending account's password. Verification
 also revokes any prior sessions, preventing account pre-hijacking. Duplicate
 registration intentionally does not reveal account existence; the UI provides
@@ -125,15 +109,14 @@ failure is reported; it must not be described as verified server logout. User
 asset caches and card exports are cleared with the native logout path.
 
 This integration targets native Android/iOS. The current Dart network layer uses
-`dart:io`; a browser client requires its own supported network/OAuth flow and a
+`dart:io`; a browser client requires its own supported network flow and a
 cookie-based session design before any production web credential persistence.
 
 ## Mail delivery and deployment preparation
 
 Copy variable names from `env/account-auth.env.example` into the existing secret
 configuration. Supply one stable random `AUTH_EMAIL_TOKEN_KEY` with at least 32
-bytes, SMTP STARTTLS host/port (587), authenticated sender/credentials, and the
-Google web client ID. API and mail worker must share this key. SMTP must support
+bytes, SMTP STARTTLS host/port (587), authenticated sender/credentials. API and mail worker must share this key. SMTP must support
 certificate-verified STARTTLS; implicit TLS port 465 is not implemented.
 
 Run `python -m scripts.deliver_auth_emails` as a supervised process with the same
@@ -158,42 +141,46 @@ mail delivery are working; apply migration `20260910_0017`; run API and mail
 worker; and verify public endpoints. This migration preserves IDs/business
 records, backfills canonical email, and marks historical email users unverified
 because no mailbox proof existed. Their sessions are revoked. Announce this
-verification requirement before rollout, including to existing IBCLC users.
+verification requirement before rollout for existing users.
 Invite identities remain usable for the internal test channel. Rollback does not
 restore revoked sessions or falsely mark users verified.
 
-## Google native configuration
+## Retired external sign-in account recovery
 
-Follow the official [Flutter Google Sign-In integration](https://pub.dev/packages/google_sign_in)
-and [Google backend verification guidance](https://developers.google.com/identity/sign-in/web/backend-auth).
-Use Google's native SDK account authentication, not a custom token entry screen.
-No Google OAuth client secret belongs in the App.
+The App and API no longer offer external sign-in or account linking. Existing
+identity rows remain attached to their users; they are **not** deleted. A
+previously verified, active account with no email password can use **Forgot your
+password?** to request a reset code at its registered mailbox. Consuming that
+purpose-bound, single-use code creates the email credential for the same user ID,
+revokes old sessions, and preserves all business records. Duplicate registration
+still returns the same generic response and cannot set a password without mailbox
+proof. Suspended, deleted, and unverified external identities are not eligible.
 
-- Backend `AUTH_GOOGLE_CLIENT_ID` and App
-  `--dart-define=MOMCOZY_GOOGLE_SERVER_CLIENT_ID=...` must identify the same Web
-  OAuth client (the expected ID-token audience).
-- Register the Android package ID with the actual signing certificate SHA-1 for
-  every distribution channel. The native SDK receives `serverClientId` from Dart;
-  a manually invented client ID cannot substitute for this registration.
-- Register the iOS bundle ID. Pass
-  `--dart-define=MOMCOZY_GOOGLE_IOS_CLIENT_ID=...`; copy
-  `ios/Flutter/GoogleAuth.xcconfig.example` to `GoogleAuth.xcconfig` and set the
-  reversed iOS client ID. The Info.plist callback scheme uses that build setting.
-- Configure consent branding, allowed test users or production consent status,
-  and perform device-level cancellation, successful sign-in and same-email
-  linking tests. Native SDKs own the OAuth transaction; backend validates Google
-  signature, issuer, configured audience, required expiry/issue time/subject and
-  verified email. Unknown keys are refreshed from Google's fixed JWKS endpoint.
+Before removing a production login path, verify mail delivery and tell affected
+users to complete password recovery. Check the number of active accounts without
+an email identity and support users who no longer control their registered
+mailbox via a separately verified support process; do not relink by email alone.
+
+Read-only inventory before rollout:
+
+```sql
+SELECT count(*) AS external_only_accounts
+FROM users AS u
+WHERE u.status = 'active' AND u.email IS NOT NULL
+  AND EXISTS (SELECT 1 FROM auth_identities AS i
+              WHERE i.user_id = u.id AND i.provider = 'google')
+  AND NOT EXISTS (SELECT 1 FROM auth_identities AS i
+                  WHERE i.user_id = u.id AND i.provider = 'email');
+```
 
 ## Verification evidence and remaining work
 
 Local checks cover real PostgreSQL migration/schema comparison, concurrent
-registration/Google first sign-in, refresh reuse, logout/deletion with old access
-and refresh tokens, transactional encrypted mail delivery/retries, Google signed
-claim/signature failures, native secure storage, startup restore, late-write
+registration and legacy-account recovery, refresh reuse, logout/deletion with old
+access and refresh tokens, transactional encrypted mail delivery/retries, native
+secure storage, startup restore, late-write
 logout races, English forms and confirmed deletion UI. See the account/auth
-regression suites in Backend, Runtime and App. These are not live SMTP or Google
-acceptance tests.
+regression suites in Backend, Runtime and App. These are not live SMTP acceptance tests.
 
 Operational work still required: project OAuth registrations and SMTP secrets,
 verified sending domain, live device/mail round trips, and an authorized release.
@@ -228,6 +215,6 @@ a device-session management screen, and automated provider security alerts.
   AAPT2 path or shared build setting was changed. The artifact was not published.
   Existing Kotlin plugin future-compatibility warnings remain.
 
-No iOS build, live Google OAuth callback, or SMTP inbox acceptance was verified.
+No iOS build or live SMTP inbox acceptance was verified.
 The checked implementation items above must not be interpreted as production
 provider credentials or operational acceptance being complete.

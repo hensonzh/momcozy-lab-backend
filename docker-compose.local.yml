@@ -73,37 +73,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
-  care-video-worker:
-    image: momcozy-lab-backend:local
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: python -m app.workers.care_video
-    env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
-    profiles: [consultations]
-    init: true
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  care-report-worker:
-    image: momcozy-lab-backend:local
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: python -m app.workers.care_reports
-    env_file:
-      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
-    profiles: [reports]
-    init: true
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   postgres:
     image: postgres:16
     environment:

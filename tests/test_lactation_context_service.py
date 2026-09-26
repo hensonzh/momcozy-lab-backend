@@ -522,7 +522,7 @@ def test_maternal_profile_update_splits_general_and_lactation_state() -> None:
     assert current_infants == [{"infant_id": infant.id, "birth_order": 1}]
 
 
-def test_maternal_profile_update_derives_cesarean_history_from_current_delivery_method() -> None:
+def test_maternal_profile_update_does_not_infer_prior_history_from_current_delivery() -> None:
     owner_user_id = uuid4()
     repository = FakeProfileRepository(
         user_profile=None,
@@ -543,37 +543,69 @@ def test_maternal_profile_update_derives_cesarean_history_from_current_delivery_
         )
     )
 
-    assert repository.upsert_values == {
-        "latest_delivery_method": "cesarean",
-        "has_cesarean_history": True,
-    }
-    assert profile.has_cesarean_history is True
+    assert repository.upsert_values == {"latest_delivery_method": "cesarean"}
+    assert profile.has_cesarean_history is None
 
 
-def test_maternal_profile_update_rejects_false_cesarean_history_for_cesarean_delivery() -> None:
+def test_maternal_profile_update_allows_no_prior_cesarean_with_current_cesarean() -> None:
     owner_user_id = uuid4()
+    repository = FakeProfileRepository(
+        user_profile=None,
+        maternal_profile=None,
+        lactation_profile=None,
+        current_infants=[],
+        infants=[],
+    )
     service = LactationContextService(
-        profile_repository=FakeProfileRepository(
-            user_profile=None,
-            maternal_profile=None,
-            lactation_profile=None,
-            current_infants=[],
-            infants=[],
-        ),
+        profile_repository=repository,
         records_service=FakeRecordsService(growth_by_infant={}),
     )
+
+    profile, _ = asyncio.run(
+        service.update_maternal_profile(
+            owner_user_id=owner_user_id,
+            values={
+                "delivery_count": 2,
+                "current_delivery_method": "cesarean",
+                "has_cesarean_history": False,
+            },
+        )
+    )
+
+    assert profile.has_cesarean_history is False
+    assert repository.upsert_values["latest_delivery_method"] == "cesarean"
+
+
+def test_first_delivery_has_no_prior_cesarean_even_when_current_delivery_is_cesarean() -> None:
+    owner_user_id = uuid4()
+    repository = FakeProfileRepository(
+        user_profile=None,
+        maternal_profile=None,
+        lactation_profile=None,
+        current_infants=[],
+        infants=[],
+    )
+    service = LactationContextService(
+        profile_repository=repository,
+        records_service=FakeRecordsService(growth_by_infant={}),
+    )
+
+    profile, _ = asyncio.run(
+        service.update_maternal_profile(
+            owner_user_id=owner_user_id,
+            values={"delivery_count": 1, "current_delivery_method": "cesarean"},
+        )
+    )
+    assert profile.has_cesarean_history is False
+    assert repository.upsert_values["has_cesarean_history"] is False
 
     with pytest.raises(ApiError) as exc_info:
         asyncio.run(
             service.update_maternal_profile(
                 owner_user_id=owner_user_id,
-                values={
-                    "current_delivery_method": "cesarean",
-                    "has_cesarean_history": False,
-                },
+                values={"delivery_count": 1, "has_cesarean_history": True},
             )
         )
-
     assert exc_info.value.code == "validation_failed"
 
 

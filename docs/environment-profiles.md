@@ -1,6 +1,10 @@
 # Product Backend Environment Profiles
 
-Updated: 2026-09-24.
+Updated: 2026-09-25.
+
+For the single cross-repository file/command matrix (Backend, Agent, and Flutter),
+see `app/docs/deployment/environment-workflow.md` from the workspace root.
+This page documents the Product Backend-specific contract.
 
 ## Environment contract
 

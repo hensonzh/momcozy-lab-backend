@@ -90,7 +90,7 @@ class LactationMotherContextOutput(_StrictOutputModel):
         description="Actual date of the current birth, formatted YYYY-MM-DD; null when unrecorded.",
     )
     has_cesarean_history: bool | None = Field(
-        description="Whether a cesarean occurred previously or during this delivery; true or false when confirmed, null otherwise.",
+        description="Whether a cesarean occurred before this delivery (not during it); false for a first delivery, null when unknown.",
     )
     postpartum_days: int | None = Field(
         ge=0,

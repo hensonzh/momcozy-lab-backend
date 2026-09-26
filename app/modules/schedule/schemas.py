@@ -5,9 +5,6 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from ..appointments.schemas import AppointmentRead
-from ..care.schemas import CareEpisodeRead
-from ..documentation.schemas import PlanPublicationRead
 
 
 class PersonalScheduleWrite(BaseModel):
@@ -39,16 +36,7 @@ class PersonalScheduleRead(BaseModel):
     updated_at: AwareDatetime
 
 
-class SchedulePlanRead(BaseModel):
-    episode_id: UUID
-    appointment_id: UUID
-    publication: PlanPublicationRead
-
-
 class SchedulePageRead(BaseModel):
     personal: list[PersonalScheduleRead]
-    appointments: list[AppointmentRead]
-    plans: list[SchedulePlanRead]
-    episodes: list[CareEpisodeRead]
     server_time: AwareDatetime
     has_more: bool

@@ -8,11 +8,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from ...core.errors import ApiError
-from ..users.models import AccountStatus, User
+from ..users.models import AccountStatus, AuthIdentity, User
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair, normalize_email
 from .email import AuthChallengeEmailSender
-from .google import GoogleClaims, GoogleTokenVerifier
-from .passwords import hash_password, verify_password
+from .passwords import hash_password
 from .repository import AuthAccountRepository
 
 CHALLENGE_TTL = timedelta(minutes=15)
@@ -35,12 +34,10 @@ class RegistrationResult:
 
 class AccountLifecycleService:
     def __init__(self, *, accounts: AuthAccountRepository, auth: AuthAccountService,
-                 email_sender: AuthChallengeEmailSender, token_key: str, now: Callable[[], datetime] | None = None,
-                 google_verifier: GoogleTokenVerifier | None = None) -> None:
+                 email_sender: AuthChallengeEmailSender, token_key: str, now: Callable[[], datetime] | None = None) -> None:
         self.accounts, self.auth, self.email_sender = accounts, auth, email_sender
         self.token_key = token_key
         self.now = now or (lambda: datetime.now(timezone.utc))
-        self.google_verifier = google_verifier
 
     async def register(self, *, email: str, password: str) -> RegistrationResult:
         self._require_email_configuration()
@@ -57,6 +54,35 @@ class AccountLifecycleService:
         if user is not None and user.status == AccountStatus.EMAIL_UNVERIFIED:
             await self._issue_email_challenge(user=user, purpose=PURPOSE_VERIFY)
         return RegistrationResult()
+
+    async def start_registration(self, *, email: str) -> RegistrationResult:
+        self._require_email_configuration()
+        normalized = normalize_email(email)
+        # No user-chosen password exists until mailbox proof is consumed.
+        password_hash = hash_password(secrets.token_urlsafe(32))
+        await self.accounts.lock_email(normalized)
+        user = await self.accounts.get_user_by_email(email=normalized)
+        if user is None:
+            user = await self.accounts.create_pending_email_user(email=normalized, password_hash=password_hash)
+        else:
+            user = await self.accounts.lock_user(user.id)
+        if user is not None and user.status == AccountStatus.EMAIL_UNVERIFIED:
+            await self._issue_email_challenge(user=user, purpose=PURPOSE_VERIFY)
+        return RegistrationResult()
+
+    async def check_registration_code(self, *, email: str, token: str) -> None:
+        user = await self._user_for_email(email)
+        if user.status != AccountStatus.EMAIL_UNVERIFIED:
+            raise ChallengeRejected()
+        challenge = await self.accounts.get_email_challenge(user_id=user.id, purpose=PURPOSE_VERIFY)
+        now = self.now()
+        if challenge is None or challenge.consumed_at is not None or _aware(challenge.expires_at) <= now or challenge.attempts >= MAX_CHALLENGE_ATTEMPTS:
+            raise ChallengeRejected()
+        if not hmac.compare_digest(challenge.token_hash, self._digest(user, PURPOSE_VERIFY, token.strip())):
+            challenge.attempts += 1
+            await self.accounts.session.flush()
+            raise ChallengeRejected()
+        # Only verify_email consumes proof and activates the account.
 
     async def verify_email(self, *, email: str, token: str, password: str, device: DeviceContext) -> IssuedTokenPair:
         validate_password(password)
@@ -86,72 +112,25 @@ class AccountLifecycleService:
         user = await self.accounts.get_user_by_email(email=normalize_email(email))
         if user is not None:
             user = await self.accounts.lock_user(user.id)
-            if user is not None and user.status in {AccountStatus.ACTIVE, AccountStatus.EMAIL_UNVERIFIED} and any(i.provider == "email" for i in user.identities):
+            if user is not None and user.status in {AccountStatus.ACTIVE, AccountStatus.EMAIL_UNVERIFIED} and self._can_reset_password(user):
                 await self._issue_email_challenge(user=user, purpose=PURPOSE_RESET)
         return RegistrationResult()
 
     async def reset_password(self, *, email: str, token: str, new_password: str) -> RegistrationResult:
         validate_password(new_password)
-        user = await self._user_for_email(email)
+        user = await self._user_for_email(email, allow_legacy_reset=True)
         if user.status not in {AccountStatus.ACTIVE, AccountStatus.EMAIL_UNVERIFIED}:
             raise ChallengeRejected()
         await self._consume_challenge(user=user, purpose=PURPOSE_RESET, token=token)
-        identity = next(identity for identity in user.identities if identity.provider == "email")
+        identity = next((identity for identity in user.identities if identity.provider == "email"), None)
+        if identity is None:
+            identity = AuthIdentity(user=user, provider="email", subject=user.email, email=user.email)
+            self.accounts.session.add(identity)
         identity.password_hash = hash_password(new_password)
         user.status, user.email_verified_at = AccountStatus.ACTIVE, self.now()
         await self.accounts.invalidate_challenges(user_id=user.id, now=self.now())
         await self.auth.session_service.revoke_user_sessions(user_id=user.id)
         return RegistrationResult(verification_required=False)
-
-    async def _google_claims(self, id_token: str) -> GoogleClaims:
-        if self.google_verifier is None or not self.auth.settings.auth_google_client_id:
-            raise ApiError(code="oauth_unavailable", message="Google sign-in is temporarily unavailable.", status=503)
-        try:
-            claims = await self.google_verifier.verify(id_token=id_token, audience=self.auth.settings.auth_google_client_id)
-            if not claims.email_verified or not claims.subject:
-                raise ValueError("Unverified identity")
-            normalize_email(claims.email)
-            return claims
-        except Exception as exc:
-            raise ApiError(code="oauth_token_invalid", message="Google sign-in could not be completed. Please try again.", status=401) from exc
-
-    async def google_login(self, *, id_token: str, device: DeviceContext) -> IssuedTokenPair:
-        claims = await self._google_claims(id_token)
-        # Subject lock handles Google email changes; email lock handles provider races.
-        await self.accounts.lock_email(f"google:{claims.subject}")
-        await self.accounts.lock_email(normalize_email(claims.email))
-        identity = await self.accounts.get_google_identity(subject=claims.subject)
-        if identity is not None:
-            user = await self.accounts.lock_user(identity.user_id)
-            if user is None or user.status != AccountStatus.ACTIVE:
-                raise ApiError(code="permission_denied", message="Account is not active.", status=403)
-            return await self.auth._issue_pair(user=user, device_context=device)
-        existing = await self.accounts.get_user_by_email(email=normalize_email(claims.email))
-        if existing is not None:
-            raise ApiError(code="account_link_required", message="Sign in to your existing account, then link Google in Account settings.", status=409)
-        user, _ = await self.accounts.create_google_user(subject=claims.subject, email=normalize_email(claims.email))
-        return await self.auth._issue_pair(user=user, device_context=device)
-
-    async def link_google(self, *, current_user: User, password: str, id_token: str) -> RegistrationResult:
-        claims = await self._google_claims(id_token)
-        await self.accounts.lock_email(f"google:{claims.subject}")
-        user = await self.accounts.lock_user(current_user.id)
-        if user is None or user.status != AccountStatus.ACTIVE:
-            raise ApiError(code="permission_denied", message="Account is not active.", status=403)
-        identity = next((identity for identity in user.identities if identity.provider == "email"), None)
-        if identity is None or not verify_password(password, identity.password_hash):
-            raise ApiError(code="authentication_required", message="Re-enter your password to link Google.", status=401)
-        if normalize_email(claims.email) != user.email:
-            raise ApiError(code="account_link_conflict", message="Choose the Google account with the same email address.", status=409)
-        existing = await self.accounts.get_google_identity(subject=claims.subject)
-        if existing is not None:
-            if existing.user_id == user.id:
-                return RegistrationResult(False)
-            raise ApiError(code="account_link_conflict", message="Google account is already linked.", status=409)
-        if any(identity.provider == "google" for identity in user.identities):
-            raise ApiError(code="account_link_conflict", message="This account already has a Google identity.", status=409)
-        await self.accounts.add_google_identity(user_id=user.id, subject=claims.subject, email=normalize_email(claims.email))
-        return RegistrationResult(False)
 
     async def delete_account(self, *, user: User) -> RegistrationResult:
         locked = await self.accounts.lock_user(user.id)
@@ -180,11 +159,21 @@ class AccountLifecycleService:
         await self.email_sender.send(challenge=challenge, recipient=user.email or "", subject=subject,
             body=f"Your Momcozy security code is:\n\n{token}\n\nIt expires in 15 minutes. If you did not request this, ignore this email.")
 
-    async def _user_for_email(self, email: str) -> User:
+    def _can_reset_password(self, user: User) -> bool:
+        # Preserve access to accounts created before external sign-in was retired.
+        return any(i.provider == "email" for i in user.identities) or (
+            user.status == AccountStatus.ACTIVE and user.email_verified_at is not None
+            and any(i.provider == "google" for i in user.identities)
+        )
+
+    async def _user_for_email(self, email: str, *, allow_legacy_reset: bool = False) -> User:
         self._require_email_configuration()
         user = await self.accounts.get_user_by_email(email=normalize_email(email))
         locked = await self.accounts.lock_user(user.id) if user is not None else None
-        if locked is None or not any(i.provider == "email" for i in locked.identities):
+        if locked is None or not (
+            self._can_reset_password(locked) if allow_legacy_reset
+            else any(i.provider == "email" for i in locked.identities)
+        ):
             raise ChallengeRejected()
         return locked
 

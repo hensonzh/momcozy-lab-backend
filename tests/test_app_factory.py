@@ -89,7 +89,6 @@ def _production_settings() -> Settings:
         app_env="production",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
-        auth_google_client_id="test-google-client",
 
         database_url="postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         redis_url="redis://redis.internal:6379/0",

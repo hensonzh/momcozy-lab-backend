@@ -42,7 +42,6 @@ SOURCE_TREE_EXCLUSIONS = frozenset(
 )
 RUNTIME_SERVICES = (
     "api", "notification-worker", "auth-email-worker",
-    "care-report-worker", "care-video-worker",
 )
 KNOWN_SECRET_PLACEHOLDERS = frozenset(
     {
@@ -516,11 +515,6 @@ def _runtime_services(
         raise ValueError("release Compose must define the API service")
     if not enabled_only:
         return services
-    values = _read_env_values(spec.env_file)
-    if not (values.get("CARE_REPORT_RUNTIME_URL") and values.get("CARE_REPORT_SERVICE_KEY")):
-        services = [name for name in services if name != "care-report-worker"]
-    if values.get("CONSULTATION_VIDEO_PROVIDER", "disabled").lower() == "disabled":
-        services = [name for name in services if name != "care-video-worker"]
     return services
 
 

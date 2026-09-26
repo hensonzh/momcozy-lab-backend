@@ -18,7 +18,7 @@ from .schemas import NotificationListResponse, NotificationRead, NotificationRea
 from .service import NotificationsService
 from .lifecycle import NotificationLifecycleService
 from .schemas import (NotificationOpenRead, PushInstallationDetach, PushInstallationRead, PushInstallationWrite,
-    ReminderRead, ReminderWrite)
+    ReminderWrite)
 
 
 router = SurfaceAPIRouter(
@@ -70,29 +70,11 @@ async def update_notification_preference(category: str, payload: ReminderWrite,
     return await service.set_preference(current_user, category, payload.enabled, payload.installation_id)
 
 
-@router.get("/appointments/{appointment_id}/reminder", response_model=ReminderRead)
-async def read_appointment_reminder(appointment_id: UUID, current_user: CurrentUser = Depends(require_current_user),
-    service: NotificationLifecycleService = Depends(get_push_registration_service)) -> ReminderRead:
-    value = await service.appointment_reminder(current_user.user_id, appointment_id)
-    return ReminderRead(enabled=value is not None and value.send_status in {"scheduled", "pending"},
-        status=value.send_status if value else "disabled", trigger_at=value.trigger_at if value else None,
-        notification_id=value.id if value else None)
-
-
-@router.put("/appointments/{appointment_id}/reminder", response_model=ReminderRead)
-async def update_appointment_reminder(appointment_id: UUID, payload: ReminderWrite,
-    current_user: CurrentUser = Depends(require_current_user),
-    service: NotificationLifecycleService = Depends(get_push_registration_service)) -> ReminderRead:
-    value = await service.set_appointment_reminder(current_user, appointment_id, enabled=payload.enabled, installation_id=payload.installation_id)
-    return ReminderRead(enabled=value.send_status in {"scheduled", "pending"}, status=value.send_status,
-        trigger_at=value.trigger_at, notification_id=value.id)
-
-
 @router.post("/{notification_id}/open", response_model=NotificationOpenRead)
 async def open_notification(notification_id: UUID, request: Request, current_user: CurrentUser = Depends(require_current_user),
     service: NotificationLifecycleService = Depends(get_push_registration_service)) -> NotificationOpenRead:
     async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
-        gateway = RuntimeConversationGateway(client, request.app.state.settings.care_report_runtime_url)
+        gateway = RuntimeConversationGateway(client, request.app.state.settings.agent_runtime_url)
         return await service.open_notification(current_user, notification_id,
             verify_conversation=lambda owner, thread: gateway.verify_owner(owner, thread, request.headers.get("Authorization", "")))
 

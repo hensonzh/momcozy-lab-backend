@@ -57,8 +57,6 @@ class Settings:
     auth_jwt_product_audience: str = ""
     auth_jwt_runtime_audience: str = ""
     auth_require_active_session: bool = True
-    ibclc_mfa_encryption_key: str = field(default="", repr=False)
-    ibclc_session_hours: int = 12
     auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)
     auth_email_token_key: str = field(default="", repr=False)
     push_token_key: str = field(default="", repr=False)
@@ -70,11 +68,9 @@ class Settings:
     auth_smtp_port: int = 587
     auth_smtp_username: str = field(default="", repr=False)
     auth_smtp_password: str = field(default="", repr=False)
-    auth_google_client_id: str = ""
     service_api_key: str = ""
     agent_runtime_service_api_key: str = ""
-    care_report_runtime_url: str = ''
-    care_report_service_key: str = field(default='', repr=False)
+    agent_runtime_url: str = ''
     readiness_check_infrastructure: bool = False
     cors_allowed_origins: tuple[str, ...] = ()
     trusted_hosts: tuple[str, ...] = ()
@@ -110,16 +106,6 @@ class Settings:
     vision_provider: str = "disabled"
     vision_openai_model: str = "gpt-5.4-mini"
     vision_request_timeout_seconds: float = 20.0
-    consultation_video_provider: str = "disabled"
-    consultation_livekit_url: str = ""
-    consultation_livekit_client_url: str = ""
-    consultation_livekit_api_key: str = field(default="", repr=False)
-    consultation_livekit_api_secret: str = field(default="", repr=False)
-    consultation_demo_early_join: bool = False
-    stripe_checkout_enabled: bool = False
-    stripe_secret_key: str = field(default="", repr=False)
-    stripe_webhook_secret: str = field(default="", repr=False)
-    stripe_checkout_return_origin: str = ""
     log_level: str = "INFO"
 
     @classmethod
@@ -160,7 +146,6 @@ class Settings:
             auth_smtp_port=_env_int("AUTH_SMTP_PORT", cls.auth_smtp_port),
             auth_smtp_username=_env("AUTH_SMTP_USERNAME", cls.auth_smtp_username),
             auth_smtp_password=_env("AUTH_SMTP_PASSWORD", cls.auth_smtp_password),
-            auth_google_client_id=_env("AUTH_GOOGLE_CLIENT_ID", cls.auth_google_client_id),
             service_api_key=_env("SERVICE_API_KEY", cls.service_api_key),
             agent_runtime_service_api_key=_env(
                 "AGENT_RUNTIME_SERVICE_API_KEY",
@@ -223,20 +208,7 @@ class Settings:
                 "VISION_REQUEST_TIMEOUT_SECONDS",
                 cls.vision_request_timeout_seconds,
             ),
-            consultation_video_provider=_env("CONSULTATION_VIDEO_PROVIDER", cls.consultation_video_provider).lower(),
-            consultation_livekit_url=_env("CONSULTATION_LIVEKIT_URL", cls.consultation_livekit_url),
-            consultation_livekit_client_url=_env("CONSULTATION_LIVEKIT_CLIENT_URL", cls.consultation_livekit_client_url),
-            consultation_livekit_api_key=_env("CONSULTATION_LIVEKIT_API_KEY", cls.consultation_livekit_api_key),
-            consultation_livekit_api_secret=_env("CONSULTATION_LIVEKIT_API_SECRET", cls.consultation_livekit_api_secret),
-            consultation_demo_early_join=_env_bool("CONSULTATION_DEMO_EARLY_JOIN", cls.consultation_demo_early_join),
-            ibclc_mfa_encryption_key=_env("IBCLC_MFA_ENCRYPTION_KEY", cls.ibclc_mfa_encryption_key),
-            ibclc_session_hours=_env_int("IBCLC_SESSION_HOURS", cls.ibclc_session_hours),
-            care_report_runtime_url=_env('CARE_REPORT_RUNTIME_URL', cls.care_report_runtime_url).rstrip('/'),
-            care_report_service_key=_env('CARE_REPORT_SERVICE_KEY', cls.care_report_service_key),
-            stripe_checkout_enabled=_env_bool("STRIPE_CHECKOUT_ENABLED", cls.stripe_checkout_enabled),
-            stripe_secret_key=_env("STRIPE_SECRET_KEY", cls.stripe_secret_key),
-            stripe_webhook_secret=_env("STRIPE_WEBHOOK_SECRET", cls.stripe_webhook_secret),
-            stripe_checkout_return_origin=_env("STRIPE_CHECKOUT_RETURN_ORIGIN", cls.stripe_checkout_return_origin).rstrip("/"),
+            agent_runtime_url=_env('AGENT_RUNTIME_URL', cls.agent_runtime_url).rstrip('/'),
             log_level=_env("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -247,10 +219,6 @@ class Settings:
     @property
     def is_deployed(self) -> bool:
         return self.app_env.lower() in DEPLOYED_ENVS
-
-    @property
-    def stripe_livemode(self) -> bool:
-        return self.stripe_secret_key.startswith(("sk_live_", "rk_live_"))
 
     def validate_for_startup(self) -> None:
         errors: list[str] = []
@@ -264,60 +232,18 @@ class Settings:
                 errors.append("PUSH_TOKEN_KEY must be at least 32 bytes when FCM is enabled")
             if not self.push_fcm_project_id or not self.push_fcm_credentials_file:
                 errors.append("PUSH_FCM_PROJECT_ID and PUSH_FCM_CREDENTIALS_FILE are required when FCM is enabled")
-        if self.stripe_checkout_enabled:
-            if not self.stripe_secret_key.startswith(("sk_test_", "sk_live_", "rk_test_", "rk_live_")):
-                errors.append("STRIPE_SECRET_KEY is required for Stripe Checkout")
-            if not self.stripe_webhook_secret.startswith("whsec_"):
-                errors.append("STRIPE_WEBHOOK_SECRET is required for Stripe Checkout")
-            if self.stripe_livemode != self.is_production:
-                errors.append("Stripe live keys require production; non-production requires Stripe test keys")
-            origin = urlparse(self.stripe_checkout_return_origin)
-            if (origin.scheme != "https" or not origin.hostname or origin.username is not None or
-                origin.password is not None or origin.path not in {"", "/"} or origin.query or origin.fragment):
-                errors.append("STRIPE_CHECKOUT_RETURN_ORIGIN must be the backend public HTTPS origin")
-        if self.care_report_runtime_url:
-            runtime = urlparse(self.care_report_runtime_url)
+        if self.agent_runtime_url:
+            runtime = urlparse(self.agent_runtime_url)
             try:
                 valid_port = runtime.port is None or 1 <= runtime.port <= 65535
             except ValueError:
                 valid_port = False
             if (not valid_port or not runtime.hostname or runtime.scheme not in {'http', 'https'} or
                 runtime.username is not None or runtime.password is not None or runtime.path not in {'', '/'} or runtime.query or runtime.fragment):
-                errors.append('CARE_REPORT_RUNTIME_URL must be an HTTP(S) origin without credentials')
+                errors.append('AGENT_RUNTIME_URL must be an HTTP(S) origin without credentials')
             if self.is_deployed and runtime.scheme != 'https':
-                errors.append('CARE_REPORT_RUNTIME_URL must use HTTPS in deployed environments')
-        if self.care_report_service_key:
-            if len(self.care_report_service_key.encode('utf-8')) < 32:
-                errors.append('CARE_REPORT_SERVICE_KEY must be at least 32 bytes')
-            if self.care_report_service_key in {self.service_api_key, self.agent_runtime_service_api_key}:
-                errors.append('CARE_REPORT_SERVICE_KEY must be distinct from other service credentials')
-        if not 1 <= self.ibclc_session_hours <= 24:
-            errors.append("IBCLC_SESSION_HOURS must be between 1 and 24")
-        if self.ibclc_mfa_encryption_key:
-            from cryptography.fernet import Fernet
-            try:
-                Fernet(self.ibclc_mfa_encryption_key.encode("ascii"))
-            except (ValueError, UnicodeError):
-                errors.append("IBCLC_MFA_ENCRYPTION_KEY must be a valid Fernet key")
+                errors.append('AGENT_RUNTIME_URL must use HTTPS in deployed environments')
         provider = self.object_storage_provider.lower()
-        if self.consultation_video_provider not in {"disabled", "sandbox", "livekit"}:
-            errors.append("CONSULTATION_VIDEO_PROVIDER must be disabled, sandbox or livekit")
-        if self.is_deployed and (self.consultation_video_provider == "sandbox" or self.consultation_demo_early_join):
-            errors.append("Deployed consultations cannot use sandbox video or bypass the join window")
-        if self.consultation_video_provider == "livekit":
-            if not self.consultation_livekit_api_key or not self.consultation_livekit_api_secret:
-                errors.append("LiveKit credentials are required")
-            video_url = urlparse(self.consultation_livekit_url)
-            if video_url.scheme not in {"ws", "wss"} or not video_url.netloc or video_url.username or video_url.password or video_url.query or video_url.fragment:
-                errors.append("CONSULTATION_LIVEKIT_URL must be a WebSocket origin")
-            if self.is_deployed and video_url.scheme != "wss":
-                errors.append("Deployed LiveKit connections require WSS")
-            client_url = urlparse(self.consultation_livekit_client_url or self.consultation_livekit_url)
-            if client_url.scheme not in {"ws", "wss"} or not client_url.netloc or client_url.username or client_url.password or client_url.query or client_url.fragment:
-                errors.append("CONSULTATION_LIVEKIT_CLIENT_URL must be a WebSocket origin")
-            if self.is_deployed and client_url.scheme != "wss":
-                errors.append("Production LiveKit client connections require WSS")
-
         if not self.database_url:
             errors.append("DATABASE_URL is required")
         if not self.redis_url:
@@ -468,8 +394,6 @@ class Settings:
                 errors.append("AUTH_EMAIL_TOKEN_KEY must be at least 32 bytes in production")
             if not self.auth_email_from or not self.auth_smtp_host:
                 errors.append("AUTH_EMAIL_FROM and AUTH_SMTP_HOST are required in deployed environments")
-            if not self.auth_google_client_id:
-                errors.append("AUTH_GOOGLE_CLIENT_ID is required in deployed environments")
             if not self.service_api_key:
                 errors.append("SERVICE_API_KEY is required in deployed environments for protected operational endpoints")
             if not self.agent_runtime_service_api_key:

@@ -51,8 +51,9 @@ def test_no_pause_state_and_no_duplicate_issues():
 
 
 def test_order_requires_unique_daily_metrics():
-    assert RecordOrder(order=["energy", "feed", "sleep", "mood"]).order[0] == "energy"
-    for order in [["feed", "feed", "sleep", "mood"], ["feed", "energy", "sleep"], ["feed", "energy", "sleep", "mood", "not_a_record"]]:
+    assert RecordOrder(order=["energy", "feed", "sleep"]).order[0] == "energy"
+    assert RecordOrder(order=["energy", "feed", "sleep", "mood"]).order[-1] == "mood"
+    for order in [["feed", "feed", "sleep"], ["feed", "energy"], ["feed", "energy", "sleep", "not_a_record"]]:
         with pytest.raises(ValidationError):
             RecordOrder(order=order)
 
@@ -75,6 +76,10 @@ def test_observations_reject_invalid_or_future_inputs():
     ("kind", "value", "fields"),
     [
         ("energy", "Energized", {}),
+        ("energy", "Doing well", {}),
+        ("energy", "Getting by", {}),
+        ("energy", "Feeling worn down", {}),
+        ("energy", "Worn down", {}),
         ("sleep", "3–4 hours", {}),
         ("mood", "Having a hard day", {}),
         ("latch", "Stayed latched", {}),

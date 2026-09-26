@@ -23,9 +23,8 @@ RATE_LIMIT_EXEMPT_PATHS = {
     "/v1/health/ready",
     "/v1/health/metrics",
 }
-AUTH_ENTRY_PATHS = {"/v1/auth/logout-session","/v1/auth/signup", "/v1/auth/register", "/v1/auth/login", "/v1/auth/google", "/v1/auth/google/link",
-                    "/v1/auth/verify-email", "/v1/auth/resend-verification", "/v1/auth/forgot-password", "/v1/auth/reset-password", "/v1/auth/invite-login"}
-WORKBENCH_LOGIN_PATHS = {"/v1/ibclc/auth/login", "/v1/ibclc/auth/verify"}
+AUTH_ENTRY_PATHS = {"/v1/auth/logout-session","/v1/auth/signup", "/v1/auth/register", "/v1/auth/login",
+                    "/v1/auth/verify-email", "/v1/auth/verify-registration-code", "/v1/auth/resend-verification", "/v1/auth/forgot-password", "/v1/auth/reset-password", "/v1/auth/invite-login"}
 
 
 class RedisRateLimitClient(Protocol):
@@ -65,7 +64,7 @@ class InMemoryRateLimitStore:
 
 
 async def check_rate_limit(request: Request, settings: Settings) -> RateLimitDecision:
-    if (not settings.rate_limit_enabled and request.url.path not in WORKBENCH_LOGIN_PATHS | AUTH_ENTRY_PATHS) or request.url.path in RATE_LIMIT_EXEMPT_PATHS:
+    if (not settings.rate_limit_enabled and request.url.path not in AUTH_ENTRY_PATHS) or request.url.path in RATE_LIMIT_EXEMPT_PATHS:
         return RateLimitDecision(
             allowed=True,
             limit=settings.rate_limit_requests,
@@ -128,7 +127,7 @@ def _rate_limit_profile(
     request: Request,
     settings: Settings,
 ) -> tuple[str, int, int]:
-    if request.url.path in WORKBENCH_LOGIN_PATHS | AUTH_ENTRY_PATHS:
+    if request.url.path in AUTH_ENTRY_PATHS:
         client_host = request.client.host if request.client else "unknown"
         limit = min(settings.rate_limit_requests, 20) if settings.rate_limit_enabled else 20
         window = settings.rate_limit_window_seconds if settings.rate_limit_enabled and settings.rate_limit_requests < 20 else 60

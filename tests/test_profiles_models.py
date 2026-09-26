@@ -54,7 +54,7 @@ def test_maternal_profiles_store_general_current_delivery_summary() -> None:
     } <= set(table.columns.keys())
     assert "current_feeding_mode" not in table.columns
     assert "uq_maternal_profiles_owner_user_id" in constraint_names
-    assert "ck_maternal_profiles_cesarean_history" in constraint_names
+    assert "ck_maternal_profiles_first_delivery_prior_cesarean" in constraint_names
     assert {
         "pregnancy_id",
         "delivery_history",

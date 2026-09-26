@@ -9,7 +9,7 @@ from app.modules.notifications.repository import NotificationsRepository
 from app.modules.notifications.service import NotificationsService
 from app.modules.users.models import User
 from tests.test_account_lifecycle import account_case
-from tests.test_care_booking import DATABASE_URL, postgres
+from tests.product_database import DATABASE_URL, postgres
 
 
 @postgres

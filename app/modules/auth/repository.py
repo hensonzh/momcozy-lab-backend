@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import cast
 from uuid import UUID, uuid4
 
@@ -10,7 +10,6 @@ from sqlalchemy.orm import selectinload
 
 from ..users.models import AuthIdentity, User
 from .models import AuthEmailDelivery, AccountDeletionRequest, DeviceSession, EmailChallenge, RefreshToken
-from .workbench_models import WorkbenchLoginChallenge
 
 
 class AuthAccountRepository:
@@ -50,23 +49,6 @@ class AuthAccountRepository:
     async def get_user_by_email(self, *, email: str) -> User | None:
         return cast(User | None, await self.session.scalar(select(User).where(User.email == email)))
 
-    async def get_google_identity(self, *, subject: str) -> AuthIdentity | None:
-        return await self.get_identity(provider="google", subject=subject)
-
-    async def create_google_user(self, *, subject: str, email: str, display_name: str = "", avatar_url: str = "") -> tuple[User, AuthIdentity]:
-        user = User(email=email, email_verified_at=datetime.now(timezone.utc))
-        identity = AuthIdentity(user=user, provider="google", subject=subject, email=email, display_name=display_name, avatar_url=avatar_url)
-        self.session.add(user)
-        self.session.add(identity)
-        await self.session.flush()
-        return user, identity
-
-    async def add_google_identity(self, *, user_id: UUID, subject: str, email: str) -> AuthIdentity:
-        identity = AuthIdentity(user_id=user_id, provider="google", subject=subject, email=email)
-        self.session.add(identity)
-        await self.session.flush()
-        return identity
-
     async def save_email_challenge(self, *, user_id: UUID, purpose: str, token_hash: str, expires_at: datetime, sent_at: datetime) -> EmailChallenge:
         existing = await self.session.scalar(
             select(EmailChallenge).where(EmailChallenge.user_id == user_id, EmailChallenge.purpose == purpose).with_for_update()
@@ -93,9 +75,6 @@ class AuthAccountRepository:
 
     async def invalidate_challenges(self, *, user_id: UUID, now: datetime) -> None:
         await self.session.execute(update(EmailChallenge).where(EmailChallenge.user_id == user_id).values(consumed_at=now))
-        await self.session.execute(update(WorkbenchLoginChallenge).where(
-            WorkbenchLoginChallenge.provider_id == user_id, WorkbenchLoginChallenge.consumed_at.is_(None)
-        ).values(consumed_at=now))
 
     async def anonymize_user(self, *, user: User, marker: str, now: datetime) -> None:
         await self.session.execute(update(AuthEmailDelivery).where(AuthEmailDelivery.user_id == user.id, AuthEmailDelivery.status == "pending").values(status="cancelled", encrypted_message=None))

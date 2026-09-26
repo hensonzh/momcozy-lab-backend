@@ -145,9 +145,6 @@ class AuthAccountService:
         if user is None or user.status != "active":
             raise ApiError(code="permission_denied", message="User account is not active.", status=403)
         roles = frozenset({"user"})
-        if device_session.mfa_verified_at is not None:
-            from .workbench_access import workbench_session_roles
-            roles = await workbench_session_roles(device_session, self.session_service.repository.session, self.settings)
         return self._tokens_for(user=user, session_id=device_session.id, issued_refresh=issued_refresh, roles=roles)
 
     async def logout(self, *, session_id: UUID) -> None:

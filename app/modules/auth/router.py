@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +16,8 @@ from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair
 from .account_lifecycle import AccountLifecycleService, ChallengeRejected
 from .current_user import CurrentUser
 from .email import QueuedAuthEmailSender
-from .google import GoogleOidcTokenVerifier
 from .repository import AuthAccountRepository, AuthSessionRepository
-from .schemas import AccountOperationResponse, AccountProfile, EmailChallengeRequest, EmailRegisterRequest, GoogleLinkRequest, GoogleLoginRequest, InviteLoginRequest, LoginRequest, LogoutResponse, PasswordResetConfirmRequest, PasswordResetRequest, RefreshRequest, SignupRequest, TokenResponse, TokenUser
+from .schemas import AccountOperationResponse, AccountProfile, EmailChallengeRequest, EmailRegisterRequest, RegistrationCodeRequest, InviteLoginRequest, LoginRequest, LogoutResponse, PasswordResetConfirmRequest, PasswordResetRequest, RefreshRequest, SignupRequest, TokenResponse, TokenUser
 from .service import refresh_token_hash, AuthSessionService, RefreshTokenRevoked
 
 
@@ -45,18 +44,30 @@ def get_account_lifecycle_service(request: Request, session: AsyncSession = Depe
         auth=AuthAccountService(account_repository=AuthAccountRepository(session), session_service=AuthSessionService(repository=AuthSessionRepository(session)), settings=settings),
         email_sender=QueuedAuthEmailSender(session, settings),
         token_key=settings.auth_email_token_key,
-        google_verifier=GoogleOidcTokenVerifier() if settings.auth_google_client_id else None,
     )
 
 
 @router.post("/register", response_model=AccountOperationResponse, status_code=202)
 async def register(body: EmailRegisterRequest, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
-    await service.register(email=body.email, password=body.password)
+    await service.start_registration(email=body.email)
     return AccountOperationResponse(status="verification_required")
+
+
+@router.post("/verify-registration-code", response_model=AccountOperationResponse)
+async def verify_registration_code(body: RegistrationCodeRequest, request: Request, response: Response,
+                                   service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse | JSONResponse:
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        await service.check_registration_code(email=body.email, token=body.token)
+    except ChallengeRejected as error:
+        return _challenge_response(error, request)
+    return AccountOperationResponse(status="code_valid")
 
 
 @router.post("/verify-email", response_model=TokenResponse)
 async def verify_email(body: EmailChallengeRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> TokenResponse | JSONResponse:
+    if body.confirm_password is not None and body.confirm_password != body.password:
+        raise ApiError(code="validation_failed", message="Passwords do not match.", status=422)
     try:
         issued = await service.verify_email(email=body.email, token=body.token, password=body.password, device=_device_context(request=request, device_id=body.device_id))
     except ChallengeRejected as error:
@@ -83,20 +94,6 @@ async def reset_password(body: PasswordResetConfirmRequest, request: Request, se
     except ChallengeRejected as error:
         return _challenge_response(error, request)
     return AccountOperationResponse(status="password_reset")
-
-
-@router.post("/google", response_model=TokenResponse)
-async def google_login(body: GoogleLoginRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> TokenResponse:
-    return _token_response(await service.google_login(id_token=body.id_token, device=_device_context(request=request, device_id=body.device_id)))
-
-
-@router.post("/google/link", response_model=AccountOperationResponse)
-async def link_google(body: GoogleLinkRequest, current_user: CurrentUser = Depends(require_current_user), service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
-    user = await service.accounts.get_user(user_id=current_user.user_id)
-    if user is None:
-        raise ApiError(code="authentication_required", message="Account is unavailable.", status=401)
-    await service.link_google(current_user=user, password=body.password, id_token=body.id_token)
-    return AccountOperationResponse(status="google_linked")
 
 
 @router.get("/me", response_model=AccountProfile)

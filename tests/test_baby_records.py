@@ -15,7 +15,7 @@ from app.modules.baby.models import BabyRecord
 from app.modules.baby.repository import BabyRecordRepository
 from app.modules.baby.schemas import BabyRecordBatchWrite, BabyRecordUpdate, BabyRecordWrite
 from app.modules.baby.service import BabyRecordService
-from test_care_booking import database, postgres
+from product_database import database, postgres
 
 AT = datetime(2026, 9, 1, 8, tzinfo=timezone.utc)
 FEED = {'kind': 'feeding', 'occurred_at': AT.isoformat(), 'method': 'breastfeeding', 'side': 'left'}

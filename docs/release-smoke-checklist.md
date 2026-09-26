@@ -37,6 +37,21 @@ the Agent Runtime release.
 
 ## Core Product Backend APIs
 
+- Confirm authenticated `GET /v1/onboarding/me` returns owner-scoped state and
+  `Cache-Control: private, no-store`; unauthenticated calls return `401`.
+- For an isolated first-delivery account, `PUT /v1/onboarding/me/profile` with
+  a required delivery date and current cesarean persists *prior* cesarean
+  history as false. A second delivery with current cesarean and no prior
+  cesarean must also persist false.
+- Repeat the same onboarding `PUT`: return the original primary infant ID
+  without adding baby records. A different payload after confirmation returns
+  `409`. Existing current-delivery babies cannot be silently duplicated.
+- Verify `GET` returns completed state only for that account and the maternal
+  context reports the same prior-history meaning. Migration
+  `20260926_0022` must set legacy ambiguous values to unknown, not false.
+- Do not enable `MOMCOZY_ENABLE_ONBOARDING` until the public OpenAPI, App
+  runtime, and actual auth-backed flow are verified. Keep release-reset disabled:
+  `/v1/onboarding/me/release-reset` is not implemented by this Backend.
 - Upload a small file through `POST /v1/files/upload`.
 - Oversized upload returns `payload_too_large` without object metadata or bytes.
 - Create and list feeding and pumping records.
