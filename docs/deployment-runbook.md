@@ -22,9 +22,9 @@ Variables:
 
 ```text
 staging:
-  RELEASE_ROOT=/opt/momcozy-lab
-  SERVICE_ENV_FILE=/opt/momcozy-lab/shared/backend/staging.env
-  RELEASE_LOCK_PATH=/opt/momcozy-lab/shared/staging-release.lock
+  RELEASE_ROOT=/opt/momcozy-lab-staging
+  SERVICE_ENV_FILE=/opt/momcozy-lab-staging/shared/backend/staging.env
+  RELEASE_LOCK_PATH=/opt/momcozy-lab-staging/shared/staging-release.lock
 production:
   RELEASE_ROOT=/opt/momcozy-lab-production
   SERVICE_ENV_FILE=/opt/momcozy-lab-production/shared/backend/production.env
@@ -48,7 +48,8 @@ SSH_KNOWN_HOSTS
 ```
 
 `RELEASE_APPROVERS` is a repository variable containing a comma-separated
-allowlist. Do not disable GitHub Environment required reviewers for production.
+allowlist; staging can reuse the existing `STAGING_APPROVERS` variable and
+`STAGING_SSH_*` repository secrets when environment-scoped values are absent. Do not disable GitHub Environment required reviewers for production.
 
 ## Bootstrap
 
@@ -69,10 +70,12 @@ does not publish a mutable image tag and does not deploy Agent Runtime.
 Run the same workflow with `operation=deploy`. The workflow:
 
 1. verifies successful CI for the requested full commit and resolves its immutable image digest from GHCR;
-2. downloads the public live OpenAPI over the reviewed TLS CA and runs
-   `scripts/check_deployed_openapi_compatibility.py` against the candidate
-   snapshot. Removed operations, newly mandatory request fields, and removed
-   success fields fail closed **before any service or schema mutation**. A
+2. for an existing release in this root, downloads the public live OpenAPI over
+   the reviewed TLS CA and runs `scripts/check_deployed_openapi_compatibility.py`
+   against the candidate snapshot. Removed operations, newly mandatory request
+   fields, and removed success fields fail closed **before any service or schema
+   mutation**. An empty isolated release root has no prior live contract, so its
+   first deploy skips this comparison. A
    retired API or stricter password confirmation needs a separate supported-
    client audit and a compatible migration/version strategy; there is no
    emergency bypass in this workflow;

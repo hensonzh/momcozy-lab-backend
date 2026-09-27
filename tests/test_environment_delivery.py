@@ -105,11 +105,15 @@ def test_delivery_is_environment_scoped_serial_and_host_key_checked() -> None:
     assert "name: ${{ inputs.environment }}" in workflow
     assert "group: momcozy-lab-backend-${{ inputs.environment }}" in workflow
     assert "RELEASE_APPROVERS" in workflow
+    assert "vars.STAGING_APPROVERS" in workflow
+    assert "inputs.environment == 'staging' && secrets.STAGING_SSH_PRIVATE_KEY" in workflow
     assert "secrets.SSH_KNOWN_HOSTS" in workflow
     assert "StrictHostKeyChecking=no" not in workflow
     assert "scripts/release.py" in workflow
     assert "scripts/check_deployed_openapi_compatibility.py" in workflow
     assert 'git show "${RELEASE_COMMIT_SHA}:docs/openapi.generated.json"' in workflow
+    assert "test -f '${DEPLOY_RELEASE_ROOT}/current/backend/release-manifest.json'" in workflow
+    assert "First deploy into an empty release root" in workflow
     assert workflow.index("Reject breaking changes against the live Product API") < workflow.index("Stage the exact commit without uncommitted files")
     assert "--environment '${DEPLOY_ENVIRONMENT}'" in workflow
     assert '"DEPLOY_ENV_FILE": root / "shared" / "backend" / f"{environment}.env"' in workflow
@@ -122,9 +126,10 @@ def test_release_identifiers_and_environment_are_strict() -> None:
     assert validate_image_ref(IMAGE_REF) == IMAGE_REF
     assert validate_environment("staging") == "staging"
     assert validate_environment("production") == "production"
-    assert validate_release_root(Path("/opt/momcozy-lab"), "staging") == Path("/opt/momcozy-lab")
+    assert validate_release_root(Path("/opt/momcozy-lab-staging"), "staging") == Path("/opt/momcozy-lab-staging")
     assert validate_release_root(Path("/opt/momcozy-lab-production"), "production") == Path("/opt/momcozy-lab-production")
     for environment, wrong_root in (
+        ("staging", Path("/opt/momcozy-lab")),
         ("production", Path("/opt/momcozy-lab")),
         ("staging", Path("/opt/momcozy-lab-production")),
     ):
