@@ -6,7 +6,7 @@
 
 ## 范围与现有实现
 
-继续由 Product Backend 管理邮箱/密码、8 位验证挑战、会话与密码重置；Resend **只负责发送邮件**，不充当身份认证服务。App 仍调用 `/v1/auth/register`、`/v1/auth/verify-email`、`/v1/auth/login` 和密码重置接口，iOS Build 59 不需为这次 SMTP 切换重打包。
+继续由 Product Backend 管理邮箱/密码、8 位验证挑战、会话与密码重置；Resend **只负责发送邮件**，不充当身份认证服务。App 仍调用 `/v1/auth/register`、`/v1/auth/verify-email`、`/v1/auth/login` 和密码重置接口。**仅切换 SMTP 本身不要求改 App 代码；但用户已确定后续会重新构建 App，Build 59 不作为本次发布候选。**新构建必须与当时部署的 Backend 认证契约一致，详见交接清单。
 
 后端 `QueuedAuthEmailSender` 先把验证码邮件加密入库；`auth-email-worker` 使用 `SmtpAuthEmailSender` 发送，发送成功后清除队列密文。现有 SMTP 实现支持**证书校验的 STARTTLS**，适合 Resend 的 587 端口；**不能**把 465 隐式 TLS 端口填入此实现。现有重试是 at-least-once，SMTP 已接收后进程异常有可能重复发同一验证码。服务商接收成功不等于收件箱投递成功，后续需分别验证。
 
