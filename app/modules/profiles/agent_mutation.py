@@ -188,9 +188,9 @@ def _invalid(index: int, message: str = "Record fields are invalid.", *, field: 
         details={"operation_index": index, "field_path": field, "reason": reason})
 
 
-def _conflict(index: int) -> ApiError:
+def _conflict(index: int, *, field: str = "revision") -> ApiError:
     return ApiError(code="version_conflict", message=f"Item {index} changed. Read it again before updating.", status=409,
-        details={"operation_index": index, "field_path": "revision", "reason": "stale_revision"})
+        details={"operation_index": index, "field_path": field, "reason": "stale_revision"})
 
 
 def _not_found(index: int) -> ApiError:
@@ -283,11 +283,11 @@ class AgentBatchService:
                 assert operation.task_id is not None and operation.expected_updated_at is not None
                 original_revision = _revision(operation.expected_updated_at)
                 if seen_schedule.setdefault(operation.task_id, original_revision) != original_revision:
-                    raise _conflict(index)
+                    raise _conflict(index, field="expected_updated_at")
                 if _revision(task.updated_at) != original_revision and not any(
                     prior.resource_id == operation.task_id for prior in results
                 ):
-                    raise _conflict(index)
+                    raise _conflict(index, field="expected_updated_at")
             fields = operation.fields.model_dump(exclude_unset=True)
             if task is not None:
                 fields = {"title": task.title, "date": task.task_date, "start_time": task.task_time, "note": task.description, **fields}
