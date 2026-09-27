@@ -25,6 +25,7 @@ workers, and evals belong to the independently deployed Agent Runtime repository
   procedures.
 - `release-smoke-checklist.md`: Product Backend release acceptance checklist.
 - `environment-profiles.md`: local, CI, and shared test environment rules.
+- `resend-auth-email-handoff-checklist.md`: Resend SMTP staging 接入现状、确认门禁、执行待办和真实邮箱验收。
 - `postgres-integration-profile.md`: PostgreSQL integration checks.
 - `object-storage-integration-profile.md`: object storage integration checks.
 
