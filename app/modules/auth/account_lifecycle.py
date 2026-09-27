@@ -6,12 +6,13 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from ...core.errors import ApiError
 from ..users.models import AccountStatus, AuthIdentity, User
 from .account_service import AuthAccountService, DeviceContext, IssuedTokenPair, normalize_email
 from .email import AuthChallengeEmailSender
-from .passwords import hash_password
+from .passwords import hash_password, verify_password, DUMMY_PASSWORD_HASH
 from .repository import AuthAccountRepository
 
 CHALLENGE_TTL = timedelta(minutes=15)
@@ -131,6 +132,19 @@ class AccountLifecycleService:
         await self.accounts.invalidate_challenges(user_id=user.id, now=self.now())
         await self.auth.session_service.revoke_user_sessions(user_id=user.id)
         return RegistrationResult(verification_required=False)
+
+    async def change_password(self, *, user_id: UUID, current_password: str, new_password: str) -> None:
+        validate_password(new_password)
+        user = await self.accounts.lock_user(user_id)
+        identity = next((item for item in user.identities if item.provider == "email"), None) if user is not None else None
+        valid = verify_password(current_password, identity.password_hash if identity is not None else DUMMY_PASSWORD_HASH)
+        if user is None or user.status != AccountStatus.ACTIVE or identity is None or not valid:
+            raise ApiError(code="invalid_current_password", message="Current password is incorrect.", status=422)
+        if verify_password(new_password, identity.password_hash):
+            raise ApiError(code="validation_failed", message="Choose a different password.", status=422)
+        identity.password_hash = hash_password(new_password)
+        await self.accounts.invalidate_challenges(user_id=user.id, now=self.now())
+        await self.auth.session_service.revoke_user_sessions(user_id=user.id)
 
     async def delete_account(self, *, user: User) -> RegistrationResult:
         locked = await self.accounts.lock_user(user.id)

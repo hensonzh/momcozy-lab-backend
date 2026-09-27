@@ -13,6 +13,7 @@ from ...modules.baby import profile_models as baby_profile_models
 from ...modules.plans import models as plans_models
 from ...modules.profiles import models as profiles_models
 from ...modules.profiles import me_models as me_experience_models
+from ...modules.profiles import agent_mutation as agent_mutation_models
 from ...modules.records import models as records_models
 from ...modules.support import models as support_models
 from ...modules.users import models as users_models
@@ -31,6 +32,7 @@ __all__ = [
     "plans_models",
     "profiles_models",
     "me_experience_models",
+    "agent_mutation_models",
     "records_models",
     "support_models",
     "users_models",

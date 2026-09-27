@@ -61,12 +61,13 @@ must never be placed in URLs or logs.
 | --- | --- |
 | POST `/register` | Email only -> generic 202 and an 8-digit verification code for eligible pending accounts. A legacy password field is accepted but ignored; no user-chosen credential is stored before proof. |
 | POST `/verify-registration-code` | Email and code -> `code_valid` on success, without consuming the code, activating the account, or issuing a session. Invalid codes count toward the five-attempt limit. |
-| POST `/verify-email` | After the code check, email, same unexpired code, chosen password, matching `confirm_password`, device ID -> consume proof and issue token pair. Legacy clients may omit confirmation. |
+| POST `/verify-email` | After the code check, email, same unexpired code, chosen password, matching `confirm_password`, device ID -> consume proof and issue token pair. The backend requires confirmation for every request. |
 | POST `/signup` (legacy compatibility) | Old email/password request -> generic 202; password remains provisional until mailbox proof and may be replaced at `/verify-email`. New clients use `/register` instead. |
 | POST `/resend-verification` | Generic 202, minimum 60 seconds between sends. |
 | POST `/login` | Email/password -> active account's token pair; legacy PBKDF2 passwords remain valid. |
 | POST `/forgot-password` | Generic 202 for all emails. |
-| POST `/reset-password` | Email, purpose-bound code, new password -> revoke all sessions. |
+| POST `/reset-password` | Email, purpose-bound code, new password and matching `confirm_password` -> revoke all sessions. |
+| POST `/change-password` | Active bearer session, current email password and matching new password confirmation -> revoke every device session; sign in again. |
 | POST `/refresh` | Rotate opaque refresh token; reuse revokes family and device session. |
 | POST `/logout` | Revoke authenticated device session. |
 | POST `/logout-session` | Refresh-token possession revokes its device session, including previously rotated tokens; generic success. |
@@ -74,7 +75,7 @@ must never be placed in URLs or logs.
 | DELETE `/me` | Revoke all sessions, anonymize authentication identifiers, create pending erasure request. |
 
 The overseas mobile UI uses `/login` for login/registration/verification/reset and
-`/account` for account details, password recovery guidance, logout and confirmed
+`/account` for account details, password change, password recovery guidance, logout and confirmed
 deletion. Existing GoRouter protection preserves a safe relative return path.
 The internal test channel can retain its invite-only page using
 `--dart-define=MOMCOZY_INTERNAL_INVITE_LOGIN=true`; this is not the consumer default.
@@ -113,6 +114,8 @@ This integration targets native Android/iOS. The current Dart network layer uses
 cookie-based session design before any production web credential persistence.
 
 ## Mail delivery and deployment preparation
+
+For the proposed Resend SMTP integration and its pending real-service gates, see [`resend-auth-email-integration.md`](resend-auth-email-integration.md). No Resend key, DNS change, cloud deployment, or live mailbox acceptance is implied by local SMTP tests.
 
 Copy variable names from `env/account-auth.env.example` into the existing secret
 configuration. Supply one stable random `AUTH_EMAIL_TOKEN_KEY` with at least 32

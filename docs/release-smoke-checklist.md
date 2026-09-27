@@ -43,15 +43,26 @@ the Agent Runtime release.
   a required delivery date and current cesarean persists *prior* cesarean
   history as false. A second delivery with current cesarean and no prior
   cesarean must also persist false.
+- Confirm required gestational weeks/days, infant count, and current feeding
+  method persist and appear in the Me profile after onboarding. Verify both
+  one baby and multiple babies, including assisted/other delivery summaries.
 - Repeat the same onboarding `PUT`: return the original primary infant ID
   without adding baby records. A different payload after confirmation returns
   `409`. Existing current-delivery babies cannot be silently duplicated.
 - Verify `GET` returns completed state only for that account and the maternal
-  context reports the same prior-history meaning. Migration
-  `20260926_0022` must set legacy ambiguous values to unknown, not false.
-- Do not enable `MOMCOZY_ENABLE_ONBOARDING` until the public OpenAPI, App
-  runtime, and actual auth-backed flow are verified. Keep release-reset disabled:
-  `/v1/onboarding/me/release-reset` is not implemented by this Backend.
+  context reports the same prior-history meaning. This rollout intentionally
+  excludes old-user migration; test with a fresh user dataset.
+- Verify onboarding and later Me edits use the same four feeding options:
+  direct, expressed, formula (combinable), or unknown (exclusive). Check a
+  direct+expressed combination remains exclusive breast milk and any formula
+  combined with breast milk derives mixed feeding for both maternal and
+  current-infant summary fields. Reject empty, duplicate and unknown+known lists.
+- Roll out only to a fresh user data set as agreed; do not point the default-on
+  App at existing unconfirmed accounts with current infants (GET required / PUT
+  409), and do not assume this code change erased any database data.
+- Verify the compatible Product Backend endpoints are actually deployed before
+  distributing the now default-on App. Keep release-reset disabled because
+  `/v1/onboarding/me/release-reset` remains unimplemented.
 - Upload a small file through `POST /v1/files/upload`.
 - Oversized upload returns `payload_too_large` without object metadata or bytes.
 - Create and list feeding and pumping records.

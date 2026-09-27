@@ -28,3 +28,6 @@ build/
 !deploy/shared/init-postgres.sh
 !deploy/shared/start-redis.sh
 data/
+
+# B deployment target declaration (non-secret, operator-reviewed)
+/config/release-targets/north-america-staging.json

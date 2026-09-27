@@ -21,6 +21,11 @@ from typing import IO, Any, Sequence, cast
 SERVICE_NAME = "product-backend"
 IMAGE_REPOSITORY = "ghcr.io/hensonzh/momcozy-lab-backend"
 DEPLOY_ENVIRONMENTS = frozenset({"staging", "production"})
+DEPLOYMENT_TARGET_ENVIRONMENTS = {
+    "legacy-staging": "staging",
+    "north-america-staging": "staging",
+    "production": "production",
+}
 RELEASE_ROOTS = {
     "staging": Path("/opt/momcozy-lab"),  # Existing host path; no staging data migration.
     "production": Path("/opt/momcozy-lab-production"),
@@ -95,6 +100,14 @@ def validate_environment(value: str) -> str:
     if normalized not in DEPLOY_ENVIRONMENTS:
         raise ValueError("environment must be staging or production")
     return normalized
+
+
+def validate_deployment_target(value: str | None, environment: str) -> str:
+    runtime_environment = validate_environment(environment)
+    target = value or ("legacy-staging" if runtime_environment == "staging" else "production")
+    if DEPLOYMENT_TARGET_ENVIRONMENTS.get(target) != runtime_environment:
+        raise ValueError("deployment target does not match the runtime environment")
+    return target
 
 
 def validate_commit_sha(value: str) -> str:
@@ -1245,6 +1258,7 @@ def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
 
 def _add_common_release_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--environment", choices=sorted(DEPLOY_ENVIRONMENTS), required=True)
+    parser.add_argument("--deployment-target", choices=sorted(DEPLOYMENT_TARGET_ENVIRONMENTS))
     parser.add_argument("--image-ref", required=True)
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--repo-dir", type=Path, required=True)
@@ -1256,6 +1270,7 @@ def _add_common_release_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _add_current_release_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--environment", choices=sorted(DEPLOY_ENVIRONMENTS), required=True)
+    parser.add_argument("--deployment-target", choices=sorted(DEPLOYMENT_TARGET_ENVIRONMENTS))
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--release-root", type=Path, required=True)
     parser.add_argument("--public-url", required=True)
@@ -1273,6 +1288,7 @@ def _parser() -> argparse.ArgumentParser:
 
     snapshot = subparsers.add_parser("stage-snapshot")
     snapshot.add_argument("--environment", choices=sorted(DEPLOY_ENVIRONMENTS), required=True)
+    snapshot.add_argument("--deployment-target", choices=sorted(DEPLOYMENT_TARGET_ENVIRONMENTS))
     snapshot.add_argument("--archive", type=Path, required=True)
     snapshot.add_argument("--archive-sha256", required=True)
     snapshot.add_argument("--commit-sha", required=True)
@@ -1313,6 +1329,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
             )
             return 0
+        target = validate_deployment_target(args.deployment_target, args.environment)
+        if target == "north-america-staging":
+            raise ValueError("B deployment is not enabled: managed DB/Redis/S3 topology and separate release root/lock are not implemented")
         if args.command == "stage-snapshot":
             stage_release_snapshot(
                 archive=args.archive,

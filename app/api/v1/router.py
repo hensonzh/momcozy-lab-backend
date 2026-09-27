@@ -16,7 +16,7 @@ from ...modules.files.router import router as files_router
 from ...modules.files.agent_router import router as agent_files_router
 from ...modules.files.model_asset_router import router as model_assets_router
 from ...modules.invites.router import router as invites_router
-from ...modules.notifications.router import router as notifications_router
+from ...modules.notifications.router import router as notifications_router, internal_router as agent_notifications_router
 from ...modules.onboarding.router import router as onboarding_router
 from ...modules.lactation.router import router as lactation_router
 from ...modules.baby.router import router as baby_records_router
@@ -42,6 +42,7 @@ router.include_router(files_router)
 router.include_router(agent_files_router)
 router.include_router(invites_router)
 router.include_router(notifications_router)
+router.include_router(agent_notifications_router)
 router.include_router(onboarding_router)
 router.include_router(lactation_router)
 router.include_router(baby_records_router)

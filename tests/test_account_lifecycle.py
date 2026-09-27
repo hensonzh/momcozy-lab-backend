@@ -200,9 +200,9 @@ def test_http_failed_code_attempts_commit_and_old_signup_uses_verification():
                 assert response.status_code == 202 and 'access_token' not in response.json()
                 code = mail.token
                 for _ in range(5):
-                    rejected = await client.post('/v1/auth/verify-email', json={'email':'mia@example.com', 'password':PASSWORD, 'token':'incorrect'})
+                    rejected = await client.post('/v1/auth/verify-email', json={'email':'mia@example.com', 'password':PASSWORD, 'confirm_password': PASSWORD, 'token':'incorrect'})
                     assert rejected.status_code == 401
-                rejected = await client.post('/v1/auth/verify-email', json={'email':'mia@example.com', 'password':PASSWORD, 'token':code})
+                rejected = await client.post('/v1/auth/verify-email', json={'email':'mia@example.com', 'password':PASSWORD, 'confirm_password': PASSWORD, 'token':code})
                 assert rejected.status_code == 401
                 assert rejected.headers['cache-control'] == 'private, no-store'
             async with sessions.begin() as session:

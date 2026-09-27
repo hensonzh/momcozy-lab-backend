@@ -18,6 +18,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 |---|---|---|---|---|---|
 | GET | `/v1/assets` | product-assets | flutter | stable | List Product Assets |
 | GET | `/v1/assets/{asset_id}` | product-assets | flutter | stable | Get Product Asset |
+| POST | `/v1/auth/change-password` | auth | flutter | stable | Change Password |
 | POST | `/v1/auth/forgot-password` | auth | flutter | stable | Forgot Password |
 | POST | `/v1/auth/invite-login` | auth | flutter | stable | Invite Login |
 | POST | `/v1/auth/login` | auth | flutter | stable | Login |
@@ -117,8 +118,12 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 |---|---|---|---|---|---|
 | GET | `/.well-known/jwks.json` | auth | agent-runtime | stable | Jwks |
 | POST | `/v1/internal/agent/files/resolve` | files | agent-runtime | stable | Resolve Agent File |
+| POST | `/v1/internal/agent/notifications/reply-ready` | notifications | agent-runtime | stable | Agent Reply Ready |
 | GET | `/v1/internal/agent/profile` | profiles | agent-runtime | stable | Read Agent Profile |
 | GET | `/v1/internal/agent/records` | profiles | agent-runtime | stable | Read Agent Topical Records |
+| POST | `/v1/internal/agent/records/batch` | profiles | agent-runtime | stable | Write Agent Records |
+| GET | `/v1/internal/agent/schedule` | profiles | agent-runtime | stable | Read Agent Schedule |
+| POST | `/v1/internal/agent/schedule/batch` | profiles | agent-runtime | stable | Write Agent Schedule |
 
 ## admin_ops_api
 

@@ -69,15 +69,24 @@ does not publish a mutable image tag and does not deploy Agent Runtime.
 Run the same workflow with `operation=deploy`. The workflow:
 
 1. verifies successful CI for the requested full commit and resolves its immutable image digest from GHCR;
-2. transfers an immutable `git archive` snapshot and `scripts/release.py`;
-3. acquires the environment release lock;
-4. validates the private env and Compose rendering;
-5. verifies the image revision label and digest;
-6. checks object storage and startup settings;
-7. creates a mode-`0600` database backup before a required migration;
-8. switches only application services, never reconciles stateful containers;
-9. verifies loopback and public `/v1/health/ready`;
-10. promotes `${RELEASE_ROOT}/current/backend/release-manifest.json`.
+2. downloads the public live OpenAPI over the reviewed TLS CA and runs
+   `scripts/check_deployed_openapi_compatibility.py` against the candidate
+   snapshot. Removed operations, newly mandatory request fields, and removed
+   success fields fail closed **before any service or schema mutation**. A
+   retired API or stricter password confirmation needs a separate supported-
+   client audit and a compatible migration/version strategy; there is no
+   emergency bypass in this workflow;
+   see [API versioned retirement runbook](api-retirement-runbook.md) for the
+   read-only client-exit audit and its currently unmet conditions;
+3. transfers an immutable `git archive` snapshot and `scripts/release.py`;
+4. acquires the environment release lock;
+5. validates the private env and Compose rendering;
+6. verifies the image revision label and digest;
+7. checks object storage and startup settings;
+8. creates a mode-`0600` database backup before a required migration;
+9. switches only application services, never reconciles stateful containers;
+10. verifies loopback and public `/v1/health/ready`;
+11. promotes `${RELEASE_ROOT}/current/backend/release-manifest.json`.
 
 For Agent-backed releases, deploy Backend first and give Agent the promoted
 Backend manifest.

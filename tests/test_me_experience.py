@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.factory import create_app
 from app.core.settings import Settings
 from app.modules.profiles.me_schemas import MeProfilePatch, Concern, Observation, RecordOrder
+from app.modules.profiles.feeding_methods import feeding_mode_for_methods
 from app.modules.profiles.me_models import MePreferences, MotherObservation
 
 
@@ -22,6 +23,19 @@ def test_all_me_endpoints_require_authentication():
         assert response.status_code == 401
 
 
+@pytest.mark.parametrize(("methods", "expected"), [
+    (["direct"], "exclusive_breastfeeding"),
+    (["expressed"], "expressed_milk_feeding"),
+    (["formula"], "formula_feeding"),
+    (["direct", "expressed"], "exclusive_breastfeeding"),
+    (["expressed", "formula"], "mixed_feeding"),
+    (["direct", "formula"], "mixed_feeding"),
+    (["unknown"], "unknown"),
+])
+def test_multi_select_feeding_derives_shared_single_mode(methods, expected):
+    assert feeding_mode_for_methods(methods) == expected
+
+
 def test_me_profile_only_accepts_editable_fields():
     parsed = MeProfilePatch.model_validate(
         {
@@ -35,6 +49,12 @@ def test_me_profile_only_accepts_editable_fields():
     )
     assert parsed.preferred_name == "Mia"
     assert parsed.caregivers == ["partner", "self"]
+    assert MeProfilePatch.model_validate({"feeding_methods": ["unknown"]}).feeding_methods == ["unknown"]
+    assert MeProfilePatch.model_validate({"feeding_methods": ["formula", "direct"]}).feeding_methods == ["direct", "formula"]
+    for methods in (None, [], ["unknown", "direct"], ["direct", "direct"]):
+        with pytest.raises(ValidationError):
+            MeProfilePatch.model_validate({"feeding_methods": methods})
+    assert MeProfilePatch.model_validate({"baby_count": 6}).baby_count == 6
     assert "age" not in parsed.model_fields_set
     for value in [{}, {"age": 0}, {"gestation_days": 7}, {"baby_count": 0}, {"is_admin": True}, {"additional_context": "x" * 501}]:
         with pytest.raises(ValidationError):

@@ -130,3 +130,38 @@ def test_topical_records_reject_invalid_scope_and_unbounded_window() -> None:
                    {**base, "infant_id": str(uuid4()), "timezone": "unknown"}):
         response = client.get("/v1/internal/agent/records", params=params, headers={"X-Service-Key": SERVICE_KEY})
         assert response.status_code == 422
+
+
+def test_topical_records_exposes_only_the_two_new_app_topics() -> None:
+    from app.modules.profiles.agent_router import get_agent_topical_records_service
+    from app.modules.profiles.topical_records import TopicalRecordsReadOutput
+
+    actor, baby = uuid4(), uuid4()
+
+    class FakeRecords:
+        query = None
+
+        async def read(self, query):
+            self.query = query
+            return TopicalRecordsReadOutput(
+                topic=query.topic, infant_id=query.infant_id, start_date=query.start_date,
+                end_date=query.end_date, timezone=query.timezone, items=[], has_more=False,
+            )
+
+    service = FakeRecords()
+    app = _app()
+    app.dependency_overrides[get_agent_topical_records_service] = lambda: service
+    client = TestClient(app)
+    base = {"actor_user_id": str(actor), "timezone": "UTC",
+            "start_date": "2026-09-20", "end_date": "2026-09-20"}
+    for topic, infant_id in (("latch", None), ("after_feeding_mood", baby)):
+        params = {**base, "topic": topic}
+        if infant_id is not None:
+            params["infant_id"] = str(infant_id)
+        response = client.get("/v1/internal/agent/records", params=params, headers={"X-Service-Key": SERVICE_KEY})
+        assert response.status_code == 200
+        assert service.query.actor_user_id == actor and service.query.infant_id == infant_id
+        assert response.json()["topic"] == topic
+    for topic in ("sleep", "mood", "daily_status", "storage", "bottle"):
+        response = client.get("/v1/internal/agent/records", params={**base, "topic": topic}, headers={"X-Service-Key": SERVICE_KEY})
+        assert response.status_code == 422

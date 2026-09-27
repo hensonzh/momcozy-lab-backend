@@ -32,7 +32,7 @@ def _query(*, owner, baby=None, topic="growth", start="2026-09-01", end="2026-09
     )
 
 
-@pytest.mark.parametrize("topic,infant", [("growth", None), ("diaper", None), ("feeding", None), ("pain", uuid4()), ("pumping", uuid4())])
+@pytest.mark.parametrize("topic,infant", [("growth", None), ("diaper", None), ("feeding", None), ("after_feeding_mood", None), ("pain", uuid4()), ("pumping", uuid4()), ("latch", uuid4())])
 def test_query_requires_explicit_baby_only_for_infant_topics(topic, infant):
     with pytest.raises(ValidationError):
         _query(owner=uuid4(), baby=infant, topic=topic)
@@ -56,12 +56,6 @@ def test_query_rejects_unbounded_or_invalid_windows(start, end, limit, timezone)
 def test_profile_and_topical_records_respect_owner_delivery_and_soft_delete_in_postgres():
     async def run():
         async with database() as (sessions, _service, _now, _provider, owners, _episodes):
-            engine = sessions.kw["bind"]
-            async with engine.begin() as connection:
-                await connection.run_sync(lambda sync: MaternalCurrentDeliveryInfant.__table__.create(sync))
-                await connection.run_sync(lambda sync: MePreferences.__table__.create(sync))
-                await connection.run_sync(lambda sync: MotherObservation.__table__.create(sync))
-                await connection.run_sync(lambda sync: GrowthRecord.__table__.create(sync))
             owner, other_owner = owners
             current, older, foreign, deleted = (uuid4() for _ in range(4))
             at = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
@@ -106,6 +100,20 @@ def test_profile_and_topical_records_respect_owner_delivery_and_soft_delete_in_p
                             occurred_at=at,
                             data={"diaper_kind": "dirty", "color": "yellow", "note": "sensitive note"},
                         ),
+                        BabyRecord(
+                            owner_user_id=owner,
+                            baby_id=current,
+                            kind="daily_status",
+                            recorded_on=date(2026, 9, 23),
+                            data={"mental_state": "content", "note": "private mood note"},
+                        ),
+                        BabyRecord(
+                            owner_user_id=owner,
+                            baby_id=current,
+                            kind="daily_status",
+                            recorded_on=date(2026, 9, 22),
+                            data={"wet_count": 5, "note": "private diaper note"},
+                        ),
                         GrowthRecord(
                             owner_user_id=owner,
                             infant_id=current,
@@ -120,6 +128,22 @@ def test_profile_and_topical_records_respect_owner_delivery_and_soft_delete_in_p
                             occurred_at=at,
                             value="Pain",
                             fields={"pain": 4, "side": "Left side", "note": "sensitive mother note"},
+                        ),
+                        MotherObservation(
+                            owner_user_id=owner,
+                            id=uuid4(),
+                            kind="latch",
+                            occurred_at=at,
+                            value="Came off easily",
+                            fields={"note": "private latch note"},
+                        ),
+                        MotherObservation(
+                            owner_user_id=other_owner,
+                            id=uuid4(),
+                            kind="latch",
+                            occurred_at=at,
+                            value="Could not latch",
+                            fields={},
                         ),
                     ]
                 )
@@ -143,15 +167,25 @@ def test_profile_and_topical_records_respect_owner_delivery_and_soft_delete_in_p
                 diaper = await service.read(_query(owner=owner, baby=current, topic="diaper"))
                 assert diaper.items[0].diaper_kind == "dirty"
                 assert "sensitive note" not in diaper.model_dump_json()
+                assert len(diaper.items) == 2 and diaper.items[1].wet_count == 5
+                assert all(item.mental_state is None for item in diaper.items)
+                mood = await service.read(_query(owner=owner, baby=current, topic="after_feeding_mood"))
+                assert len(mood.items) == 1 and mood.items[0].mental_state == "content"
+                assert mood.items[0].wet_count is None and "private mood note" not in mood.model_dump_json()
+                latch = await service.read(_query(owner=owner, topic="latch"))
+                assert len(latch.items) == 1 and latch.items[0].latch_status == "Came off easily"
+                assert "private latch note" not in latch.model_dump_json()
                 pain = await service.read(_query(owner=owner, topic="pain"))
                 assert pain.items[0].pain_score == 4 and "sensitive mother note" not in pain.model_dump_json()
                 limited = await service.read(_query(owner=owner, baby=current, limit=1))
                 assert limited.has_more and len(limited.items) == 1
                 for infant in (older, foreign, deleted):
-                    with pytest.raises(ApiError) as error:
-                        await service.read(_query(owner=owner, baby=infant))
-                    assert error.value.status == 404
+                    for topic in ("growth", "after_feeding_mood"):
+                        with pytest.raises(ApiError) as error:
+                            await service.read(_query(owner=owner, baby=infant, topic=topic))
+                        assert error.value.status == 404
                 assert (await service.read(_query(owner=other_owner, topic="pain"))).items == []
+                assert [item.latch_status for item in (await service.read(_query(owner=other_owner, topic="latch"))).items] == ["Could not latch"]
                 assert (await session.scalars(select(BabyRecord).where(BabyRecord.baby_id == current))).all()
 
     asyncio.run(run())
@@ -161,14 +195,14 @@ def test_diaper_topic_keeps_daily_counts_separate_from_individual_events():
     owner, baby = uuid4(), uuid4()
     at = datetime(2026, 9, 23, 12, tzinfo=timezone.utc)
     individual = BabyRecord(
-        owner_user_id=owner, baby_id=baby, kind="diaper", occurred_at=at, data={"diaper_kind": "wet", "note": "never return this"}
+        id=uuid4(), version=1, owner_user_id=owner, baby_id=baby, kind="diaper", occurred_at=at, data={"diaper_kind": "wet", "note": "never return this"}
     )
     summary = BabyRecord(
-        owner_user_id=owner,
+        id=uuid4(), version=1, owner_user_id=owner,
         baby_id=baby,
         kind="daily_status",
         recorded_on=date(2026, 9, 23),
-        data={"wet_count": 6, "stool_count": 2, "color": "yellow", "note": "private"},
+        data={"wet_count": 6, "stool_count": 2, "color": "yellow", "mental_state": "content", "note": "private"},
     )
 
     class FakeProfiles:
@@ -180,6 +214,7 @@ def test_diaper_topic_keeps_daily_counts_separate_from_individual_events():
             sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
             assert "baby_records" in sql
             if "daily_status" in sql:
+                assert "wet_count" in sql and "stool_count" in sql
                 return [summary]
             assert "diaper" in sql
             return [individual]
@@ -189,9 +224,12 @@ def test_diaper_topic_keeps_daily_counts_separate_from_individual_events():
     assert len(output.items) == 2
     event, daily = output.items
     assert event.record_type == "event" and event.diaper_kind == "wet"
+    assert event.record_id == individual.id and event.revision == "1"
     assert daily.record_type == "daily_summary" and daily.wet_count == 6 and daily.stool_count == 2
+    assert daily.record_id == summary.id and daily.revision == "1"
     assert daily.recorded_on == date(2026, 9, 23)
-    assert daily.occurred_at is None
+    assert daily.occurred_at is None and daily.mental_state is None
+    assert "content" not in output.model_dump_json()
     assert "private" not in output.model_dump_json() and "never return this" not in output.model_dump_json()
 
 
@@ -200,9 +238,11 @@ def test_diaper_topic_keeps_daily_counts_separate_from_individual_events():
     [
         ("feeding", ("baby_records", "feeding_records")),
         ("diaper", ("baby_records", "baby_records")),
+        ("after_feeding_mood", ("baby_records",)),
         ("growth", ("baby_records", "growth_records")),
         ("pumping", ("pumping_records",)),
         ("pain", ("mother_observations",)),
+        ("latch", ("mother_observations",)),
     ],
 )
 def test_topical_source_queries_are_bounded_and_owner_scoped_without_database(topic, expected_tables):
@@ -224,7 +264,7 @@ def test_topical_source_queries_are_bounded_and_owner_scoped_without_database(to
 
     session = RecordingSession()
     service = TopicalRecordsService(session, FakeProfiles())
-    infant_id = baby if topic in {"feeding", "diaper", "growth"} else None
+    infant_id = baby if topic in {"feeding", "diaper", "growth", "after_feeding_mood"} else None
     result = asyncio.run(service.read(_query(owner=owner, baby=infant_id, topic=topic)))
     assert result.items == [] and result.coverage == "recorded_entries_only" and not result.has_more
     assert len(session.statements) == len(expected_tables)
@@ -242,3 +282,67 @@ def test_topical_source_queries_are_bounded_and_owner_scoped_without_database(to
         else:
             # Asia/Shanghai inclusive calendar dates become a UTC half-open range.
             assert "2026-08-31 16:00:00" in sql and "2026-09-24 16:00:00" in sql
+
+
+def test_after_feeding_mood_projects_only_recorded_mental_state():
+    owner, baby = uuid4(), uuid4()
+    valid = BabyRecord(
+        id=uuid4(), version=1, owner_user_id=owner, baby_id=baby, kind="daily_status", recorded_on=date(2026, 9, 23),
+        data={"mental_state": "content", "wet_count": 6, "stool_count": 2, "note": "private"},
+    )
+
+    class FakeProfiles:
+        async def is_current_delivery_infant(self, *, owner_user_id, infant_id):
+            return owner_user_id == owner and infant_id == baby
+
+    class FakeSession:
+        async def scalars(self, statement):
+            sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+            assert "daily_status" in sql and "mental_state" in sql and "content" in sql
+            assert "wet_count" not in sql and "stool_count" not in sql
+            return [valid]
+
+    result = asyncio.run(TopicalRecordsService(FakeSession(), FakeProfiles()).read(
+        _query(owner=owner, baby=baby, topic="after_feeding_mood")
+    ))
+    assert len(result.items) == 1
+    assert result.items[0].kind == "after_feeding_mood"
+    assert result.items[0].recorded_on == date(2026, 9, 23)
+    assert result.items[0].mental_state == "content"
+    assert result.items[0].wet_count is None and result.items[0].stool_count is None
+    assert "wet_count" not in result.model_dump_json(exclude_none=True)
+    assert "private" not in result.model_dump_json()
+
+
+def test_latch_projects_only_reviewed_choice_without_notes_or_other_observations():
+    owner = uuid4()
+    entry = MotherObservation(
+        owner_user_id=owner, id=uuid4(), updated_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc), kind="latch",
+        occurred_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+        value="Came off easily", fields={"note": "private", "feeding_record_id": str(uuid4())},
+    )
+
+    class FakeSession:
+        async def scalars(self, statement):
+            from sqlalchemy.dialects import postgresql
+            sql = str(statement.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+            assert "mother_observations" in sql and "latch" in sql
+            assert "Came off easily" in sql and "Could not latch" in sql
+            assert str(owner) in sql
+            return [entry]
+
+    result = asyncio.run(TopicalRecordsService(FakeSession(), object()).read(
+        _query(owner=owner, topic="latch")
+    ))
+    assert len(result.items) == 1
+    assert result.items[0].kind == "latch"
+    assert result.items[0].latch_status == "Came off easily"
+    assert result.items[0].occurred_at == entry.occurred_at
+    assert "private" not in result.model_dump_json()
+    assert "feeding_record_id" not in result.model_dump_json()
+
+
+@pytest.mark.parametrize("unsupported", ["sleep", "development", "energy", "mood", "storage", "bottle", "pump", "daily_status"])
+def test_only_app_record_topics_are_supported(unsupported):
+    with pytest.raises(ValidationError):
+        _query(owner=uuid4(), topic=unsupported)

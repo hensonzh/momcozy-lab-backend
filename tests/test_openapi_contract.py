@@ -189,5 +189,9 @@ def test_removed_diary_and_legacy_agent_business_routes_are_absent() -> None:
         "/v1/internal/agent/profile",
         "/v1/internal/agent/files/resolve",
         "/v1/internal/agent/records",
+        "/v1/internal/agent/records/batch",
+        "/v1/internal/agent/schedule",
+        "/v1/internal/agent/schedule/batch",
+        "/v1/internal/agent/notifications/reply-ready",
     }
     assert set(paths["/v1/internal/agent/records"]) == {"get"}

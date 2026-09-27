@@ -1,5 +1,12 @@
 # Notification module: local operation and provider handoff
 
+> **Current repository notice (2026-09-26):** The appointment/consultation
+> event projection described below is historical design documentation; its
+> producer modules are absent from the current production source. The currently
+> implemented trigger is Agent reply completion. See
+> [agent-reply-push-rollout.md](agent-reply-push-rollout.md) for its code path and
+> remaining FCM/APNs acceptance work.
+
 The current acceptance scope is local implementation and verification. Firebase,
 FCM service account and Apple APNs configuration were not prepared as of
 2026-09-10. No real push was sent and no cloud deployment was performed.

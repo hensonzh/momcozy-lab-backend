@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -16,10 +16,12 @@ from app.infrastructure.db.session import get_session
 from app.modules.auth import CurrentUser
 from app.modules.baby.profile_models import BabyProfile
 from app.modules.onboarding.models import OnboardingConfirmation
+from app.modules.onboarding import schemas as onboarding_schemas
 from app.modules.onboarding.router import get_onboarding_service
 from app.modules.onboarding.schemas import OnboardingProfileInput, OnboardingStateOutput
 from app.modules.onboarding.service import OnboardingService
-from app.modules.profiles.models import MaternalCurrentDeliveryInfant, MaternalProfile, UserProfile
+from app.modules.profiles.models import LactationProfile, MaternalCurrentDeliveryInfant, MaternalProfile, UserProfile
+from app.modules.profiles.me_models import MePreferences
 from product_database import database, postgres
 
 
@@ -28,10 +30,45 @@ def payload(**changes):
         "stage": "postpartum", "display_name": "Mia", "age": 32,
         "delivery_date": (date.today() - timedelta(days=3)).isoformat(),
         "delivery_count": 1, "has_cesarean_history": False, "delivery_type": "cesarean",
+        "gestation_weeks": 39, "gestation_days": 2,
+        "feeding_methods": ["direct", "formula"],
         "infant_count": 1, "infants": [{"nickname": "", "sex": None}],
     }
     values.update(changes)
     return values
+
+
+def test_onboarding_requires_valid_gestational_age_and_feeding_methods():
+    data = OnboardingProfileInput.model_validate(payload())
+    assert (data.gestation_weeks, data.gestation_days) == (39, 2)
+    assert data.feeding_methods == ["direct", "formula"]
+    assert OnboardingProfileInput.model_validate(payload(feeding_methods=["formula", "direct"])).feeding_methods == ["direct", "formula"]
+    for field in ("gestation_weeks", "gestation_days", "feeding_methods"):
+        missing = payload()
+        del missing[field]
+        with pytest.raises(ValidationError):
+            OnboardingProfileInput.model_validate(missing)
+
+
+def test_delivery_date_is_checked_against_device_calendar_day(monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 26, 20, tzinfo=timezone.utc).astimezone(tz or timezone.utc)
+
+    monkeypatch.setattr(onboarding_schemas, "datetime", FixedDateTime)
+    tomorrow_in_shanghai = OnboardingProfileInput.model_validate(payload(
+        delivery_date="2026-09-27", client_timezone_offset_minutes=480,
+    ))
+    assert tomorrow_in_shanghai.delivery_date.isoformat() == "2026-09-27"
+    assert "client_timezone_offset_minutes" not in tomorrow_in_shanghai.model_dump(mode="json")
+    for value in [
+        payload(delivery_date="2026-09-28", client_timezone_offset_minutes=480),
+        payload(delivery_date="2026-09-27", client_timezone_offset_minutes=-300),
+        payload(delivery_date="2026-09-27", client_timezone_offset_minutes=900),
+    ]:
+        with pytest.raises(ValidationError):
+            OnboardingProfileInput.model_validate(value)
 
 
 def test_onboarding_requires_authenticated_owner():
@@ -103,10 +140,35 @@ def test_authenticated_onboarding_http_flow_persists_and_replays_once():
                 assert (await client.get("/v1/onboarding/me")).json() == {
                     "status": "required", "profile_confirmed": False, "primary_infant_id": None,
                 }
-                first = await client.put("/v1/onboarding/me/profile", json=payload())
+                first = await client.put("/v1/onboarding/me/profile", json=payload(client_timezone_offset_minutes=480))
                 assert first.status_code == 200 and first.json()["profile_confirmed"] is True
-                assert (await client.put("/v1/onboarding/me/profile", json=payload())).json() == first.json()
+                assert (await client.put("/v1/onboarding/me/profile", json=payload(client_timezone_offset_minutes=-300))).json() == first.json()
                 assert (await client.get("/v1/onboarding/me")).json() == first.json()
+                me = await client.get(
+                    "/v1/profile/me-experience",
+                    params={"start": "2026-09-20T00:00:00Z", "end": "2026-09-21T00:00:00Z"},
+                )
+                assert me.status_code == 200
+                assert me.json()["profile"]["baby_count"] == 1
+                assert me.json()["profile"]["gestation_weeks"] == 39
+                assert me.json()["profile"]["gestation_days"] == 2
+                assert me.json()["profile"]["feeding_methods"] == ["direct", "formula"]
+                updated = await client.patch("/v1/profile/me-experience/profile", json={"feeding_methods": ["direct", "expressed"]})
+                assert updated.status_code == 200
+                assert updated.json()["feeding_methods"] == ["direct", "expressed"]
+                async with sessions() as check:
+                    lactation = await check.scalar(select(LactationProfile).where(LactationProfile.owner_user_id == owners[0]))
+                    baby = await check.scalar(select(BabyProfile).where(BabyProfile.owner_user_id == owners[0]))
+                    assert lactation.current_feeding_mode == "exclusive_breastfeeding"
+                    assert baby.feeding_mode == "exclusive_breastfeeding"
+                unsure = await client.patch("/v1/profile/me-experience/profile", json={"feeding_methods": ["unknown"]})
+                assert unsure.status_code == 200
+                assert unsure.json()["feeding_methods"] == ["unknown"]
+                async with sessions() as check:
+                    lactation = await check.scalar(select(LactationProfile).where(LactationProfile.owner_user_id == owners[0]))
+                    baby = await check.scalar(select(BabyProfile).where(BabyProfile.owner_user_id == owners[0]))
+                    assert lactation.current_feeding_mode == "unknown"
+                    assert baby.feeding_mode == "unknown"
                 assert (await client.put("/v1/onboarding/me/profile", json=payload(display_name="Other"))).status_code == 409
             async with sessions.begin() as session:
                 assert await session.scalar(select(func.count(BabyProfile.id)).where(BabyProfile.owner_user_id == owners[0])) == 1
@@ -116,6 +178,14 @@ def test_authenticated_onboarding_http_flow_persists_and_replays_once():
 
 @pytest.mark.parametrize("changes", [
     {"delivery_date": None},
+    {"gestation_weeks": None},
+    {"gestation_weeks": 19},
+    {"gestation_days": None},
+    {"gestation_days": 7},
+    {"feeding_methods": []},
+    {"feeding_methods": ["unsupported"]},
+    {"feeding_methods": ["direct", "direct"]},
+    {"feeding_methods": ["unknown", "formula"]},
     {"delivery_count": 1, "has_cesarean_history": True},
     {"infant_count": 2},
     {"delivery_date": (date.today() + timedelta(days=1)).isoformat()},
@@ -142,6 +212,15 @@ def test_first_cesarean_is_not_prior_history_and_retry_does_not_duplicate_babies
                 mother = await session.scalar(select(MaternalProfile).where(MaternalProfile.owner_user_id == owners[0]))
                 assert mother is not None and mother.latest_delivery_method == "cesarean"
                 assert mother.delivery_count == 1 and mother.has_cesarean_history is False
+                lactation = await session.scalar(select(LactationProfile).where(LactationProfile.owner_user_id == owners[0]))
+                assert lactation is not None and lactation.current_feeding_mode == "mixed_feeding"
+                preferences = await session.get(MePreferences, owners[0])
+                assert preferences is not None and preferences.profile["gestation_weeks"] == 39
+                assert preferences.profile["gestation_days"] == 2
+                assert preferences.profile["baby_count"] == 1
+                assert preferences.profile["feeding_methods"] == ["direct", "formula"]
+                baby = await session.scalar(select(BabyProfile).where(BabyProfile.owner_user_id == owners[0]))
+                assert baby is not None and baby.feeding_mode == "mixed_feeding"
                 assert await session.scalar(select(UserProfile.preferred_name).where(UserProfile.user_id == owners[0])) == "Mia"
                 assert await session.scalar(select(func.count(MaternalCurrentDeliveryInfant.infant_id)).where(MaternalCurrentDeliveryInfant.maternal_profile_id == mother.id)) == 1
                 assert await session.get(OnboardingConfirmation, owners[0]) is not None
@@ -169,6 +248,25 @@ def test_repeat_delivery_tracks_prior_history_separately_from_current_birth():
                 babies = list((await session.scalars(select(BabyProfile).where(BabyProfile.owner_user_id == owners[0]).order_by(BabyProfile.name))).all())
                 assert [baby.name for baby in babies] == ["A", "B"]
                 assert [baby.birth_date for baby in babies] == [data.delivery_date, data.delivery_date]
+    asyncio.run(run())
+
+
+@postgres
+def test_six_infants_are_saved_and_visible_in_me_profile():
+    async def run():
+        async with database() as (sessions, _booking, _clock, _provider, owners, _episodes):
+            data = OnboardingProfileInput.model_validate(payload(
+                infant_count=6,
+                infants=[{"nickname": f"Baby {index}"} for index in range(1, 7)],
+            ))
+            async with sessions.begin() as session:
+                await OnboardingService(session).confirm(owners[0], data, "six-babies")
+            async with sessions.begin() as session:
+                preferences = await session.get(MePreferences, owners[0])
+                assert preferences is not None and preferences.profile["baby_count"] == 6
+                babies = await session.scalar(select(func.count(BabyProfile.id)).where(BabyProfile.owner_user_id == owners[0]))
+                assert babies == 6
+
     asyncio.run(run())
 
 

@@ -108,6 +108,9 @@ def test_delivery_is_environment_scoped_serial_and_host_key_checked() -> None:
     assert "secrets.SSH_KNOWN_HOSTS" in workflow
     assert "StrictHostKeyChecking=no" not in workflow
     assert "scripts/release.py" in workflow
+    assert "scripts/check_deployed_openapi_compatibility.py" in workflow
+    assert 'git show "${RELEASE_COMMIT_SHA}:docs/openapi.generated.json"' in workflow
+    assert workflow.index("Reject breaking changes against the live Product API") < workflow.index("Stage the exact commit without uncommitted files")
     assert "--environment '${DEPLOY_ENVIRONMENT}'" in workflow
     assert '"DEPLOY_ENV_FILE": root / "shared" / "backend" / f"{environment}.env"' in workflow
     assert '"DEPLOY_RELEASE_LOCK": root / "shared" / f"{environment}-release.lock"' in workflow

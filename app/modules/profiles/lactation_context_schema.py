@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..baby.profile_schemas import BabySex, BabyFeedingMode
+from .feeding_methods import FeedingMethod
 
 
 DeliveryMethod = Literal["vaginal", "cesarean", "assisted_vaginal", "other", "unknown"]
@@ -51,10 +52,10 @@ class ActiveConcernContextOutput(_StrictOutputModel):
 
 
 class PersonalContextOutput(_StrictOutputModel):
-    baby_count: int | None = Field(default=None, ge=1, le=3)
+    baby_count: int | None = Field(default=None, ge=1, le=6)
     gestation_weeks: int | None = Field(default=None, ge=20, le=45)
     gestation_days: int | None = Field(default=None, ge=0, le=6)
-    feeding_methods: list[Literal["direct", "expressed", "formula"]] | None = Field(default=None, max_length=3)
+    feeding_methods: list[FeedingMethod] | None = Field(default=None, max_length=3)
     feeding_preference: Literal["breast", "formula", "mixed", "undecided"] | None = None
     caregivers: list[Literal["partner", "family", "professional", "self"]] | None = Field(default=None, max_length=4)
     return_to_work_date: date | None = None

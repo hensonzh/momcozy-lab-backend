@@ -17,7 +17,7 @@ from .account_lifecycle import AccountLifecycleService, ChallengeRejected
 from .current_user import CurrentUser
 from .email import QueuedAuthEmailSender
 from .repository import AuthAccountRepository, AuthSessionRepository
-from .schemas import AccountOperationResponse, AccountProfile, EmailChallengeRequest, EmailRegisterRequest, RegistrationCodeRequest, InviteLoginRequest, LoginRequest, LogoutResponse, PasswordResetConfirmRequest, PasswordResetRequest, RefreshRequest, SignupRequest, TokenResponse, TokenUser
+from .schemas import AccountOperationResponse, AccountProfile, EmailChallengeRequest, EmailRegisterRequest, RegistrationCodeRequest, InviteLoginRequest, LoginRequest, LogoutResponse, PasswordResetConfirmRequest, PasswordChangeRequest, PasswordResetRequest, RefreshRequest, SignupRequest, TokenResponse, TokenUser
 from .service import refresh_token_hash, AuthSessionService, RefreshTokenRevoked
 
 
@@ -66,7 +66,7 @@ async def verify_registration_code(body: RegistrationCodeRequest, request: Reque
 
 @router.post("/verify-email", response_model=TokenResponse)
 async def verify_email(body: EmailChallengeRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> TokenResponse | JSONResponse:
-    if body.confirm_password is not None and body.confirm_password != body.password:
+    if body.confirm_password != body.password:
         raise ApiError(code="validation_failed", message="Passwords do not match.", status=422)
     try:
         issued = await service.verify_email(email=body.email, token=body.token, password=body.password, device=_device_context(request=request, device_id=body.device_id))
@@ -89,12 +89,23 @@ async def forgot_password(body: PasswordResetRequest, service: AccountLifecycleS
 
 @router.post("/reset-password", response_model=AccountOperationResponse)
 async def reset_password(body: PasswordResetConfirmRequest, request: Request, service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse | JSONResponse:
+    if body.confirm_password != body.new_password:
+        raise ApiError(code="validation_failed", message="Passwords do not match.", status=422)
     try:
         await service.reset_password(email=body.email, token=body.token, new_password=body.new_password)
     except ChallengeRejected as error:
         return _challenge_response(error, request)
     return AccountOperationResponse(status="password_reset")
 
+
+@router.post("/change-password", response_model=AccountOperationResponse)
+async def change_password(body: PasswordChangeRequest, current_user: CurrentUser = Depends(require_current_user),
+                          service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountOperationResponse:
+    if body.confirm_password != body.new_password:
+        raise ApiError(code="validation_failed", message="Passwords do not match.", status=422)
+    await service.change_password(user_id=current_user.user_id, current_password=body.current_password,
+                                  new_password=body.new_password)
+    return AccountOperationResponse(status="password_changed")
 
 @router.get("/me", response_model=AccountProfile)
 async def account_me(current_user: CurrentUser = Depends(require_current_user), service: AccountLifecycleService = Depends(get_account_lifecycle_service)) -> AccountProfile:

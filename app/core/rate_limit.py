@@ -24,7 +24,7 @@ RATE_LIMIT_EXEMPT_PATHS = {
     "/v1/health/metrics",
 }
 AUTH_ENTRY_PATHS = {"/v1/auth/logout-session","/v1/auth/signup", "/v1/auth/register", "/v1/auth/login",
-                    "/v1/auth/verify-email", "/v1/auth/verify-registration-code", "/v1/auth/resend-verification", "/v1/auth/forgot-password", "/v1/auth/reset-password", "/v1/auth/invite-login"}
+                    "/v1/auth/verify-email", "/v1/auth/verify-registration-code", "/v1/auth/resend-verification", "/v1/auth/forgot-password", "/v1/auth/reset-password", "/v1/auth/change-password", "/v1/auth/invite-login"}
 
 
 class RedisRateLimitClient(Protocol):

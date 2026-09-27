@@ -9,7 +9,9 @@ from ...core.errors import ApiError
 from ..audit.repository import AuditRepository
 from ..audit.service import AuditService, request_hash
 from ..baby.profile_models import BabyProfile
-from ..profiles.models import MaternalProfile, UserProfile, MaternalCurrentDeliveryInfant
+from ..profiles.models import LactationProfile, MaternalProfile, UserProfile, MaternalCurrentDeliveryInfant
+from ..profiles.me_models import MePreferences
+from ..profiles.feeding_methods import feeding_mode_for_methods
 from ..users.models import User
 from .models import OnboardingConfirmation
 from .schemas import OnboardingProfileInput, OnboardingStateOutput
@@ -83,6 +85,27 @@ class OnboardingService:
         maternal.has_cesarean_history = (
             False if payload.delivery_count == 1 else payload.has_cesarean_history
         )
+        preferences = await self.session.get(MePreferences, owner_user_id)
+        if preferences is None:
+            preferences = MePreferences(
+                owner_user_id=owner_user_id, profile={}, concerns=[], record_order=[]
+            )
+            self.session.add(preferences)
+        feeding_mode = feeding_mode_for_methods(payload.feeding_methods)
+        preferences.profile = {
+            **preferences.profile,
+            "gestation_weeks": payload.gestation_weeks,
+            "gestation_days": payload.gestation_days,
+            "baby_count": payload.infant_count,
+            "feeding_methods": payload.feeding_methods,
+        }
+        lactation = await self.session.scalar(
+            select(LactationProfile).where(LactationProfile.owner_user_id == owner_user_id)
+        )
+        if lactation is None:
+            lactation = LactationProfile(owner_user_id=owner_user_id)
+            self.session.add(lactation)
+        lactation.current_feeding_mode = feeding_mode
         await self.session.flush()
 
         infants = [
@@ -91,7 +114,7 @@ class OnboardingService:
                 name=infant.nickname or f"Baby {index}",
                 sex=infant.sex or "unspecified",
                 birth_date=payload.delivery_date,
-                feeding_mode="unknown",
+                feeding_mode=feeding_mode,
             )
             for index, infant in enumerate(payload.infants, start=1)
         ]

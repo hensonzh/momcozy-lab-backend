@@ -7,6 +7,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
+class AgentUpdateWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    owner_user_id: UUID
+    thread_id: UUID
+    completed_at: datetime
+
+
+class AgentUpdateRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    notification_id: UUID
+    send_status: str
+
+
 class NotificationRead(BaseModel):
     id: UUID
     owner_user_id: UUID

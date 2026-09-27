@@ -3,6 +3,7 @@ from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .schemas import UserProfileUpdate
+from .feeding_methods import FeedingMethod, validate_feeding_methods
 
 Metric = Literal["feed", "energy", "sleep", "mood", "pump", "pain", "latch", "bottle", "diaper", "weight", "storage"]
 Issue = Literal["comfort", "feeding", "intake", "supply", "work", "other"]
@@ -15,15 +16,26 @@ class StrictModel(BaseModel):
 class MeProfilePatch(UserProfileUpdate):
     actual_delivery_date: date | None = None
     delivery_count: int | None = Field(None, ge=1, le=20)
-    baby_count: int | None = Field(None, ge=1, le=3)
-    current_delivery_method: Literal["vaginal", "cesarean"] | None = None
+    baby_count: int | None = Field(None, ge=1, le=6)
+    current_delivery_method: Literal["vaginal", "cesarean", "assisted_vaginal", "other"] | None = None
     gestation_weeks: int | None = Field(None, ge=20, le=45)
     gestation_days: int | None = Field(None, ge=0, le=6)
-    feeding_methods: list[Literal["direct", "expressed", "formula"]] | None = Field(None, max_length=3)
+    feeding_methods: list[FeedingMethod] | None = Field(None, min_length=1, max_length=3)
     feeding_preference: Literal["breast", "formula", "mixed", "undecided"] | None = None
     caregivers: list[Literal["partner", "family", "professional", "self"]] | None = Field(None, max_length=4)
     return_to_work_date: date | None = None
     additional_context: str | None = Field(None, max_length=500)
+
+    @field_validator("feeding_methods")
+    @classmethod
+    def valid_feeding_methods(cls, methods: list[FeedingMethod] | None) -> list[FeedingMethod] | None:
+        return validate_feeding_methods(methods) if methods is not None else None
+
+    @model_validator(mode="after")
+    def require_explicit_feeding_choice(self) -> "MeProfilePatch":
+        if "feeding_methods" in self.model_fields_set and self.feeding_methods is None:
+            raise ValueError("Select at least one feeding method or Not sure yet")
+        return self
 
     @field_validator("actual_delivery_date")
     @classmethod

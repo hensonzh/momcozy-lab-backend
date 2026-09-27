@@ -187,6 +187,24 @@ jobs:
           printf '%s\n' "${DEPLOY_SSH_PRIVATE_KEY}" > "${HOME}/.ssh/id_ed25519"
           printf '%s\n' "${DEPLOY_SSH_KNOWN_HOSTS}" > "${HOME}/.ssh/known_hosts"
 
+      - name: Reject breaking changes against the live Product API
+        if: inputs.operation == 'deploy'
+        env:
+          DEPLOY_SSH_HOST: ${{ secrets.SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          set -euo pipefail
+          live_openapi="${RUNNER_TEMP}/product-live-openapi.json"
+          candidate_openapi="${RUNNER_TEMP}/product-candidate-openapi.json"
+          git show "${RELEASE_COMMIT_SHA}:docs/openapi.generated.json" > "${candidate_openapi}"
+          ssh -p "${DEPLOY_SSH_PORT}" "${DEPLOY_SSH_USER}@${DEPLOY_SSH_HOST}" \
+            "curl --fail --silent --show-error --max-time 15 --cacert '${DEPLOY_CA_FILE}' '${DEPLOY_PUBLIC_URL}/openapi.json'" \
+            > "${live_openapi}"
+          python3 scripts/check_deployed_openapi_compatibility.py \
+            --current "${live_openapi}" \
+            --candidate "${candidate_openapi}"
+
       - name: Authenticate the host to GHCR with an ephemeral token
         env:
           GHCR_TOKEN: ${{ github.token }}

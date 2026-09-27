@@ -13,9 +13,12 @@ from ...infrastructure.db import get_session
 from ..auth import CurrentUser
 from ..records.router import get_records_service
 from ..baby.models import BabyRecord
+from ..baby.profile_models import BabyProfile
 from ..audit import AuditService
 from ..audit.repository import AuditRepository
 from .me_models import MePreferences, MotherObservation
+from .models import LactationProfile, MaternalCurrentDeliveryInfant
+from .feeding_methods import feeding_mode_for_methods
 from .me_schemas import Concern, MeProfilePatch, Observation, RecordOrder
 from .repository import ProfileRepository
 from .router import get_profile_service, get_lactation_context_service
@@ -103,6 +106,21 @@ async def update_profile(
         await get_profile_service(session).update_user_profile(user_id=owner, values=user)
     if mother:
         await get_lactation_context_service(session).update_maternal_profile(owner_user_id=owner, values=mother)
+    methods = payload.feeding_methods
+    if "feeding_methods" in values and methods is not None:
+        feeding_mode = feeding_mode_for_methods(methods)
+        lactation = await session.scalar(select(LactationProfile).where(LactationProfile.owner_user_id == owner))
+        if lactation is None:
+            lactation = LactationProfile(owner_user_id=owner)
+            session.add(lactation)
+        lactation.current_feeding_mode = feeding_mode
+        current_babies = await session.scalars(
+            select(BabyProfile)
+            .join(MaternalCurrentDeliveryInfant, MaternalCurrentDeliveryInfant.infant_id == BabyProfile.id)
+            .where(BabyProfile.owner_user_id == owner)
+        )
+        for baby in current_babies:
+            baby.feeding_mode = feeding_mode
     extra = {k: v for k, v in payload.model_dump(mode="json", exclude_unset=True).items() if k not in user and k not in mother}
     preferences.profile = {**preferences.profile, **extra}
     await session.flush()

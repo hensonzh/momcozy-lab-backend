@@ -67,17 +67,34 @@ revocation reaches it no later than the 15-minute access-token expiry.
 
 - `GET /v1/onboarding/me`: authenticated owner's confirmation state; no-store.
 - `PUT /v1/onboarding/me/profile`: atomically save name, age, required delivery
-  date, delivery count (including this birth), optional current delivery method,
-  infant count and infant profiles. `has_cesarean_history` describes births
+  date, gestational weeks/days, delivery count (including this birth), optional
+  current delivery method, infant count, feeding methods and infant profiles.
+  `feeding_methods` is the required multi-select list (`direct`, `expressed`,
+  `formula`, or `unknown` on its own). It is the same field as Me's later
+  multi-select editor. Direct + expressed remains exclusive breast milk;
+  formula + breast milk derives mixed feeding. Both onboarding and Me edits
+  keep the maternal and current-infant single-mode summaries in sync.
+  The Me profile shows gestational age, this delivery's infant count and the
+  onboarding feeding choices without asking for them again. The App sends its
+  UTC offset so a delivery on the device's current calendar day is not rejected
+  as tomorrow by a server in another time zone; older clients retain server-day
+  validation. `has_cesarean_history`
+  describes births
   **before** this one; it is false on a first delivery, even if this birth was
   cesarean. Identical retries return the confirmed infant without creating
   duplicates; changed submissions after confirmation return `409` and should
   be made through profile editing instead.
 
-The App gate is disabled by default. This local contract and generated OpenAPI
-do not imply the public staging endpoint has been deployed. The separate
-`/v1/onboarding/me/release-reset` call is not yet implemented; do not enable
-the App release-reset capability against this Backend.
+This release targets a fresh user data set. Existing unconfirmed accounts with
+current-delivery infant links are not migrated; do not enable this build against
+a database that still contains those accounts, because they receive GET
+`required` and PUT `409`. No database purge is performed by this code change.
+
+The App gate is enabled by default in the client build, but this local contract
+and generated OpenAPI do not imply staging is deployed. Deploy the compatible
+Product Backend before distributing the App. The separate
+`/v1/onboarding/me/release-reset` call remains unimplemented and the reset
+capability remains disabled by default.
 
 ## Admin Invite Codes
 
@@ -120,9 +137,25 @@ Product tables. It calls the following Product-owned internal endpoints:
 ### Read
 
 - `GET /v1/internal/agent/profile`
+- `GET /v1/internal/agent/records`
+- `GET /v1/internal/agent/schedule`
 
 This service-only endpoint provides the current Run's basic profile context.
 It requires the Runtime service key and explicit `actor_user_id` owner scope.
+The records reader is limited to seven App topics; the schedule reader returns
+owner-scoped personal entries. Neither reader writes data.
+
+### Atomic record and schedule batches
+
+- `POST /v1/internal/agent/records/batch`
+- `POST /v1/internal/agent/schedule/batch`
+
+These service-only, owner-scoped endpoints apply 1–20 operations atomically per
+batch under a durable idempotency key. The Agent checks known field requirements
+before proposing an Action; Product still validates ownership, current versions,
+fields, and transaction outcomes. Rejected batches write nothing. When available,
+the error envelope's `details` contains only `operation_index` (zero-based),
+`field_path`, and a stable `reason`; no submitted value or note is reflected.
 
 ### Files
 
@@ -142,8 +175,9 @@ own TTL, revalidates authoritative file state before proxying bytes, returns
 revoked, unknown, or drifted mappings. Product application logs redact the
 path token.
 
-Runtime business tools and Action endpoints have been removed. Mobile clients
-continue using public Product APIs; the Runtime has no Product write adapter.
+Retired Runtime business endpoints remain removed. The current Agent Runtime
+tools use only the internal records/schedule batch adapter above; mobile clients
+continue using public Product APIs and do not call these service-only routes.
 
 ## Files
 

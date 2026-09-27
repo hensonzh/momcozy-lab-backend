@@ -30,7 +30,7 @@ class RegistrationCodeRequest(BaseModel):
 class EmailChallengeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     password: str = Field(min_length=8, max_length=128)
-    confirm_password: str | None = Field(default=None, min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
     email: str = Field(min_length=3, max_length=320)
     token: str = Field(min_length=1, max_length=256)
     device_id: str = Field(default="", max_length=120)
@@ -46,6 +46,14 @@ class PasswordResetConfirmRequest(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     token: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordChangeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
 
 
 class LoginRequest(BaseModel):

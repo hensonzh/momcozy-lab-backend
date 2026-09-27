@@ -8,7 +8,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.errors import ApiError
@@ -17,7 +17,8 @@ from ..records.models import FeedingRecord, GrowthRecord, PumpingRecord
 from .me_models import MotherObservation
 from .repository import ProfileRepository
 
-Topic = Literal["feeding", "pumping", "diaper", "pain", "growth"]
+Topic = Literal["feeding", "pumping", "diaper", "pain", "growth", "latch", "after_feeding_mood"]
+LatchStatus = Literal["Stayed latched", "Came off easily", "Could not latch", "含得稳", "容易松开", "含不住"]
 Source = Literal["baby_records", "feeding_records", "pumping_records", "mother_observations", "growth_records"]
 
 
@@ -27,6 +28,8 @@ class StrictModel(BaseModel):
 
 class TopicalRecord(StrictModel):
     source: Source
+    record_id: UUID
+    revision: str
     kind: Topic
     record_type: Literal["event", "daily_summary"] | None = None
     occurred_at: datetime | None = None
@@ -42,6 +45,8 @@ class TopicalRecord(StrictModel):
     consistency: str | None = None
     signs: list[str] | None = None
     pain_score: int | None = None
+    latch_status: LatchStatus | None = None
+    mental_state: Literal["content", "active", "crying", "drowsy"] | None = None
     phase: str | None = None
     impact: str | None = None
     metric: str | None = None
@@ -75,7 +80,7 @@ class TopicalRecordsQuery(StrictModel):
     def valid_scope(self) -> TopicalRecordsQuery:
         if self.start_date > self.end_date or (self.end_date - self.start_date).days >= 30:
             raise ValueError("Use a chronological window of at most 30 calendar days.")
-        if (self.topic in {"feeding", "diaper", "growth"}) != (self.infant_id is not None):
+        if (self.topic in {"feeding", "diaper", "growth", "after_feeding_mood"}) != (self.infant_id is not None):
             raise ValueError("Infant topics require infant_id; mother topics must not include one.")
         try:
             ZoneInfo(self.timezone)
@@ -119,6 +124,7 @@ class TopicalRecordsService:
                 if query.topic == "feeding":
                     record = TopicalRecord(
                         source="baby_records",
+                        record_id=item.id, revision=str(item.version),
                         kind="feeding",
                         occurred_at=item.occurred_at,
                         method=data.get("method"),
@@ -129,6 +135,7 @@ class TopicalRecordsService:
                 elif query.topic == "diaper":
                     record = TopicalRecord(
                         source="baby_records",
+                        record_id=item.id, revision=str(item.version),
                         kind="diaper",
                         record_type="event",
                         occurred_at=item.occurred_at,
@@ -140,6 +147,7 @@ class TopicalRecordsService:
                 else:
                     record = TopicalRecord(
                         source="baby_records",
+                        record_id=item.id, revision=str(item.version),
                         kind="growth",
                         recorded_on=item.recorded_on,
                         metric=data.get("metric"),
@@ -162,6 +170,7 @@ class TopicalRecordsService:
                     BabyRecord.kind == "daily_status",
                     BabyRecord.recorded_on >= query.start_date,
                     BabyRecord.recorded_on <= query.end_date,
+                    or_(BabyRecord.data["wet_count"].astext.is_not(None), BabyRecord.data["stool_count"].astext.is_not(None)),
                 )
                 .order_by(BabyRecord.recorded_on.desc(), BabyRecord.updated_at.desc(), BabyRecord.id.desc())
                 .limit(cap)
@@ -174,6 +183,7 @@ class TopicalRecordsService:
                         str(summary.id),
                         TopicalRecord(
                             source="baby_records",
+                            record_id=summary.id, revision=str(summary.version),
                             kind="diaper",
                             record_type="daily_summary",
                             recorded_on=summary.recorded_on,
@@ -181,6 +191,36 @@ class TopicalRecordsService:
                             stool_count=data.get("stool_count"),
                             color=data.get("color"),
                             consistency=data.get("consistency"),
+                        ),
+                    )
+                )
+        if query.topic == "after_feeding_mood":
+            assert infant_id is not None
+            mood_statement = (
+                select(BabyRecord)
+                .where(
+                    BabyRecord.owner_user_id == owner,
+                    BabyRecord.baby_id == infant_id,
+                    BabyRecord.deleted_at.is_(None),
+                    BabyRecord.kind == "daily_status",
+                    BabyRecord.recorded_on >= query.start_date,
+                    BabyRecord.recorded_on <= query.end_date,
+                    BabyRecord.data["mental_state"].astext.in_(("content", "active", "crying", "drowsy")),
+                )
+                .order_by(BabyRecord.recorded_on.desc(), BabyRecord.updated_at.desc(), BabyRecord.id.desc())
+                .limit(cap)
+            )
+            for summary in await self.session.scalars(mood_statement):
+                rows.append(
+                    (
+                        datetime.combine(cast(date, summary.recorded_on), time.min, tzinfo=zone).astimezone(timezone.utc),
+                        str(summary.id),
+                        TopicalRecord(
+                            source="baby_records",
+                            record_id=summary.id, revision=str(summary.version),
+                            kind="after_feeding_mood",
+                            recorded_on=summary.recorded_on,
+                            mental_state=summary.data["mental_state"],
                         ),
                     )
                 )
@@ -206,6 +246,7 @@ class TopicalRecordsService:
                         str(feeding.id),
                         TopicalRecord(
                             source="feeding_records",
+                            record_id=feeding.id, revision=feeding.updated_at.isoformat(),
                             kind="feeding",
                             occurred_at=feeding.feed_time,
                             method=feeding.feed_type,
@@ -227,15 +268,29 @@ class TopicalRecordsService:
                 .order_by(PumpingRecord.pump_start_time.desc(), PumpingRecord.id.desc())
                 .limit(cap)
             )
-            for pumping in await self.session.scalars(pumping_statement):
+            pumps = list(await self.session.scalars(pumping_statement))
+            linked_sides: dict[str, str] = {}
+            if pumps:
+                mirrors = await self.session.scalars(select(MotherObservation).where(
+                    MotherObservation.owner_user_id == owner,
+                    MotherObservation.kind == "pump",
+                    MotherObservation.fields["canonical_record_id"].astext.in_(str(p.id) for p in pumps),
+                ).order_by(MotherObservation.updated_at.desc(), MotherObservation.id.desc()))
+                for mirror in mirrors:
+                    side = mirror.fields.get("side")
+                    if side in {"Left side", "Right side", "Both sides", "左侧", "右侧", "两侧"}:
+                        linked_sides.setdefault(str(mirror.fields.get("canonical_record_id")), side)
+            for pumping in pumps:
                 rows.append(
                     (
                         pumping.pump_start_time,
                         str(pumping.id),
                         TopicalRecord(
                             source="pumping_records",
+                            record_id=pumping.id, revision=pumping.updated_at.isoformat(),
                             kind="pumping",
                             occurred_at=pumping.pump_start_time,
+                            side=linked_sides.get(str(pumping.id)),
                             volume_ml=pumping.milk_volume_ml,
                             duration_minutes=pumping.duration_seconds / 60 if pumping.duration_seconds is not None else None,
                         ),
@@ -261,12 +316,42 @@ class TopicalRecordsService:
                         str(pain.id),
                         TopicalRecord(
                             source="mother_observations",
+                            record_id=pain.id, revision=pain.updated_at.isoformat(),
                             kind="pain",
                             occurred_at=pain.occurred_at,
                             pain_score=fields.get("pain"),
                             side=fields.get("side"),
                             phase=fields.get("phase"),
                             impact=fields.get("impact"),
+                        ),
+                    )
+                )
+        elif query.topic == "latch":
+            latch_statement = (
+                select(MotherObservation)
+                .where(
+                    MotherObservation.owner_user_id == owner,
+                    MotherObservation.kind == "latch",
+                    MotherObservation.value.in_((
+                        "Stayed latched", "Came off easily", "Could not latch", "含得稳", "容易松开", "含不住",
+                    )),
+                    MotherObservation.occurred_at >= start,
+                    MotherObservation.occurred_at < end,
+                )
+                .order_by(MotherObservation.occurred_at.desc(), MotherObservation.id.desc())
+                .limit(cap)
+            )
+            for latch in await self.session.scalars(latch_statement):
+                rows.append(
+                    (
+                        latch.occurred_at,
+                        str(latch.id),
+                        TopicalRecord(
+                            source="mother_observations",
+                            record_id=latch.id, revision=latch.updated_at.isoformat(),
+                            kind="latch",
+                            occurred_at=latch.occurred_at,
+                            latch_status=cast(LatchStatus, latch.value),
                         ),
                     )
                 )
@@ -292,6 +377,7 @@ class TopicalRecordsService:
                         str(growth.id),
                         TopicalRecord(
                             source="growth_records",
+                            record_id=growth.id, revision=growth.updated_at.isoformat(),
                             kind="growth",
                             occurred_at=growth.measured_at,
                             recorded_on=growth.measured_at.astimezone(zone).date(),

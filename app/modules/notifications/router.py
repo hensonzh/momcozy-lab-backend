@@ -6,15 +6,16 @@ import httpx
 from fastapi import Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...api.dependencies import require_current_user
+from ...api.dependencies import require_agent_runtime_client, require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...infrastructure.db import get_session
 from ...infrastructure.agent_runtime import RuntimeConversationGateway
 from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
-from ..auth import CurrentUser
+from ..auth import CurrentUser, ServiceClient
 from .repository import NotificationsRepository
-from .schemas import NotificationListResponse, NotificationRead, NotificationReadStateUpdate
+from .producer import AgentUpdateProducer
+from .schemas import AgentUpdateRead, AgentUpdateWrite, NotificationListResponse, NotificationRead, NotificationReadStateUpdate
 from .service import NotificationsService
 from .lifecycle import NotificationLifecycleService
 from .schemas import (NotificationOpenRead, PushInstallationDetach, PushInstallationRead, PushInstallationWrite,
@@ -26,6 +27,25 @@ router = SurfaceAPIRouter(
     tags=["notifications"],
     api_surface_metadata=api_surface("public_app_api", owner="notifications", clients=["flutter"]),
 )
+
+
+internal_router = SurfaceAPIRouter(
+    prefix="/internal/agent/notifications",
+    tags=["internal-agent"],
+    api_surface_metadata=api_surface("internal_service_api", owner="notifications", clients=["agent-runtime"]),
+)
+
+
+def get_agent_update_producer(request: Request, session: AsyncSession = Depends(get_session)) -> AgentUpdateProducer:
+    return AgentUpdateProducer(session, push_available=request.app.state.settings.push_provider == "fcm")
+
+
+@internal_router.post("/reply-ready", response_model=AgentUpdateRead)
+async def agent_reply_ready(payload: AgentUpdateWrite,
+    _service_client: ServiceClient = Depends(require_agent_runtime_client),
+    producer: AgentUpdateProducer = Depends(get_agent_update_producer)) -> AgentUpdateRead:
+    return await producer.reply_ready(run_id=payload.run_id, owner_user_id=payload.owner_user_id,
+        thread_id=payload.thread_id, completed_at=payload.completed_at)
 
 
 def get_notifications_service(session: AsyncSession = Depends(get_session)) -> NotificationsService:
