@@ -51,6 +51,13 @@ SSH_KNOWN_HOSTS
 allowlist; staging can reuse the existing `STAGING_APPROVERS` variable and
 `STAGING_SSH_*` repository secrets when environment-scoped values are absent. Do not disable GitHub Environment required reviewers for production.
 
+## A staging HTTPS trust bundle
+
+Both public API origins use the App staging CA. The Backend-to-Agent URL must
+be the reviewed HTTPS origin; mount the system-root plus staging-CA bundle via
+`MOMCOZY_BACKEND_TRUST_BUNDLE_FILE`. Compose sets `SSL_CERT_FILE` for the API
+and workers without disabling verification or changing the public URL.
+
 ## Shared object-storage image prerequisite
 
 Public MinIO server/client tags used by the old stack are no longer reliably

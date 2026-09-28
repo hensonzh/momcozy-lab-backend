@@ -6,6 +6,7 @@ x-backend-image: &backend-image
     - ${MOMCOZY_BACKEND_ENV_FILE:?Set MOMCOZY_BACKEND_ENV_FILE}
   environment:
     APP_ENV: ${APP_ENV:?Set APP_ENV}
+    SSL_CERT_FILE: /run/momcozy/trust-bundle.pem
     AUTH_REQUIRE_ACTIVE_SESSION: "true"
     DATABASE_URL: postgresql+asyncpg://${MOMCOZY_PRODUCT_POSTGRES_USER:?Set MOMCOZY_PRODUCT_POSTGRES_USER}:${MOMCOZY_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_PRODUCT_POSTGRES_PASSWORD}@postgres:5432/${MOMCOZY_PRODUCT_POSTGRES_DB:?Set MOMCOZY_PRODUCT_POSTGRES_DB}
     REDIS_URL: redis://product-backend:${MOMCOZY_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_PRODUCT_REDIS_PASSWORD}@redis:6379/0
@@ -25,6 +26,8 @@ x-backend-image: &backend-image
     MOMCOZY_PRODUCT_MINIO_SECRET_KEY: ""
     MOMCOZY_AGENT_MINIO_ACCESS_KEY: ""
     MOMCOZY_AGENT_MINIO_SECRET_KEY: ""
+  volumes:
+    - ${MOMCOZY_BACKEND_TRUST_BUNDLE_FILE:-/etc/ssl/certs/ca-certificates.crt}:/run/momcozy/trust-bundle.pem:ro
   networks:
     - deployment
 
@@ -73,6 +76,7 @@ services:
     <<: *backend-image
     command: python -m app.workers.notifications
     volumes:
+      - ${MOMCOZY_BACKEND_TRUST_BUNDLE_FILE:-/etc/ssl/certs/ca-certificates.crt}:/run/momcozy/trust-bundle.pem:ro
       - ${MOMCOZY_PUSH_SECRETS_DIR:-./.local/push-secrets}:/run/momcozy-push:ro
     init: true
     restart: unless-stopped
