@@ -270,7 +270,8 @@ jobs:
               unexpected = {
                   table
                   for table in tables
-                  if table.startswith(("agent_", "user_fact"))
+                  if (table.startswith("agent_") and table != "agent_batch_receipts")
+                  or table.startswith("user_fact")
                   or table == "legacy_agent_context_checkpoints"
               }
               if unexpected:

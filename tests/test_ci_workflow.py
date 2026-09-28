@@ -62,3 +62,8 @@ def test_backend_ci_is_scoped_to_product_backend() -> None:
 
     assert "**" in text
     assert "src/momcozy" + "_agent" not in text
+
+
+def test_product_owned_agent_batch_receipts_are_not_rejected_as_runtime_tables() -> None:
+    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/backend-ci.yml").read_text()
+    assert 'table.startswith("agent_") and table != "agent_batch_receipts"' in workflow
