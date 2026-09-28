@@ -79,7 +79,12 @@ every authorized resolve and slides the Redis capability TTL by 30 minutes.
 The unauthenticated model fetch endpoint revalidates the file again, never
 renews TTL, returns `no-store` bytes, and is revoked by deletion. Configure
 `AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to the public HTTPS Product Backend origin
-reachable by the model provider.
+reachable by the model provider. In the local-only Compose environment, Agent
+Runtime instead fetches an owner-scoped image through its authenticated internal
+endpoint and inlines the bytes for the provider call; this avoids exposing a
+local developer machine through a public tunnel. The local inline image is
+never written to the transcript or context ledger. Staging/production keep the
+HTTPS capability URL flow and require a real provider-reachable origin.
 
 ## Local Development
 

@@ -100,6 +100,31 @@ class AgentFileAccessService:
         )
 
 
+class AgentLocalImageService:
+    """Return owner-scoped image bytes to the local Runtime without a public URL."""
+
+    def __init__(self, *, repository: Any, object_storage: Any, max_bytes: int) -> None:
+        self.repository = repository
+        self.object_storage = object_storage
+        self.max_bytes = max_bytes
+
+    async def fetch(self, *, owner_user_id: UUID, file_id: UUID) -> AgentModelAsset:
+        file_object = await self.repository.get_for_owner(
+            file_id=file_id, owner_user_id=owner_user_id,
+        )
+        content_type = _authorized_content_type(
+            file_object=file_object, purpose="model_image",
+        )
+        if file_object.id != file_id or file_object.owner_user_id != owner_user_id:
+            raise _invalid_attachment()
+        if file_object.size_bytes > self.max_bytes or file_object.size_bytes <= 0:
+            raise _invalid_attachment()
+        body = await self.object_storage.get_bytes(key=file_object.object_key)
+        if not body or len(body) > self.max_bytes:
+            raise _invalid_attachment()
+        return AgentModelAsset(body=bytes(body), content_type=content_type)
+
+
 class AgentModelAssetService:
     """Redeems one capability after revalidating authoritative file state."""
 

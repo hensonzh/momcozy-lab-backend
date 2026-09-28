@@ -118,6 +118,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 |---|---|---|---|---|---|
 | GET | `/.well-known/jwks.json` | auth | agent-runtime | stable | Jwks |
 | POST | `/v1/internal/agent/files/resolve` | files | agent-runtime | stable | Resolve Agent File |
+| GET | `/v1/internal/agent/files/{file_id}/model-image` | files | agent-runtime | stable | Get Local Model Image |
 | POST | `/v1/internal/agent/notifications/reply-ready` | notifications | agent-runtime | stable | Agent Reply Ready |
 | GET | `/v1/internal/agent/profile` | profiles | agent-runtime | stable | Read Agent Profile |
 | GET | `/v1/internal/agent/records` | profiles | agent-runtime | stable | Read Agent Topical Records |

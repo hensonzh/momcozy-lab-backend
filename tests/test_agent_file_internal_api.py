@@ -13,7 +13,7 @@ from app.core.errors import ApiError
 from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.files.agent_router import get_agent_file_service
-from app.modules.files.agent_service import AgentFileAccessService
+from app.modules.files.agent_service import AgentFileAccessService, AgentLocalImageService
 from app.modules.files.agent_asset_capability import IssuedAgentAssetCapability
 
 
@@ -251,6 +251,7 @@ def _file_object(*, content_type: str) -> SimpleNamespace:
         object_key=f"users/{owner_user_id}/files/checkup",
         original_filename="checkup.png",
         content_type=content_type,
+        size_bytes=128,
         status="active",
         deleted_at=None,
     )
@@ -263,3 +264,73 @@ def _app() -> FastAPI:
             agent_runtime_service_api_key=SERVICE_KEY,
         )
     )
+
+
+def test_local_model_image_bytes_require_service_identity_and_owner_scope() -> None:
+    from app.modules.files.agent_router import get_agent_local_image_service
+
+    file_object = _file_object(content_type="image/png")
+    service = AgentLocalImageService(
+        repository=OwnerScopedFakeFileRepository(file_object),
+        object_storage=FakeObjectStorage(),
+        max_bytes=10 * 1024 * 1024,
+    )
+    app = create_app(Settings(app_env="local", agent_runtime_service_api_key=SERVICE_KEY))
+    app.dependency_overrides[get_agent_local_image_service] = lambda: service
+    client = TestClient(app)
+    path = f"/v1/internal/agent/files/{file_object.id}/model-image"
+    assert client.get(path, params={"actor_user_id": str(file_object.owner_user_id)}).status_code == 401
+    foreign = client.get(path, params={"actor_user_id": str(uuid4())}, headers={"X-Service-Key": SERVICE_KEY})
+    assert foreign.status_code == 422
+    assert service.object_storage.keys == []
+    valid = client.get(path, params={"actor_user_id": str(file_object.owner_user_id)}, headers={"X-Service-Key": SERVICE_KEY})
+    assert valid.status_code == 200
+    assert valid.content == b"image-bytes"
+    assert valid.headers["content-type"] == "image/png"
+    assert valid.headers["cache-control"] == "private, no-store"
+    assert service.object_storage.keys == [file_object.object_key]
+
+
+def test_local_model_image_bytes_reject_non_images_deleted_and_oversized_files() -> None:
+    from app.modules.files.agent_service import AgentLocalImageService
+
+    for content_type, status, size in (
+        ("application/pdf", "active", 10),
+        ("image/png", "deleted", 10),
+        ("image/png", "active", 11 * 1024 * 1024),
+    ):
+        file_object = _file_object(content_type=content_type)
+        file_object.status = status
+        file_object.size_bytes = size
+        storage = FakeObjectStorage()
+        service = AgentLocalImageService(repository=FakeFileRepository(file_object), object_storage=storage,
+                                         max_bytes=10 * 1024 * 1024)
+        with pytest.raises(ApiError):
+            asyncio.run(service.fetch(owner_user_id=file_object.owner_user_id, file_id=file_object.id))
+        assert storage.keys == []
+
+
+def test_local_model_image_endpoint_is_unavailable_outside_local_environment() -> None:
+    from app.modules.files.agent_router import get_agent_local_image_service
+    file_object = _file_object(content_type="image/png")
+    app = _app()
+    app.dependency_overrides[get_agent_local_image_service] = lambda: None
+    response = TestClient(app).get(f"/v1/internal/agent/files/{file_object.id}/model-image",
+        params={"actor_user_id": str(file_object.owner_user_id)}, headers={"X-Service-Key": SERVICE_KEY})
+    assert response.status_code == 404
+
+
+class OwnerScopedFakeFileRepository(FakeFileRepository):
+    async def get_for_owner(self, *, file_id: UUID, owner_user_id: UUID) -> object | None:
+        if self.file_object is None or self.file_object.id != file_id or self.file_object.owner_user_id != owner_user_id:
+            return None
+        return self.file_object
+
+
+class FakeObjectStorage:
+    def __init__(self) -> None:
+        self.keys: list[str] = []
+
+    async def get_bytes(self, *, key: str) -> bytes:
+        self.keys.append(key)
+        return b"image-bytes"
