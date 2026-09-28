@@ -13,7 +13,7 @@ from app.core.errors import ApiError
 from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.files.agent_router import get_agent_file_service
-from app.modules.files.agent_service import AgentFileAccessService, AgentLocalImageService
+from app.modules.files.agent_service import AgentFileAccessService, AgentModelBytesService
 from app.modules.files.agent_asset_capability import IssuedAgentAssetCapability
 
 
@@ -266,57 +266,115 @@ def _app() -> FastAPI:
     )
 
 
-def test_local_model_image_bytes_require_service_identity_and_owner_scope() -> None:
-    from app.modules.files.agent_router import get_agent_local_image_service
+@pytest.mark.parametrize(
+    ("content_type", "purpose", "environment"),
+    (
+        ("image/png", "model_image", "local"),
+        ("application/pdf", "model_file", "local"),
+        ("image/png", "model_image", "staging"),
+        ("application/pdf", "model_file", "staging"),
+    ),
+)
+def test_model_asset_bytes_require_service_identity_and_owner_scope(
+    content_type: str, purpose: str, environment: str,
+) -> None:
+    from app.modules.files.agent_router import get_agent_model_bytes_service
 
-    file_object = _file_object(content_type="image/png")
-    service = AgentLocalImageService(
+    file_object = _file_object(content_type=content_type)
+    service = AgentModelBytesService(
         repository=OwnerScopedFakeFileRepository(file_object),
         object_storage=FakeObjectStorage(),
         max_bytes=10 * 1024 * 1024,
     )
     app = create_app(Settings(app_env="local", agent_runtime_service_api_key=SERVICE_KEY))
-    app.dependency_overrides[get_agent_local_image_service] = lambda: service
+    app.state.settings = Settings(app_env=environment, agent_runtime_service_api_key=SERVICE_KEY)
+    app.dependency_overrides[get_agent_model_bytes_service] = lambda: service
     client = TestClient(app)
-    path = f"/v1/internal/agent/files/{file_object.id}/model-image"
-    assert client.get(path, params={"actor_user_id": str(file_object.owner_user_id)}).status_code == 401
-    foreign = client.get(path, params={"actor_user_id": str(uuid4())}, headers={"X-Service-Key": SERVICE_KEY})
+    path = f"/v1/internal/agent/files/{file_object.id}/model-asset"
+    params = {"actor_user_id": str(file_object.owner_user_id), "purpose": purpose}
+    assert client.get(path, params=params).status_code == 401
+    foreign = client.get(path, params={**params, "actor_user_id": str(uuid4())}, headers={"X-Service-Key": SERVICE_KEY})
     assert foreign.status_code == 422
     assert service.object_storage.keys == []
-    valid = client.get(path, params={"actor_user_id": str(file_object.owner_user_id)}, headers={"X-Service-Key": SERVICE_KEY})
+    valid = client.get(path, params=params, headers={"X-Service-Key": SERVICE_KEY})
     assert valid.status_code == 200
     assert valid.content == b"image-bytes"
-    assert valid.headers["content-type"] == "image/png"
+    assert valid.headers["content-type"] == content_type
     assert valid.headers["cache-control"] == "private, no-store"
     assert service.object_storage.keys == [file_object.object_key]
 
 
-def test_local_model_image_bytes_reject_non_images_deleted_and_oversized_files() -> None:
-    from app.modules.files.agent_service import AgentLocalImageService
+@pytest.mark.parametrize(
+    ("content_type", "purpose", "status", "size"),
+    (
+        ("application/pdf", "model_image", "active", 10),
+        ("image/png", "model_file", "active", 10),
+        ("text/plain", "model_file", "active", 10),
+        ("image/png", "model_image", "deleted", 10),
+        ("image/png", "model_image", "active", 11 * 1024 * 1024),
+    ),
+)
+def test_model_asset_bytes_reject_invalid_purpose_deleted_and_oversized_files(
+    content_type: str, purpose: str, status: str, size: int,
+) -> None:
+    file_object = _file_object(content_type=content_type)
+    file_object.status = status
+    file_object.size_bytes = size
+    storage = FakeObjectStorage()
+    service = AgentModelBytesService(repository=FakeFileRepository(file_object), object_storage=storage,
+                                     max_bytes=10 * 1024 * 1024)
+    with pytest.raises(ApiError):
+        asyncio.run(service.fetch(owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose=purpose))
+    assert storage.keys == []
 
-    for content_type, status, size in (
-        ("application/pdf", "active", 10),
-        ("image/png", "deleted", 10),
-        ("image/png", "active", 11 * 1024 * 1024),
-    ):
-        file_object = _file_object(content_type=content_type)
-        file_object.status = status
-        file_object.size_bytes = size
+
+def test_model_asset_bytes_rejects_empty_and_oversized_storage_responses() -> None:
+    file_object = _file_object(content_type="application/pdf")
+    for body in (b"", b"x" * (10 * 1024 * 1024 + 1)):
         storage = FakeObjectStorage()
-        service = AgentLocalImageService(repository=FakeFileRepository(file_object), object_storage=storage,
-                                         max_bytes=10 * 1024 * 1024)
-        with pytest.raises(ApiError):
-            asyncio.run(service.fetch(owner_user_id=file_object.owner_user_id, file_id=file_object.id))
-        assert storage.keys == []
+        storage.body = body
+        service = AgentModelBytesService(
+            repository=OwnerScopedFakeFileRepository(file_object),
+            object_storage=storage, max_bytes=10 * 1024 * 1024,
+        )
+        with pytest.raises(ApiError) as error:
+            asyncio.run(service.fetch(
+                owner_user_id=file_object.owner_user_id, file_id=file_object.id,
+                purpose="model_file",
+            ))
+        assert error.value.code == "invalid_agent_attachment"
 
 
-def test_local_model_image_endpoint_is_unavailable_outside_local_environment() -> None:
-    from app.modules.files.agent_router import get_agent_local_image_service
+def test_legacy_local_image_endpoint_remains_compatible_but_not_available_in_staging() -> None:
+    from app.modules.files.agent_router import get_agent_model_bytes_service
+
+    file_object = _file_object(content_type="image/png")
+    service = AgentModelBytesService(
+        repository=OwnerScopedFakeFileRepository(file_object),
+        object_storage=FakeObjectStorage(), max_bytes=10 * 1024 * 1024,
+    )
+    app = create_app(Settings(app_env="local", agent_runtime_service_api_key=SERVICE_KEY))
+    app.dependency_overrides[get_agent_model_bytes_service] = lambda: service
+    client = TestClient(app)
+    path = f"/v1/internal/agent/files/{file_object.id}/model-image"
+    params = {"actor_user_id": str(file_object.owner_user_id)}
+    assert client.get(path, params=params).status_code == 401
+    valid = client.get(path, params=params, headers={"X-Service-Key": SERVICE_KEY})
+    assert valid.status_code == 200
+    assert valid.content == b"image-bytes"
+    assert valid.headers["content-type"] == "image/png"
+    app.state.settings = Settings(app_env="staging", agent_runtime_service_api_key=SERVICE_KEY)
+    assert client.get(path, params=params, headers={"X-Service-Key": SERVICE_KEY}).status_code == 404
+
+
+def test_model_asset_bytes_endpoint_is_unavailable_in_production() -> None:
+    from app.modules.files.agent_router import get_agent_model_bytes_service
     file_object = _file_object(content_type="image/png")
     app = _app()
-    app.dependency_overrides[get_agent_local_image_service] = lambda: None
-    response = TestClient(app).get(f"/v1/internal/agent/files/{file_object.id}/model-image",
-        params={"actor_user_id": str(file_object.owner_user_id)}, headers={"X-Service-Key": SERVICE_KEY})
+    app.state.settings = Settings(app_env="production", agent_runtime_service_api_key=SERVICE_KEY)
+    app.dependency_overrides[get_agent_model_bytes_service] = lambda: None
+    response = TestClient(app).get(f"/v1/internal/agent/files/{file_object.id}/model-asset",
+        params={"actor_user_id": str(file_object.owner_user_id), "purpose": "model_image"}, headers={"X-Service-Key": SERVICE_KEY})
     assert response.status_code == 404
 
 
@@ -330,7 +388,8 @@ class OwnerScopedFakeFileRepository(FakeFileRepository):
 class FakeObjectStorage:
     def __init__(self) -> None:
         self.keys: list[str] = []
+        self.body = b"image-bytes"
 
     async def get_bytes(self, *, key: str) -> bytes:
         self.keys.append(key)
-        return b"image-bytes"
+        return self.body

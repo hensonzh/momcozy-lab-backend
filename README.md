@@ -72,19 +72,19 @@ Core infrastructure is configured through `DATABASE_URL`, `REDIS_URL`, and
 vision when those providers are enabled. Agent model credentials and model
 settings belong to Agent Runtime.
 
-Images uploaded for Agent Runtime remain Product Backend-owned assets. Agent Runtime resolves an
-owner-scoped `asset_id` through the internal file endpoint and receives a
-stable opaque Product Backend capability URL. Product Backend revalidates owner/status/type on
-every authorized resolve and slides the Redis capability TTL by 30 minutes.
-The unauthenticated model fetch endpoint revalidates the file again, never
-renews TTL, returns `no-store` bytes, and is revoked by deletion. Configure
-`AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to the public HTTPS Product Backend origin
-reachable by the model provider. In the local-only Compose environment, Agent
-Runtime instead fetches an owner-scoped image through its authenticated internal
-endpoint and inlines the bytes for the provider call; this avoids exposing a
-local developer machine through a public tunnel. The local inline image is
-never written to the transcript or context ledger. Staging/production keep the
-HTTPS capability URL flow and require a real provider-reachable origin.
+Images uploaded for Agent Runtime remain Product Backend-owned assets. Agent Runtime
+verifies an owner-scoped `asset_id` via the internal file resolver. In local and
+staging, it fetches image/PDF bytes through the service-authenticated, owner-scoped
+`/v1/internal/agent/files/{file_id}/model-asset` endpoint and inlines them only
+for the model request. The bytes/data URL are never written to the transcript or
+context ledger. This avoids requiring the model provider to fetch files over the
+staging endpoint's internal CA (or a local developer tunnel).
+
+Production retains the HTTPS capability URL flow. Product Backend revalidates
+owner/status/type on every authorized resolve, slides the Redis capability TTL
+by 30 minutes, and revalidates the file before an unauthenticated model fetch.
+Configure `AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to a provider-reachable public
+HTTPS Product Backend origin for production.
 
 ## Local Development
 

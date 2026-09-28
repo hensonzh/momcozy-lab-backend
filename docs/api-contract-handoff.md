@@ -160,15 +160,21 @@ the error envelope's `details` contains only `operation_index` (zero-based),
 ### Files
 
 - `POST /v1/internal/agent/files/resolve`
-- `GET /v1/model-assets/{token}`
+- `GET /v1/internal/agent/files/{file_id}/model-asset` (local/staging)
+- `GET /v1/model-assets/{token}` (production capability)
 
-The request carries `actor_user_id`, Product `file_id`, and purpose. Product
-validates ownership and returns an opaque Product capability URL. Repeated
-authorized resolves reuse the URL and slide its 30-minute inactivity TTL.
-`file_id` remains the durable identity; the capability URL must not be
-persisted as an identity.
+The resolve request carries `actor_user_id`, Product `file_id`, and purpose.
+Product validates ownership and returns an opaque Product capability URL;
+repeated authorized resolves reuse the URL and slide its 30-minute inactivity
+TTL. `file_id` remains the durable identity; the URL is not persisted or used
+in the local/staging model request.
 
-The model-asset GET is intentionally unauthenticated because the high-entropy
+In local and staging, the service-authenticated internal model-asset GET checks
+owner, active status, content type, purpose, and size before returning image or
+PDF bytes. Agent Runtime inlines them only for the provider call and persists
+only the file id; the model provider never needs to fetch the internal-CA URL.
+
+The public model-asset GET is intentionally unauthenticated because the high-entropy
 path token is a bearer capability. It remains rate limited, does not renew its
 own TTL, revalidates authoritative file state before proxying bytes, returns
 `Cache-Control: private, no-store`, and uses the same opaque 404 for expired,

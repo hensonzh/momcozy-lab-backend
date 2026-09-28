@@ -12,8 +12,8 @@ from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
 from ..auth import ServiceClient
 from .agent_asset_capability import AgentAssetCapabilityStore
-from .agent_contracts import AgentFileResolveRequest, AgentFileResolveResponse
-from .agent_service import AgentFileAccessService, AgentLocalImageService
+from .agent_contracts import AgentFilePurpose, AgentFileResolveRequest, AgentFileResolveResponse
+from .agent_service import AgentFileAccessService, AgentModelBytesService
 from .repository import FileRepository
 
 
@@ -62,15 +62,36 @@ async def resolve_agent_file(
     return AgentFileResolveResponse.model_validate(result)
 
 
-def get_agent_local_image_service(
+def get_agent_model_bytes_service(
     request: Request,
     session: AsyncSession = Depends(get_session),
     object_storage: ObjectStorage = Depends(get_object_storage),
-) -> AgentLocalImageService:
-    return AgentLocalImageService(
+) -> AgentModelBytesService:
+    return AgentModelBytesService(
         repository=FileRepository(session),
         object_storage=object_storage,
         max_bytes=request.app.state.settings.file_upload_max_bytes,
+    )
+
+
+@router.get("/files/{file_id}/model-asset", response_class=Response)
+async def get_model_asset_bytes(
+    file_id: UUID,
+    request: Request,
+    actor_user_id: UUID = Query(...),
+    purpose: AgentFilePurpose = Query(...),
+    _service_client: ServiceClient = Depends(require_agent_runtime_client),
+    service: AgentModelBytesService = Depends(get_agent_model_bytes_service),
+) -> Response:
+    if request.app.state.settings.app_env not in {"local", "staging"}:
+        raise ApiError(code="not_found", message="Not found.", status=404)
+    asset = await service.fetch(
+        owner_user_id=actor_user_id, file_id=file_id, purpose=purpose,
+    )
+    return Response(
+        content=asset.body,
+        media_type=asset.content_type,
+        headers={"Cache-Control": "private, no-store"},
     )
 
 
@@ -80,13 +101,16 @@ async def get_local_model_image(
     request: Request,
     actor_user_id: UUID = Query(...),
     _service_client: ServiceClient = Depends(require_agent_runtime_client),
-    service: AgentLocalImageService = Depends(get_agent_local_image_service),
+    service: AgentModelBytesService = Depends(get_agent_model_bytes_service),
 ) -> Response:
+    """Keep the previously published local-only internal endpoint compatible."""
     if request.app.state.settings.app_env != "local":
         raise ApiError(code="not_found", message="Not found.", status=404)
-    image = await service.fetch(owner_user_id=actor_user_id, file_id=file_id)
+    asset = await service.fetch(
+        owner_user_id=actor_user_id, file_id=file_id, purpose="model_image",
+    )
     return Response(
-        content=image.body,
-        media_type=image.content_type,
+        content=asset.body,
+        media_type=asset.content_type,
         headers={"Cache-Control": "private, no-store"},
     )
