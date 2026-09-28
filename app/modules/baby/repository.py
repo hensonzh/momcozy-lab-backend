@@ -39,6 +39,14 @@ class BabyRecordRepository:
             raise ApiError(code='not_found', message='Baby record not found.', status=404)
         return value
 
+    async def daily_status(self, owner: UUID, baby_id: UUID, day: date) -> BabyRecord | None:
+        value: BabyRecord | None = await self.session.scalar(select(BabyRecord).where(
+            BabyRecord.owner_user_id == owner, BabyRecord.baby_id == baby_id,
+            BabyRecord.kind == 'daily_status', BabyRecord.recorded_on == day,
+            BabyRecord.deleted_at.is_(None),
+        ).with_for_update().execution_options(populate_existing=True))
+        return value
+
     async def active_sleep(self, baby_id: UUID, exclude: UUID | None = None) -> bool:
         query = select(BabyRecord.id).where(BabyRecord.baby_id == baby_id, BabyRecord.kind == 'sleep', BabyRecord.deleted_at.is_(None), BabyRecord.ended_at.is_(None))
         if exclude is not None:

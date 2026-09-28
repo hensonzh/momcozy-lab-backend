@@ -92,6 +92,39 @@ def test_records_preserve_unknown_values_and_isolate_babies_through_delete_resto
 
 
 @postgres
+def test_daily_status_creates_merge_into_one_current_day_without_losing_other_fields():
+    async def run():
+        async with database() as (sessions, _, now, _, owners, _):
+            first, second, _foreign = await babies(sessions, owners)
+            day = now.date()
+            async def save(baby_id, payload, key):
+                observation = BabyRecordWrite.model_validate({'observation': {
+                    'kind': 'daily_status', 'recorded_on': day, 'timezone': 'UTC', **payload,
+                }}).observation
+                async with sessions.begin() as session:
+                    return await service(session, now).create(owners[0], baby_id, observation, key, key)
+            wet = await save(first, {'wet_count': 2}, 'wet-2')
+            newer = await save(first, {'wet_count': 4}, 'wet-4')
+            stool = await save(first, {'stool_count': 3, 'color': 'yellow'}, 'stool-3')
+            mood = await save(first, {'mental_state': 'content'}, 'mood')
+            assert {wet.id, newer.id, stool.id, mood.id} == {wet.id}
+            assert [wet.version, newer.version, stool.version, mood.version] == [1, 2, 3, 4]
+            await save(second, {'wet_count': 1}, 'other-baby')
+            async with sessions.begin() as session:
+                current = (await service(session, now).list(owners[0], first, day, day + timedelta(days=1),
+                    timezone_name='UTC', kind='daily_status', offset=0, limit=10)).items
+                assert len(current) == 1
+                assert current[0].observation.wet_count == 4
+                assert current[0].observation.stool_count == 3
+                assert current[0].observation.color == 'yellow'
+                assert current[0].observation.mental_state == 'content'
+                persisted = (await session.scalars(select(BabyRecord).where(BabyRecord.baby_id == first,
+                    BabyRecord.recorded_on == day))).all()
+                assert len(persisted) == 1 and persisted[0].id == wet.id
+    asyncio.run(run())
+
+
+@postgres
 def test_active_sleep_is_single_per_baby_and_midnight_queries_include_overlap():
     async def run():
         async with database() as (sessions, booking, now, provider, owners, episodes):

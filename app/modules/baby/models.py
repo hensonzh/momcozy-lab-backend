@@ -18,6 +18,7 @@ class BabyRecord(Base):
         Index('ix_baby_records_scope_time', 'owner_user_id', 'baby_id', 'occurred_at', 'id'),
         Index('ix_baby_records_scope_date', 'owner_user_id', 'baby_id', 'recorded_on', 'id'),
         Index('uq_baby_records_active_sleep', 'baby_id', unique=True, postgresql_where=text("kind = 'sleep' AND ended_at IS NULL AND deleted_at IS NULL")),
+        Index('uq_baby_records_active_daily_status', 'baby_id', 'recorded_on', unique=True, postgresql_where=text("kind = 'daily_status' AND deleted_at IS NULL")),
         CheckConstraint("kind IN ('feeding','sleep','diaper','growth','development','daily_status')", name='baby_record_kind'),
         CheckConstraint("ended_at IS NULL OR (kind = 'sleep' AND ended_at > occurred_at)", name='baby_record_sleep_end'),
         CheckConstraint('version >= 1', name='baby_record_version'),

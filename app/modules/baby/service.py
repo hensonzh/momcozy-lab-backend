@@ -10,7 +10,7 @@ from ...core.errors import ApiError
 from ..audit.service import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
 from .models import BabyRecord
 from .repository import BabyRecordRepository
-from .schemas import BabyRecordBatchWrite, BabyRecordList, BabyRecordRead, BabyRecordUpdate, DatedObservation, NotedObservation, Observation, RecordKind, SleepObservation
+from .schemas import BabyRecordBatchWrite, BabyRecordList, BabyRecordRead, BabyRecordUpdate, DailyStatusObservation, DatedObservation, NotedObservation, Observation, RecordKind, SleepObservation
 
 
 def utc_now() -> datetime:
@@ -47,6 +47,21 @@ class BabyRecordService:
                 raise ApiError(code='record_deleted', message='This record was deleted.', status=409)
             return value
         await self._validate(baby_id, observation, birth_date=baby.birth_date)
+        if isinstance(observation, DailyStatusObservation):
+            existing = await self.repository.daily_status(owner, baby_id, observation.recorded_on)
+            if existing is not None:
+                merged = DailyStatusObservation.model_validate({
+                    'kind': 'daily_status', 'recorded_on': observation.recorded_on,
+                    **existing.data,
+                    **observation.model_dump(mode='json', exclude_none=True, exclude={'kind', 'recorded_on'}),
+                })
+                self._apply(existing, merged)
+                existing.version += 1
+                existing.updated_at = self.now()
+                await self.repository.session.flush()
+                await self.idempotency.mark_completed(record=decision.record, response_ref=str(existing.id))
+                await self._audit(owner, existing, 'update', request_id)
+                return existing
         value = BabyRecord(owner_user_id=owner, baby_id=baby_id, version=1, created_at=self.now(), updated_at=self.now())
         self._apply(value, observation)
         self.repository.session.add(value)
@@ -92,6 +107,10 @@ class BabyRecordService:
         if value.kind != body.observation.kind:
             raise ApiError(code='record_kind_changed', message='Edit a record within its original category.', status=422)
         await self._validate(baby_id, body.observation, birth_date=baby.birth_date, exclude=record_id)
+        if (isinstance(body.observation, DailyStatusObservation) and
+                body.observation.recorded_on != value.recorded_on and
+                await self.repository.daily_status(owner, baby_id, body.observation.recorded_on)):
+            raise conflict()
         self._apply(value, body.observation)
         value.version += 1
         value.updated_at = self.now()
@@ -108,6 +127,8 @@ class BabyRecordService:
             raise conflict()
         if not deleted:
             await self._validate(baby_id, value.observation, birth_date=baby.birth_date, exclude=record_id)
+            if value.kind == 'daily_status' and value.recorded_on is not None and await self.repository.daily_status(owner, baby_id, value.recorded_on):
+                raise conflict()
         value.deleted_at, value.version, value.updated_at = self.now() if deleted else None, value.version + 1, self.now()
         await self.repository.session.flush()
         await self._audit(owner, value, 'delete' if deleted else 'restore', request_id)

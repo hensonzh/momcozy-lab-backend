@@ -350,6 +350,17 @@ class AgentBatchService:
             values["recorded_on" if record.recorded_on else "occurred_at"] = record.recorded_on or record.occurred_at
         else:
             values = {"kind": "daily_status" if op.topic == "after_feeding_mood" or op.record_type == "daily_summary" else op.topic}
+            if values["kind"] == "daily_status":
+                day = op.fields.recorded_on
+                if day is None:
+                    raise _invalid(index, "Recording date is required.", field="fields.recorded_on", reason="required")
+                record = await self.session.scalar(select(BabyRecord).where(
+                    BabyRecord.owner_user_id == owner, BabyRecord.baby_id == op.infant_id,
+                    BabyRecord.kind == "daily_status", BabyRecord.recorded_on == day,
+                    BabyRecord.deleted_at.is_(None),
+                ).with_for_update())
+                if record is not None:
+                    values = {"kind": record.kind, **record.data, "recorded_on": record.recorded_on}
         fields = op.fields.model_dump(exclude_unset=True)
         if op.topic == "after_feeding_mood" and values["kind"] != "daily_status":
             raise _not_found(index)
@@ -365,6 +376,15 @@ class AgentBatchService:
         except ValidationError as exc:
             raise _invalid(index) from exc
         if isinstance(observation, DatedObservation):
+            if (record is not None and op.op == "update" and record.kind == "daily_status"
+                    and observation.recorded_on != record.recorded_on):
+                occupied = await self.session.scalar(select(BabyRecord.id).where(
+                    BabyRecord.owner_user_id == owner, BabyRecord.baby_id == op.infant_id,
+                    BabyRecord.kind == "daily_status", BabyRecord.recorded_on == observation.recorded_on,
+                    BabyRecord.deleted_at.is_(None), BabyRecord.id != record.id,
+                ))
+                if occupied is not None:
+                    raise _conflict(index, field="fields.recorded_on")
             if observation.recorded_on > datetime.now(zone).date() or (baby.birth_date and observation.recorded_on < baby.birth_date):
                 raise _invalid(index, "Date must be from birth through today.")
         elif isinstance(observation, NotedObservation) and (observation.occurred_at > datetime.now(timezone.utc)
@@ -374,10 +394,13 @@ class AgentBatchService:
             record = BabyRecord(owner_user_id=owner, baby_id=op.infant_id, version=1)
             self.session.add(record)
         else:
-            assert op.record_id is not None
-            if ("baby_records", op.record_id) not in updated:
+            if record.kind == 'daily_status' and op.op == 'create':
                 record.version += 1
-                updated.add(("baby_records", op.record_id))
+            else:
+                assert op.record_id is not None
+                if ("baby_records", op.record_id) not in updated:
+                    record.version += 1
+                    updated.add(("baby_records", op.record_id))
         record.kind = observation.kind
         record.occurred_at = getattr(observation, "occurred_at", None)
         record.recorded_on = getattr(observation, "recorded_on", None)

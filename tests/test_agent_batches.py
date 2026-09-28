@@ -586,3 +586,99 @@ def test_legacy_pumping_side_update_creates_valid_me_mirror_and_replays_once():
                 assert len(observed.items) == 1 and observed.items[0].side == 'Both sides'
                 assert observed.items[0].volume_ml == 40
     asyncio.run(run())
+
+@postgres
+def test_daily_summary_agent_creates_replace_totals_and_share_mood_without_duplicates():
+    from app.modules.profiles.topical_records import TopicalRecordsQuery, TopicalRecordsService
+    from app.modules.profiles.repository import ProfileRepository
+
+    async def run():
+        async with database() as (sessions, _, _, _, owners, _):
+            owner, baby, day = owners[0], uuid4(), '2026-09-23'
+            async with sessions.begin() as session:
+                session.add(BabyProfile(id=baby, owner_user_id=owner, name='Baby', birth_date=datetime(2026, 8, 1).date()))
+                mother = MaternalProfile(owner_user_id=owner, latest_delivery_date=datetime(2026, 8, 1).date())
+                session.add(mother)
+                await session.flush()
+                session.add(MaternalCurrentDeliveryInfant(maternal_profile_id=mother.id, infant_id=baby, birth_order=1))
+
+            def create(topic, fields):
+                return {'op': 'create', 'topic': topic, 'infant_id': str(baby),
+                    **({'record_type': 'daily_summary'} if topic == 'diaper' else {}),
+                    'fields': {'recorded_on': day, **fields}}
+
+            batch = RecordBatch.model_validate({'actor_user_id': owner, 'timezone': 'UTC', 'operations': [
+                create('diaper', {'wet_count': 2}),
+                create('diaper', {'wet_count': 4}),
+                create('diaper', {'stool_count': 3, 'color': 'yellow'}),
+                create('after_feeding_mood', {'mental_state': 'active'}),
+            ]})
+            key = str(uuid4())
+            async with sessions.begin() as session:
+                result = await AgentBatchService(session).records(batch, key=key, request_id='daily-summaries')
+            assert len({item.resource_id for item in result.items}) == 1
+            assert [item.revision for item in result.items] == ['1', '2', '3', '4']
+            async with sessions.begin() as session:
+                replay = await AgentBatchService(session).records(batch, key=key, request_id='retry')
+                assert replay == result
+                record = await session.get(BabyRecord, result.items[0].resource_id)
+                assert record.version == 4 and record.data['wet_count'] == 4
+                assert record.data['stool_count'] == 3 and record.data['mental_state'] == 'active'
+                assert len((await session.scalars(select(BabyRecord).where(BabyRecord.baby_id == baby))).all()) == 1
+                query = dict(actor_user_id=owner, infant_id=baby, start_date=day, end_date=day, timezone='UTC')
+                reader = TopicalRecordsService(session, ProfileRepository(session))
+                diaper = (await reader.read(TopicalRecordsQuery(topic='diaper', **query))).items
+                mood = (await reader.read(TopicalRecordsQuery(topic='after_feeding_mood', **query))).items
+                assert len(diaper) == len(mood) == 1
+                assert diaper[0].wet_count == 4 and diaper[0].stool_count == 3
+                assert mood[0].mental_state == 'active'
+
+            separate = RecordBatch.model_validate({'actor_user_id': owner, 'timezone': 'UTC',
+                'operations': [create('diaper', {'wet_count': 5})]})
+            async with sessions.begin() as session:
+                changed = await AgentBatchService(session).records(separate, key=str(uuid4()), request_id='another-day-save')
+                assert changed.items[0].resource_id == result.items[0].resource_id
+                assert changed.items[0].revision == '5'
+                record = await session.get(BabyRecord, changed.items[0].resource_id)
+                assert record.data['wet_count'] == 5 and record.data['stool_count'] == 3
+    asyncio.run(run())
+
+@postgres
+def test_daily_status_agent_create_requires_date_and_date_move_cannot_collide():
+    async def run():
+        async with database() as (sessions, _, _, _, owners, _):
+            owner, baby = owners[0], uuid4()
+            async with sessions.begin() as session:
+                session.add(BabyProfile(id=baby, owner_user_id=owner, name='Baby', birth_date=datetime(2026, 8, 1).date()))
+                mother = MaternalProfile(owner_user_id=owner, latest_delivery_date=datetime(2026, 8, 1).date())
+                session.add(mother)
+                await session.flush()
+                session.add(MaternalCurrentDeliveryInfant(maternal_profile_id=mother.id, infant_id=baby, birth_order=1))
+
+            def batch(operations):
+                return RecordBatch.model_validate({'actor_user_id': owner, 'timezone': 'UTC', 'operations': operations})
+
+            without_date = {'op': 'create', 'topic': 'diaper', 'record_type': 'daily_summary',
+                'infant_id': str(baby), 'fields': {'wet_count': 2}}
+            with pytest.raises(ApiError) as exc:
+                async with sessions.begin() as session:
+                    await AgentBatchService(session).records(batch([without_date]), key=str(uuid4()), request_id='missing-date')
+            assert exc.value.code == 'validation_failed'
+            assert exc.value.details['field_path'] == 'fields.recorded_on'
+
+            first = {**without_date, 'fields': {'recorded_on': '2026-09-22', 'wet_count': 2}}
+            second = {**without_date, 'fields': {'recorded_on': '2026-09-23', 'wet_count': 3}}
+            async with sessions.begin() as session:
+                result = await AgentBatchService(session).records(batch([first, second]), key=str(uuid4()), request_id='different-days')
+            move = {'op': 'update', 'topic': 'diaper', 'record_type': 'daily_summary',
+                'infant_id': str(baby), 'record_source': 'baby_records',
+                'record_id': str(result.items[0].resource_id), 'revision': '1',
+                'fields': {'recorded_on': '2026-09-23'}}
+            with pytest.raises(ApiError) as exc:
+                async with sessions.begin() as session:
+                    await AgentBatchService(session).records(batch([move]), key=str(uuid4()), request_id='colliding-date')
+            assert exc.value.code == 'version_conflict'
+            async with sessions.begin() as session:
+                rows = (await session.scalars(select(BabyRecord).where(BabyRecord.baby_id == baby))).all()
+                assert len(rows) == 2 and {row.recorded_on.isoformat() for row in rows} == {'2026-09-22', '2026-09-23'}
+    asyncio.run(run())
