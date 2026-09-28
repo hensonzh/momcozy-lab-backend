@@ -64,4 +64,7 @@ class InviteCodeRepository:
         invite_code.status = "disabled"
         invite_code.disabled_at = disabled_at
         await self.session.flush()
+        # SQL onupdate expires updated_at; response serialization must not trigger
+        # an implicit async lazy load outside the greenlet context.
+        await self.session.refresh(invite_code)
         return invite_code
