@@ -86,6 +86,8 @@ jobs:
           ci_private_key_b64="$(
             openssl base64 -A -in /tmp/momcozy-backend-ci-private-key.pem
           )"
+          # A generated test key still needs masking before it enters later job logs.
+          printf '::add-mask::%s\n' "$ci_private_key_b64"
           printf 'AUTH_JWT_PRIVATE_KEY_B64=%s\n' \
             "$ci_private_key_b64" >> "$GITHUB_ENV"
           rm -f /tmp/momcozy-backend-ci-private-key.pem
