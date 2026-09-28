@@ -71,22 +71,23 @@ def test_product_owned_agent_batch_receipts_are_not_rejected_as_runtime_tables()
 
 def test_pinned_minio_ci_builds_reuse_main_only_layer_cache_without_skipping_smoke() -> None:
     text = WORKFLOW.read_text()
-    sections = text.split('      - name: Build the pinned community MinIO image\n')[1:]
-    assert len(sections) == 2
-    for section in sections:
-        step = section.split('      - name:', 1)[0]
+    container = text.split("  container:\n", 1)[1].split("  postgres-migration:\n", 1)[0]
+    object_storage = text.split("  object-storage-integration:\n", 1)[1]
+    for section in (container, object_storage):
+        build = section.split("      - name: Build the pinned community MinIO image\n", 1)[1].split("      - name:", 1)[0]
         for line in (
-            'uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4',
-            'context: deploy/shared',
-            'file: deploy/shared/Minio.Dockerfile',
-            'load: true',
-            'push: false',
-            'tags: momcozy-staging-minio:9e49d5e7a648f00e',
-            'cache-from: type=gha,scope=momcozy-minio-9e49d5e7a648f00e',
-            "github.ref == 'refs/heads/main'",
-            'cache-to:',
+            "uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4",
+            "context: deploy/shared",
+            "file: deploy/shared/Minio.Dockerfile",
+            "load: true",
+            "push: false",
+            "tags: momcozy-staging-minio:9e49d5e7a648f00e",
+            "cache-from: type=gha,scope=momcozy-minio-9e49d5e7a648f00e",
         ):
-            assert line in step
-    assert text.count('uses: docker/setup-buildx-action@v3') == 2
-    assert 'Smoke-test migration-gated readiness' in text
-    assert 'Check object storage profile' in text
+            assert line in build
+    assert "cache-to:" not in container
+    assert "cache-to:" in object_storage
+    assert "github.ref == 'refs/heads/main'" in object_storage
+    assert text.count("uses: docker/setup-buildx-action@v3") == 2
+    assert "Smoke-test migration-gated readiness" in container
+    assert "Check object storage profile" in object_storage

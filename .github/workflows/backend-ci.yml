@@ -149,7 +149,6 @@ jobs:
           push: false
           tags: momcozy-staging-minio:9e49d5e7a648f00e
           cache-from: type=gha,scope=momcozy-minio-9e49d5e7a648f00e
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=momcozy-minio-9e49d5e7a648f00e' || '' }}
 
       - name: Smoke-test migration-gated readiness
         run: |
