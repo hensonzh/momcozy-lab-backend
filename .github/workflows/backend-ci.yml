@@ -70,7 +70,7 @@ jobs:
       contents: read
       packages: write
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
     env:
       MOMCOZY_BACKEND_ENV_FILE: env/local.env.example
       IMMUTABLE_IMAGE_TAG: ghcr.io/${{ github.repository }}:${{ github.sha }}
@@ -137,6 +137,9 @@ jobs:
         run: |
           docker run --rm momcozy-lab-backend:ci \
             python scripts/check_productization_status.py
+
+      - name: Build the pinned community MinIO image
+        run: docker build --file deploy/shared/Minio.Dockerfile --tag momcozy-staging-minio:9e49d5e7a648f00e deploy/shared
 
       - name: Smoke-test migration-gated readiness
         run: |
@@ -306,6 +309,7 @@ jobs:
 
   object-storage-integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       OBJECT_STORAGE_PROVIDER: minio
       OBJECT_STORAGE_BUCKET: momcozy-test
@@ -323,13 +327,16 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements-dev.txt
 
+      - name: Build the pinned community MinIO image
+        run: docker build --file deploy/shared/Minio.Dockerfile --tag momcozy-staging-minio:9e49d5e7a648f00e deploy/shared
+
       - name: Start MinIO
         run: |
           docker run -d --name momcozy-minio \
             -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:RELEASE.2025-07-23T15-54-02Z server /data --address ":9000"
+            momcozy-staging-minio:9e49d5e7a648f00e server /data --address ":9000"
           for i in {1..30}; do
             if curl -fs http://localhost:9000/minio/health/live; then
               exit 0

@@ -43,7 +43,11 @@ def test_deploy_compose_is_environment_neutral_and_private() -> None:
     assert "9000:9000" not in compose
     assert "postgres:16" in compose
     assert "redis:7.4-alpine" in compose
-    assert "minio/minio:RELEASE.2025-07-23T15-54-02Z" in compose
+    assert "momcozy-staging-minio:9e49d5e7a648f00e" in compose
+    dockerfile = (ROOT / "deploy/shared/Minio.Dockerfile").read_text()
+    assert "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a" in dockerfile
+    assert "sha256sum -c" in dockerfile
+    assert "Build the pinned community MinIO image" in CI_WORKFLOW.read_text()
     assert "read_only" not in compose.split("  postgres:", 1)[1]
 
 

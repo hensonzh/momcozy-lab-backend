@@ -51,6 +51,17 @@ SSH_KNOWN_HOSTS
 allowlist; staging can reuse the existing `STAGING_APPROVERS` variable and
 `STAGING_SSH_*` repository secrets when environment-scoped values are absent. Do not disable GitHub Environment required reviewers for production.
 
+## Shared object-storage image prerequisite
+
+Public MinIO server/client tags used by the old stack are no longer reliably
+pullable. Before the first staging bootstrap, build the checked-in
+`deploy/shared/Minio.Dockerfile` on the deployment host as
+`momcozy-staging-minio:9e49d5e7a648f00e`. It verifies the official MinIO
+source commit and the official mc release checksum; CI builds and smoke-tests
+the same image. Do not retag the stopped legacy image or bypass the MinIO
+integration jobs. Record the resulting local image ID. Only the Backend Compose
+owns this stateful service and its new volumes; the Agent deploy joins it.
+
 ## Bootstrap
 
 Run `.github/workflows/backend-delivery.yml` with:

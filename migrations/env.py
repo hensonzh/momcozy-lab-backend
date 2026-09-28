@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.core.settings import Settings
 from app.infrastructure.db.base import Base
 from app.infrastructure.db import models as _models  # noqa: F401
+from migrations.retained_schema import include_object
 
 
 config = context.config
@@ -31,6 +32,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -38,7 +40,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True, include_object=include_object)
 
     with context.begin_transaction():
         context.run_migrations()
