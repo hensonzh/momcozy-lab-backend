@@ -141,7 +141,15 @@ jobs:
             python scripts/check_productization_status.py
 
       - name: Build the pinned community MinIO image
-        run: docker build --file deploy/shared/Minio.Dockerfile --tag momcozy-staging-minio:9e49d5e7a648f00e deploy/shared
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: deploy/shared
+          file: deploy/shared/Minio.Dockerfile
+          load: true
+          push: false
+          tags: momcozy-staging-minio:9e49d5e7a648f00e
+          cache-from: type=gha,scope=momcozy-minio-9e49d5e7a648f00e
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=momcozy-minio-9e49d5e7a648f00e' || '' }}
 
       - name: Smoke-test migration-gated readiness
         run: |
@@ -330,8 +338,19 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements-dev.txt
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build the pinned community MinIO image
-        run: docker build --file deploy/shared/Minio.Dockerfile --tag momcozy-staging-minio:9e49d5e7a648f00e deploy/shared
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: deploy/shared
+          file: deploy/shared/Minio.Dockerfile
+          load: true
+          push: false
+          tags: momcozy-staging-minio:9e49d5e7a648f00e
+          cache-from: type=gha,scope=momcozy-minio-9e49d5e7a648f00e
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=momcozy-minio-9e49d5e7a648f00e' || '' }}
 
       - name: Start MinIO
         run: |
