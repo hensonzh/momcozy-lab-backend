@@ -138,3 +138,64 @@ def test_makefile_exposes_validation_but_not_direct_deploy_mutation() -> None:
     assert "backend-deploy-validate" in makefile
     assert "$(DEPLOY_COMPOSE) up" not in makefile
     assert "$(DEPLOY_COMPOSE) down" not in makefile
+
+
+def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = (root / "deploy/config_us-east-uat").read_text()
+    entries = dict(
+        line.split("=", 1)
+        for line in config.splitlines()
+        if line and not line.startswith("#")
+    )
+
+    assert entries == {
+        "APP_ENV": "staging",
+        "LOG_LEVEL": "INFO",
+        "READINESS_CHECK_INFRASTRUCTURE": "true",
+        "AUTH_REQUIRE_ACTIVE_SESSION": "true",
+        "OBJECT_STORAGE_PROVIDER": "s3",
+        "AUTH_EMAIL_FROM": "noreply@mail-momcozy-uat.luteos.cloud",
+        "AUTH_SMTP_HOST": "smtp.resend.com",
+        "AUTH_SMTP_PORT": "587",
+        "AUTH_SMTP_USERNAME": "resend",
+        "PRODUCT_ASSET_MANIFEST_PATH": "/workspace/assets/product-assets.manifest.json",
+    }
+    assert "PostgreSQL database: momcozy_lab_pre" in config
+    assert "cozy-ai.clm4o6oqe8vg.us-east-1.rds.amazonaws.com" in config
+    assert "master.cozy-application-pre.po3nd4.use1.cache.amazonaws.com" in config
+    assert "Redis port/database: 6379 / DB 0" in config
+    assert "DATABASE_URL" not in entries and "REDIS_URL" not in entries
+    dockerfile = (root / "deploy/Dockerfile").read_text()
+    assert 'org.momcozy.release-target="north-america-staging"' in dockerfile
+    assert "python:3.13-slim@sha256:" in dockerfile
+    assert "COPY --chown=app:app app app" in dockerfile
+    assert "COPY --chown=app:app assets assets" in dockerfile
+    assert "COPY --chown=app:app scripts/deliver_auth_emails.py scripts/deliver_auth_emails.py" in dockerfile
+    assert "COPY --chown=app:app . ." not in dockerfile
+    assert 'CMD ["uvicorn", "app.main:app"' in dockerfile
+    assert 'org.momcozy.release-target' not in (root / "Dockerfile").read_text()
+    workloads = (root / "deploy/us-east-uat/workloads.yaml").read_text()
+    migration = (root / "deploy/us-east-uat/migration-job.yaml").read_text()
+    assert workloads.count("kind: Deployment") == 3
+    assert "momcozy-product-api-uat-secrets" in workloads
+    assert "momcozy-product-notification-uat-secrets" in workloads
+    assert "momcozy-product-email-uat-secrets" in workloads
+    assert "momcozy-product-migrate-uat-secrets" in migration
+    assert "REPLACE_WITH_APPROVED_US_EAST_UAT_NAMESPACE" in workloads + migration
+    assert "REPLACE_WITH_BACKEND_IMAGE_DIGEST" in workloads + migration
+    assert "kind: Job" in migration and "alembic.ini, upgrade, head" in migration
+    assert "kind: Deployment" not in migration
+    assert "postgres:" not in workloads and "minio:" not in workloads
+    import json
+
+    source = json.loads((root / "deploy/us-east-uat/release-source.json").read_text())
+    assert source == {
+        "deployment_target": "north-america-staging",
+        "source_branch": "uat",
+        "build_context": ".",
+        "dockerfile": "deploy/Dockerfile",
+        "non_secret_config": "deploy/config_us-east-uat",
+        "migration_template": "deploy/us-east-uat/migration-job.yaml",
+        "workloads_template": "deploy/us-east-uat/workloads.yaml",
+    }

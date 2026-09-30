@@ -1,0 +1,97 @@
+# B-only Kubernetes workload template. Supply a reviewed namespace, immutable
+# Backend image digest and private ConfigMap/Secret before any deployment.
+# This file deliberately has no Ingress, PostgreSQL, Redis or S3 provisioning.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: momcozy-product-api-uat
+  namespace: REPLACE_WITH_APPROVED_US_EAST_UAT_NAMESPACE
+  labels: {app.kubernetes.io/part-of: momcozy-us-east-uat}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: momcozy-product-api-uat}
+  template:
+    metadata:
+      labels: {app: momcozy-product-api-uat}
+    spec:
+      containers:
+        - name: api
+          image: REPLACE_WITH_BACKEND_IMAGE_DIGEST
+          ports: [{name: http, containerPort: 8000}]
+          envFrom:
+            - configMapRef: {name: momcozy-product-uat-config}
+            - secretRef: {name: momcozy-product-api-uat-secrets}
+          startupProbe:
+            httpGet: {path: /v1/health/live, port: http}
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet: {path: /v1/health/live, port: http}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /v1/health/ready, port: http}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {cpu: '1', memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: momcozy-product-api-uat
+  namespace: REPLACE_WITH_APPROVED_US_EAST_UAT_NAMESPACE
+  labels: {app.kubernetes.io/part-of: momcozy-us-east-uat}
+spec:
+  selector: {app: momcozy-product-api-uat}
+  ports: [{name: http, port: 8000, targetPort: http}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: momcozy-product-notification-worker-uat
+  namespace: REPLACE_WITH_APPROVED_US_EAST_UAT_NAMESPACE
+  labels: {app.kubernetes.io/part-of: momcozy-us-east-uat}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: momcozy-product-notification-worker-uat}
+  template:
+    metadata:
+      labels: {app: momcozy-product-notification-worker-uat}
+    spec:
+      containers:
+        - name: worker
+          image: REPLACE_WITH_BACKEND_IMAGE_DIGEST
+          command: [python, -m, app.workers.notifications]
+          envFrom:
+            - configMapRef: {name: momcozy-product-uat-config}
+            - secretRef: {name: momcozy-product-notification-uat-secrets}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 250m, memory: 256Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: momcozy-product-email-worker-uat
+  namespace: REPLACE_WITH_APPROVED_US_EAST_UAT_NAMESPACE
+  labels: {app.kubernetes.io/part-of: momcozy-us-east-uat}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: momcozy-product-email-worker-uat}
+  template:
+    metadata:
+      labels: {app: momcozy-product-email-worker-uat}
+    spec:
+      containers:
+        - name: worker
+          image: REPLACE_WITH_BACKEND_IMAGE_DIGEST
+          command: [python, -m, scripts.deliver_auth_emails]
+          envFrom:
+            - configMapRef: {name: momcozy-product-uat-config}
+            - secretRef: {name: momcozy-product-email-uat-secrets}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 250m, memory: 256Mi}
