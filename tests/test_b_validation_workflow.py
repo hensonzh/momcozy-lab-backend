@@ -14,9 +14,16 @@ def test_b_validation_only_targets_dev_and_never_deploys() -> None:
     assert "env/us-east-uat.env.example" in text
     assert "python -m pytest" in text
     assert "python -m ruff check" in text
+    assert "tests/test_north_america_target.py" in text
+    assert "tests/test_staging_trust_bundle.py" in text
+    assert "tests/test_b_ingress_contract.py" in text
     assert "deploy/Dockerfile" in text
     assert "docker build" in text
     assert "scripts/check_b_infra_contract.sh" in text
+    assert "tests/test_b_redis_recovery.py" in text
+    assert "RUN_B_REDIS_RECOVERY=1 python -m pytest -q tests/test_b_redis_recovery_docker.py" in text
+    assert "scripts/check_b_minio_recovery_contract.sh" in text
+    assert "deploy/shared/Minio.Dockerfile" in text
     contract = text.split("\n  b-image:", 1)[0]
     for forbidden in (
         "docker push", "docker compose up", "scripts/release.py",

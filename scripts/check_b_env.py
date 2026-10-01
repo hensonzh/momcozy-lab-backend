@@ -25,6 +25,12 @@ EXPECTED = {
     "MOMCOZY_PRODUCT_MINIO_BUCKET": "momcozy-product-us-east-uat",
     "MOMCOZY_AGENT_MINIO_BUCKET": "momcozy-agent-us-east-uat",
     "OBJECT_STORAGE_ENDPOINT_URL": "http://minio:9000",
+    "MOMCOZY_BACKEND_PUBLIC_URL": "https://backend-us-dev.lute-momcozylab.luteos.cloud",
+    "MOMCOZY_AGENT_PUBLIC_URL": "https://agent-us-dev.lute-momcozylab.luteos.cloud",
+    "AGENT_RUNTIME_URL": "https://agent-us-dev.lute-momcozylab.luteos.cloud",
+    "AGENT_MODEL_ASSET_PUBLIC_BASE_URL": "https://backend-us-dev.lute-momcozylab.luteos.cloud",
+    "TRUSTED_HOSTS": "backend-us-dev.lute-momcozylab.luteos.cloud,product-backend,localhost,127.0.0.1",
+    "MOMCOZY_BACKEND_TRUST_BUNDLE_FILE": "/etc/ssl/certs/ca-certificates.crt",
 }
 REQUIRED_SECRETS = (
     "MOMCOZY_POSTGRES_ADMIN_PASSWORD", "MOMCOZY_PRODUCT_POSTGRES_PASSWORD",
@@ -55,7 +61,7 @@ def validate(path: Path) -> None:
         values[key] = value.strip()
     for key, expected in EXPECTED.items():
         if values.get(key) != expected:
-            raise ValueError(f"B env {key} does not match the isolated topology")
+            raise ValueError(f"B env {key} does not match the approved B origin or isolated topology")
     if values.get("DATABASE_URL", "").split("@")[-1] != "postgres:5432/momcozy_lab_backend_uat":
         raise ValueError("B env DATABASE_URL must use the B Product database")
     if not values.get("DATABASE_URL", "").startswith("postgresql+asyncpg://momcozy_lab_backend_uat:"):

@@ -35,3 +35,4 @@ data/
 !deploy/us-east-uat/start-redis.sh
 !deploy/us-east-uat/init-postgres.sh
 !scripts/check_b_infra_contract.sh
+!scripts/check_b_minio_recovery_contract.sh

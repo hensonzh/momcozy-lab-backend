@@ -13,8 +13,8 @@ MOMCOZY_AGENT_COMPOSE_PROJECT=momcozy-lab-agent-us-east-uat
 MOMCOZY_NETWORK_NAME=momcozy-lab-us-east-uat
 MOMCOZY_BACKEND_API_BIND=127.0.0.1:8101
 MOMCOZY_AGENT_API_BIND=127.0.0.1:8102
-MOMCOZY_BACKEND_PUBLIC_URL=https://product-uat.example.org
-MOMCOZY_AGENT_PUBLIC_URL=https://agent-uat.example.org
+MOMCOZY_BACKEND_PUBLIC_URL=https://backend-us-dev.lute-momcozylab.luteos.cloud
+MOMCOZY_AGENT_PUBLIC_URL=https://agent-us-dev.lute-momcozylab.luteos.cloud
 MOMCOZY_POSTGRES_ADMIN_USER=momcozy_us_east_uat_admin
 MOMCOZY_AGENT_POSTGRES_DB=momcozy_lab_agent_uat
 MOMCOZY_AGENT_POSTGRES_USER=momcozy_lab_agent_uat
@@ -31,8 +31,6 @@ PRODUCT_BACKEND_SERVICE_KEY=synthetic-AGENT_RUNTIME_SERVICE_API_KEY
 def _env(tmp_path: Path, name: str) -> Path:
     data = (ROOT / "env/us-east-uat.env.example").read_text() if name == "backend.env" else AGENT_TEMPLATE
     data = data.replace("REPLACE_WITH_US_EAST_UAT_", "synthetic-")
-    data = data.replace("product-uat.example.invalid", "product-uat.example.org")
-    data = data.replace("agent-uat.example.invalid", "agent-uat.example.org")
     path = tmp_path / name
     path.write_text(data)
     path.chmod(0o600)

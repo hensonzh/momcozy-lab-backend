@@ -27,7 +27,7 @@ jobs:
       - name: Check B contracts and retain A release guard
         run: |
           python -m ruff check app tests scripts
-          python -m pytest tests/test_deployment_templates.py tests/test_environment_delivery.py tests/test_check_b_env.py tests/test_b_host_layout.py tests/test_b_release_admission.py tests/test_b_rollback_admission.py tests/test_b_postgres_recovery.py tests/test_b_pair_config.py tests/test_b_validation_workflow.py tests/test_release_target_guard.py
+          python -m pytest tests/test_deployment_templates.py tests/test_environment_delivery.py tests/test_check_b_env.py tests/test_north_america_target.py tests/test_staging_trust_bundle.py tests/test_b_ingress_contract.py tests/test_b_host_layout.py tests/test_b_release_admission.py tests/test_b_rollback_admission.py tests/test_b_postgres_recovery.py tests/test_b_redis_recovery.py tests/test_b_minio_recovery_contract.py tests/test_b_pair_config.py tests/test_b_validation_workflow.py tests/test_release_target_guard.py
           bash -n deploy/us-east-uat/init-postgres.sh
           sh -n deploy/us-east-uat/start-redis.sh
 
@@ -44,6 +44,14 @@ jobs:
 
       - name: Exercise B two-database synthetic dump and isolated restore
         run: RUN_B_PG_RECOVERY=1 python -m pytest -q tests/test_b_postgres_recovery_docker.py
+
+      - name: Exercise B synthetic Redis RDB backup and isolated restore
+        run: RUN_B_REDIS_RECOVERY=1 python -m pytest -q tests/test_b_redis_recovery_docker.py
+
+      - name: Build pinned B-only MinIO image and exercise two-bucket isolated restore
+        run: |
+          docker build -f deploy/shared/Minio.Dockerfile -t momcozy-us-east-uat-minio:9e49d5e7a648f00e deploy/shared
+          bash scripts/check_b_minio_recovery_contract.sh
 
       - name: Build B-only Dockerfile locally (do not publish)
         run: docker build -f deploy/Dockerfile -t momcozy-lab-backend:b-validation .

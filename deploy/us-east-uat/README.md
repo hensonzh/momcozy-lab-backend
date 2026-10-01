@@ -28,6 +28,18 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
 - Use distinct B Compose project names, network, port binds, release root,
   lock and 0600 private env files; do not mount or modify A's data volumes.
   Expose only the two API loopback ports to a B-specific TLS reverse proxy.
+  The B HTTPS origins are
+  `https://backend-us-dev.lute-momcozylab.luteos.cloud` and
+  `https://agent-us-dev.lute-momcozylab.luteos.cloud`; both DNS A records
+  resolved to `32.199.186.149` on 2026-10-01. DNS alone is not an ingress or
+  certificate check: HTTPS :443 timed out from the operator Mac and target.
+  The B containers mount the host's system CA bundle for outbound HTTPS;
+  this does not install an ingress TLS certificate or prove public trust.
+  The versioned, **not installed** B ingress template is
+  `deploy/us-east-uat/nginx-backend.conf`: it listens on :443 with this
+  hostname and proxies only to `127.0.0.1:8101`. It names a future public
+  certificate under `/etc/letsencrypt/live/`; the file is not present yet.
+  Do not enable a fake/self-signed public endpoint to bypass TLS verification.
   PostgreSQL, Redis and MinIO must not expose public host ports. Build the
   pinned MinIO source image for this B tag before first bootstrap:
   `docker build -f deploy/shared/Minio.Dockerfile -t momcozy-us-east-uat-minio:9e49d5e7a648f00e deploy/shared`.
@@ -42,7 +54,8 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   private env templates now exist. The B-only GitHub `dev`
   `backend-b-validation.yml` runs on GitHub `dev`; it checks contracts,
   synthetic PostgreSQL/Redis isolation, two-database synthetic dump/restore,
-  and locally builds the B Dockerfile. After those gates pass on a GitHub `dev`
+  Redis RDB and MinIO two-bucket synthetic backup/isolated restores, and
+  locally builds the B Dockerfile. After those gates pass on a GitHub `dev`
   push, the separate `b-image` job publishes only the B Dockerfile image to
   private GHCR as `b-dev-<full SHA>` and records its immutable digest. Verify
   the exact commit's job and digest before release. It does not run migrations
@@ -79,8 +92,17 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   Alembic revision and writes mode-0600 checksummed evidence only after both
   restores succeed. A local two-database synthetic drill passed and B CI
   exercises the same drill on `dev`. It does not cover
-  MinIO/Redis, off-host retention or point-in-time restore. It does not prove
-  a complete production data restore without a target-host drill. Complete those
+  MinIO, Redis live data, off-host retention or point-in-time restore.
+  `scripts/b_redis_recovery.py --apply` similarly acquires the B release lock,
+  checks the dedicated `/data` backup bind mount, captures a fresh RDB from the
+  B-owned Redis container without putting its ACL password in host arguments,
+  and verifies key count after restoring in a disposable no-network/no-volume
+  container. A Redis ACL/stream/lock synthetic contract test also runs; the
+  RDB drill has a separate CI synthetic test with Product/Agent keys. **Neither
+  synthetic drill proves a target-host backup or lossless recovery of live
+  changing data**; Redis AOF history is not preserved by the RDB copy.
+  MinIO, real Redis/PostgreSQL drills and off-host retention still block the
+  complete production-data recovery gate. Complete those
   gates before wiring any reviewed deploy operation. The
   `scripts/check_b_rollback.py` is read-only: it checks B-only release
   symlinks/manifests, equal schema revisions and queries the B-owned
@@ -93,7 +115,7 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   Keep B-specific rollback and schema-compatibility gates; do not downgrade
   databases automatically. Verify `/v1/health/ready` and real UAT mail flow.
 - This file does not authorize cloud or server changes. Host capacity was
-  measured but 10-run load is untested; domain/TLS, DNS/SMTP and provider egress,
+  measured but 10-run load is untested; HTTPS/TLS ingress, SMTP and provider authentication,
   final bucket names, real secrets, stateful recovery, data-migration strategy
   and actual delivery behavior must still be verified before enabling B. Basic
   TCP connections to `smtp.resend.com:587`, `api.openai.com:443` and
@@ -117,9 +139,10 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
 - The mode-0700 B root `/opt/momcozy-lab-us-east-uat` contains separate
   `releases/backend`, `releases/agent`, `shared/backend`, `shared/agent`,
   `current` and `previous` directories. The B release lock and both private
-  env and target JSON files are mode 0600. **The env files still contain
-  `REPLACE_WITH` secrets and invalid `.example.invalid` URLs; the target
-  URLs remain `TBD`.** Their preflight checks reject them as intended.
+  env and target JSON files are mode 0600. The approved B domains have been
+  entered in both private env and target declarations; **the env files still
+  contain `REPLACE_WITH` secrets, and HTTPS/TLS is not reachable**. Env and
+  release preflight must continue to reject deployment.
 - A dedicated systemd bind mount maps
   `/data/momcozy-lab-us-east-uat/backups` to
   `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
@@ -160,12 +183,13 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   in GitHub, Codeup, logs, command arguments or chat. Compose and application
   secrets originate only from private host files; a real delivery must avoid
   printing `docker compose config` or unmasked process environment.
-- A separate private target JSON for each service must contain its own
-  approved HTTPS origin. The checked-in `.example` remains invalid until
-  those domains, DNS and TLS are approved. Keep the target files mode 0600.
+- A separate private target JSON for each service contains its own approved
+  HTTPS origin. The checked-in `.example` now documents those non-secret
+  origins; the private declarations remain mode 0600. A valid static target
+  check is **not** evidence of a public certificate or running service.
 - The host architecture, Docker/Compose and on-host backup mount are
   verified. Host UFW is inactive; external security-group exposure was not
-  audited. DNS/TLS, approved domains, real credentials, data-disposition
+  audited. HTTPS/TLS, real credentials, data-disposition
   decision, MinIO/Redis backup and isolated recovery, off-host retention,
   immutable registry images and a reviewed B-only deployment/rollback runner
   remain gates. The synthetic test is not a live backup rehearsal.
