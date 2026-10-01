@@ -47,7 +47,7 @@ docker exec "$source_name" sh -ec '
 '
 docker exec "$source_name" tar -C /tmp/momcozy-b-backup -cf - . | tar -C "$backup_dir" -xf -
 [[ -f "$backup_dir/product/recovery-canary" && -f "$backup_dir/agent/recovery-canary" ]]
-[[ "$(stat -f %Lp "$backup_dir" 2>/dev/null || stat -c %a "$backup_dir")" == 700 ]]
+[[ "$(python3 -c 'import os, stat, sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$backup_dir")" == 0o700 ]]
 
 # The destination is a different server with no network, no named volume and
 # no public host port. A read-only bind of the synthetic copy is its sole input.
