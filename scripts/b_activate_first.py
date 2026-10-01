@@ -68,6 +68,33 @@ def check_service_containers_absent(service: str) -> None:
             raise ValueError("B first release already has business containers")
 
 
+def check_running_service_provenance(args: argparse.Namespace) -> None:
+    """Recover only the exact B containers created by this source and image."""
+    project = f"momcozy-lab-{args.service}-us-east-uat"
+    expected = {"api", "notification-worker", "auth-email-worker"} if args.service == "backend" else {"api", "worker"}
+    for service in expected:
+        configured_hash = _run(_compose(args, ["config", "--hash", service]),
+                               cwd=args.source, env=_environment(args)).strip().split()
+        if len(configured_hash) != 2 or configured_hash[0] != service or not re.fullmatch(r"[0-9a-f]{64}", configured_hash[1]):
+            raise ValueError("B service configuration hash is unavailable")
+        ids = _run(["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
+                    "--filter", f"label=com.docker.compose.service={service}", "--format", "{{.ID}}"])
+        if len(ids.splitlines()) != 1:
+            raise ValueError("B running recovery requires exactly one container per business service")
+        container = json.loads(_run(["docker", "inspect", ids.strip(), "--format", "{{json .}}"]))
+        labels = container["Config"]["Labels"]
+        if (container["State"]["Status"] != "running" or container["Image"] != args.image_id
+                or labels.get("com.docker.compose.project") != project
+                or labels.get("com.docker.compose.service") != service
+                or labels.get("com.docker.compose.project.working_dir") != str(args.source)
+                or labels.get("com.docker.compose.project.config_files") != str(args.source / "docker-compose.us-east-uat.yml")
+                or labels.get("com.docker.compose.project.environment_file") != str(args.env_file)
+                or labels.get("com.docker.compose.config-hash") != configured_hash[1]):
+            raise ValueError("B running container provenance differs; refuse first-release promotion")
+        if service == "api" and container["State"].get("Health", {}).get("Status") != "healthy":
+            raise ValueError("B API container is not healthy")
+
+
 def _compose(args: argparse.Namespace, command: list[str]) -> list[str]:
     return ["docker", "compose", "--env-file", str(args.env_file), "-f", "docker-compose.us-east-uat.yml", *command]
 
@@ -106,13 +133,20 @@ def check_ready(service: str) -> None:
         if len(lines.splitlines()) != 1:
             raise ValueError("B required worker or API is not running")
     sockets = _run(["ss", "-ltnH", f"( sport = :{port} )"])
-    if f"127.0.0.1:{port}" not in sockets or "0.0.0.0" in sockets:
+    # ss includes a peer column such as 0.0.0.0:* for a loopback listener.
+    # Only the local-address column describes exposure.
+    local_addresses = [fields[3] for line in sockets.splitlines()
+                       if len(fields := line.split()) >= 5]
+    if local_addresses != [f"127.0.0.1:{port}"]:
         raise ValueError("B API loopback port is not isolated")
 
 
 def activate(args: argparse.Namespace) -> None:
     check_fresh_pointer(args.service, args.source)
-    check_service_containers_absent(args.service)
+    if getattr(args, "recover_running", False):
+        check_running_service_provenance(args)
+    else:
+        check_service_containers_absent(args.service)
     revision = read_live_revision(args.service)
     backups = select_latest(_validate_backup_mount(ROOT))
     if backups["postgres"].is_symlink():
@@ -121,8 +155,10 @@ def activate(args: argparse.Namespace) -> None:
     database = "momcozy_lab_backend_uat" if args.service == "backend" else "momcozy_lab_agent_uat"
     if revision_evidence["databases"][database]["alembic_revision"] != revision:
         raise ValueError("B live schema differs from isolated recovery evidence")
-    start_services(args)
+    if not getattr(args, "recover_running", False):
+        start_services(args)
     check_ready(args.service)
+    check_running_service_provenance(args)
     manifest = args.source / "release-manifest.json"
     payload = {"deployment_target": "north-america-staging", "service": args.service,
                "commit": args.commit, "image_ref": args.image, "migration_revision": revision,
@@ -137,6 +173,8 @@ def activate(args: argparse.Namespace) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--recover-running", action="store_true",
+                        help="After a partial first activation, verify exact running containers without restarting them")
     parser.add_argument("--service", required=True, choices=PORTS)
     for option in ("source", "env-file", "target"):
         parser.add_argument("--" + option, required=True, type=Path)
