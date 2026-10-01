@@ -40,12 +40,11 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   image digest and use a separate approved US-East host and release root.
   `deploy/config_us-east-uat` is **non-secret defaults only**. B Compose and
   private env templates now exist. The B-only GitHub `dev`
-  `backend-b-validation.yml` has run successfully on GitHub `dev`; it checks
-  contracts, synthetic PostgreSQL/Redis isolation and locally builds
-  the B Dockerfile. This worktree adds a two-database synthetic restore
-  CI test which has not been pushed yet; the workflow does not publish an image,
-  run migrations against UAT or deploy. Release integration and live validation
-  still remain. B Compose requires `MOMCOZY_B_ENV_MARKER` so A env
+  `backend-b-validation.yml` runs on GitHub `dev`; it checks contracts,
+  synthetic PostgreSQL/Redis isolation, two-database synthetic dump/restore,
+  and locally builds the B Dockerfile. Verify the exact commit's CI result
+  before release. The workflow does not publish an image, run migrations
+  against UAT or deploy; release integration and live validation remain. B Compose requires `MOMCOZY_B_ENV_MARKER` so A env
   cannot pass static rendering by accident; the read-only `scripts/check_b_env.py`
   also verifies B identity, loopback ports, DB 0, private file mode and no
   placeholders. The marker alone does not prove isolation. `scripts/release.py`
@@ -76,7 +75,7 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   restores each on an isolated disposable PostgreSQL server to verify the
   Alembic revision and writes mode-0600 checksummed evidence only after both
   restores succeed. A local two-database synthetic drill passed and B CI
-  will run the same drill after these changes are committed. It does not cover
+  exercises the same drill on `dev`. It does not cover
   MinIO/Redis, off-host retention or point-in-time restore. It does not prove
   a complete production data restore without a target-host drill. Complete those
   gates before wiring any reviewed deploy operation. The
