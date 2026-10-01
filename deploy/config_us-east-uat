@@ -1,20 +1,21 @@
-# US East UAT: non-secret container startup defaults for Product Backend.
-# UAT uses APP_ENV=staging because the application has no separate uat mode.
-# IT must inject environment-specific URLs, database/Redis/S3 credentials,
-# JWT signing key, mail credentials, and service keys via managed Secrets.
-# This file alone is not a deployable environment configuration.
-# IT-confirmed US East UAT managed endpoints (not connection URLs):
-# Product PostgreSQL database: momcozy_lab_pre
-# PostgreSQL host: cozy-ai.clm4o6oqe8vg.us-east-1.rds.amazonaws.com
-# Redis host: master.cozy-application-pre.po3nd4.use1.cache.amazonaws.com
-# Redis port/database: 6379 / DB 0
-# Inject complete DATABASE_URL and REDIS_URL through the approved Secret path;
-# confirm PostgreSQL port and DB/Redis TLS mode before assembly. Never commit passwords.
+# US-East UAT (B) non-secret defaults for the planned single-host Compose stack.
+# This file is not a complete env_file and does not start the stack by itself.
+# Keep A's Compose project, volumes, ports, private env and release root separate.
+# Backend owns the B PostgreSQL, Redis and MinIO containers and their volumes.
+# B PostgreSQL will contain separate momcozy_lab_backend_uat and
+# momcozy_lab_agent_uat databases, with separate service roles.
+# B Redis is one self-hosted service: Product and Agent use logical DB 0 with
+# existing distinct key prefixes: Product rate-limit:* and product:*;
+# Agent agent-runtime:* and momcozy-agent-runtime:*. Use distinct ACL users.
+# B MinIO is one self-hosted service with Product and Agent private buckets.
+# Inject complete DATABASE_URL, REDIS_URL, bucket and credentials only via
+# the private B runtime env; do not reuse former RDS/ElastiCache/S3 credentials.
 APP_ENV=staging
 LOG_LEVEL=INFO
 READINESS_CHECK_INFRASTRUCTURE=true
 AUTH_REQUIRE_ACTIVE_SESSION=true
-OBJECT_STORAGE_PROVIDER=s3
+OBJECT_STORAGE_PROVIDER=minio
+OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000
 AUTH_EMAIL_FROM=noreply@mail-momcozy-uat.luteos.cloud
 AUTH_SMTP_HOST=smtp.resend.com
 AUTH_SMTP_PORT=587

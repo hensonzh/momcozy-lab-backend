@@ -141,31 +141,35 @@ def test_makefile_exposes_validation_but_not_direct_deploy_mutation() -> None:
 
 
 def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
+    import json
+
     root = Path(__file__).resolve().parents[1]
     config = (root / "deploy/config_us-east-uat").read_text()
     entries = dict(
-        line.split("=", 1)
-        for line in config.splitlines()
+        line.split("=", 1) for line in config.splitlines()
         if line and not line.startswith("#")
     )
-
     assert entries == {
         "APP_ENV": "staging",
         "LOG_LEVEL": "INFO",
         "READINESS_CHECK_INFRASTRUCTURE": "true",
         "AUTH_REQUIRE_ACTIVE_SESSION": "true",
-        "OBJECT_STORAGE_PROVIDER": "s3",
+        "OBJECT_STORAGE_PROVIDER": "minio",
+        "OBJECT_STORAGE_ENDPOINT_URL": "http://minio:9000",
         "AUTH_EMAIL_FROM": "noreply@mail-momcozy-uat.luteos.cloud",
         "AUTH_SMTP_HOST": "smtp.resend.com",
         "AUTH_SMTP_PORT": "587",
         "AUTH_SMTP_USERNAME": "resend",
         "PRODUCT_ASSET_MANIFEST_PATH": "/workspace/assets/product-assets.manifest.json",
     }
-    assert "PostgreSQL database: momcozy_lab_pre" in config
-    assert "cozy-ai.clm4o6oqe8vg.us-east-1.rds.amazonaws.com" in config
-    assert "master.cozy-application-pre.po3nd4.use1.cache.amazonaws.com" in config
-    assert "Redis port/database: 6379 / DB 0" in config
+    assert "momcozy_lab_backend_uat" in config
+    assert "momcozy_lab_agent_uat" in config
+    assert "Product and Agent use logical DB 0" in config
+    assert "rate-limit:* and product:*" in config
     assert "DATABASE_URL" not in entries and "REDIS_URL" not in entries
+    assert "cozy-ai.clm4o6oqe8vg" not in config
+    assert "master.cozy-application-pre" not in config
+
     dockerfile = (root / "deploy/Dockerfile").read_text()
     assert 'org.momcozy.release-target="north-america-staging"' in dockerfile
     assert "python:3.13-slim@sha256:" in dockerfile
@@ -175,27 +179,52 @@ def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
     assert "COPY --chown=app:app . ." not in dockerfile
     assert 'CMD ["uvicorn", "app.main:app"' in dockerfile
     assert 'org.momcozy.release-target' not in (root / "Dockerfile").read_text()
-    workloads = (root / "deploy/us-east-uat/workloads.yaml").read_text()
-    migration = (root / "deploy/us-east-uat/migration-job.yaml").read_text()
-    assert workloads.count("kind: Deployment") == 3
-    assert "momcozy-product-api-uat-secrets" in workloads
-    assert "momcozy-product-notification-uat-secrets" in workloads
-    assert "momcozy-product-email-uat-secrets" in workloads
-    assert "momcozy-product-migrate-uat-secrets" in migration
-    assert "REPLACE_WITH_APPROVED_US_EAST_UAT_NAMESPACE" in workloads + migration
-    assert "REPLACE_WITH_BACKEND_IMAGE_DIGEST" in workloads + migration
-    assert "kind: Job" in migration and "alembic.ini, upgrade, head" in migration
-    assert "kind: Deployment" not in migration
-    assert "postgres:" not in workloads and "minio:" not in workloads
-    import json
-
     source = json.loads((root / "deploy/us-east-uat/release-source.json").read_text())
     assert source == {
         "deployment_target": "north-america-staging",
-        "source_branch": "uat",
+        "source_branch": "dev",
         "build_context": ".",
         "dockerfile": "deploy/Dockerfile",
         "non_secret_config": "deploy/config_us-east-uat",
-        "migration_template": "deploy/us-east-uat/migration-job.yaml",
-        "workloads_template": "deploy/us-east-uat/workloads.yaml",
+        "deployment_strategy": "single-host-docker-compose",
+        "compose_file": "docker-compose.us-east-uat.yml",
+        "private_env_template": "env/us-east-uat.env.example",
     }
+    assert not (root / "deploy/us-east-uat/workloads.yaml").exists()
+    assert not (root / "deploy/us-east-uat/migration-job.yaml").exists()
+    assert "not an executable" in (root / "deploy/us-east-uat/README.md").read_text()
+
+
+def test_us_east_uat_compose_isolated_from_a_and_owns_stateful_services() -> None:
+    compose = (ROOT / "docker-compose.us-east-uat.yml").read_text()
+    env = (ROOT / "env/us-east-uat.env.example").read_text()
+    assert "name: momcozy-lab-backend-us-east-uat" in compose
+    assert "name: momcozy-lab-us-east-uat" in compose
+    assert "name: momcozy-lab-backend-staging" not in compose
+    assert "postgres_data:" in compose and "redis_data:" in compose and "minio_data:" in compose
+    assert "minio-init:" in compose
+    assert "./deploy/us-east-uat/start-redis.sh:" in compose
+    assert "./deploy/us-east-uat/init-postgres.sh:" in compose
+    b_postgres = (ROOT / "deploy/us-east-uat/init-postgres.sh").read_text()
+    assert b_postgres.count("REVOKE CONNECT, TEMPORARY") == 2
+    assert b_postgres.count("GRANT CONNECT, TEMPORARY") == 2
+    b_redis = (ROOT / "deploy/us-east-uat/start-redis.sh").read_text()
+    assert "-select -move -swapdb -flushdb -flushall" in b_redis
+    assert "~rate-limit:*" in b_redis and "~agent-runtime:*" in b_redis
+    for service in ("postgres", "redis", "minio"):
+        section = compose.split(f"  {service}:\n", 1)[1].split("\n  ", 1)[0]
+        assert "    ports:" not in section
+    assert "MOMCOZY_PRODUCT_POSTGRES_DB=momcozy_lab_backend_uat" in env
+    assert "MOMCOZY_AGENT_POSTGRES_DB=momcozy_lab_agent_uat" in env
+    assert "REDIS_URL=redis://product-backend:${MOMCOZY_PRODUCT_REDIS_PASSWORD}@redis:6379/0" in env
+    assert "OBJECT_STORAGE_PROVIDER=minio" in env
+    assert "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000" in env
+    assert "MOMCOZY_PRODUCT_MINIO_BUCKET=momcozy-product-us-east-uat" in env
+    assert "MOMCOZY_AGENT_MINIO_BUCKET=momcozy-agent-us-east-uat" in env
+    assert "cozy-ai.clm4o6oqe8vg" not in env
+    assert "master.cozy-application-pre" not in env
+    assert "backend-test.lute-momcozylab" not in env
+    assert "MOMCOZY_BACKEND_COMPOSE_PROJECT=momcozy-lab-backend-us-east-uat" in env
+    assert "MOMCOZY_NETWORK_NAME=momcozy-lab-us-east-uat" in env
+    assert "REPLACE_WITH_US_EAST_UAT_" in env
+    assert "env/us-east-uat.env" in (ROOT / ".gitignore").read_text() or "env/*.env" in (ROOT / ".gitignore").read_text()

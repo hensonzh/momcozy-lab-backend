@@ -31,3 +31,7 @@ data/
 
 # B deployment target declaration (non-secret, operator-reviewed)
 /config/release-targets/north-america-staging.json
+
+!deploy/us-east-uat/start-redis.sh
+!deploy/us-east-uat/init-postgres.sh
+!scripts/check_b_infra_contract.sh
