@@ -49,3 +49,12 @@ def test_b_certificate_renewal_reloads_only_valid_running_nginx() -> None:
     assert "systemctl reload nginx" in text
     assert text.index("nginx -t") < text.index("systemctl reload nginx")
     assert "docker" not in text
+
+
+def test_b_https_unknown_host_rejects_handshake() -> None:
+    text = (ROOT / "deploy/us-east-uat/nginx-https-deny-unknown.conf").read_text()
+    assert "listen 443 ssl default_server;" in text
+    assert "ssl_reject_handshake on;" in text
+    assert "access_log off;" in text
+    assert "proxy_pass" not in text
+    assert "ssl_certificate" not in text
