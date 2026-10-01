@@ -27,6 +27,41 @@ def test_verified_login_issues_standard_user_permissions() -> None:
     assert principal.user_id == user.id
 
 
+def test_b_invite_login_rejects_even_managed_codes_without_issuing_tokens() -> None:
+    account_repository = FakeAccountRepository()
+    session_service = FakeSessionService()
+    invite_repository = FakeInviteCodeRepository(invite_code=InviteCode(code="MCZ-ABCD-2345", status="active"))
+    service = AuthAccountService(
+        account_repository=account_repository,
+        session_service=session_service,
+        settings=auth_settings(auth_invite_codes=(), auth_invite_login_enabled=False),
+        invite_code_repository=invite_repository,
+    )
+
+    with pytest.raises(ApiError) as denied:
+        asyncio.run(service.invite_login(
+            invite_code="MCZ-ABCD-2345", device_context=DeviceContext(device_id="flutter-device-001"),
+        ))
+
+    assert denied.value.code == "permission_denied"
+    assert account_repository.created_identity is None
+    assert session_service.created_user_id is None
+
+def test_b_email_login_still_works_without_invite_login() -> None:
+    user = User(id=uuid4(), status="active")
+    identity = AuthIdentity(user_id=user.id, user=user, provider="email", subject="test@example.com", password_hash=hash_password("secret123"))
+    service = AuthAccountService(
+        account_repository=FakeAccountRepository(existing_identity=identity),
+        session_service=FakeSessionService(),
+        settings=auth_settings(auth_invite_codes=(), auth_invite_login_enabled=False),
+    )
+
+    issued = asyncio.run(service.login(email="test@example.com", password="secret123"))
+
+    assert issued.user.id == user.id
+    assert issued.refresh_token == "refresh-token"
+
+
 def test_invite_login_creates_invite_identity_and_issues_tokens() -> None:
     account_repository = FakeAccountRepository()
     session_service = FakeSessionService()

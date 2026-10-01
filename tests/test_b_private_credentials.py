@@ -56,7 +56,8 @@ def test_generates_b_credentials_once_and_preserves_external_gate(tmp_path: Path
     assert runtime["RUNTIME_ADMIN_SERVICE_KEY"] not in (product["SERVICE_API_KEY"], product["AGENT_RUNTIME_SERVICE_API_KEY"])
     assert len(set(product[key] for key in provision.GENERATED_BACKEND if key != "AUTH_JWT_PRIVATE_KEY_B64")) == len(provision.GENERATED_BACKEND) - 1
     assert product["AUTH_SMTP_PASSWORD"].startswith("REPLACE_WITH_")
-    assert product["AUTH_INVITE_CODES"].startswith("REPLACE_WITH_")
+    assert product["AUTH_INVITE_LOGIN_ENABLED"] == "false"
+    assert product["AUTH_INVITE_CODES"] == ""
     assert runtime["OPENAI_API_KEY"].startswith("REPLACE_WITH_")
     assert backend.stat().st_mode & 0o777 == agent.stat().st_mode & 0o777 == 0o600
     validate_pair(backend, agent)

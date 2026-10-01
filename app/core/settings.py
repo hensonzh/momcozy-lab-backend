@@ -58,6 +58,7 @@ class Settings:
     auth_jwt_runtime_audience: str = ""
     auth_require_active_session: bool = True
     auth_invite_codes: tuple[str, ...] = ("MOMCOZY-BETA",)
+    auth_invite_login_enabled: bool = True
     auth_email_token_key: str = field(default="", repr=False)
     push_token_key: str = field(default="", repr=False)
     push_provider: str = "disabled"
@@ -136,6 +137,7 @@ class Settings:
             auth_jwt_runtime_audience=_env("AUTH_JWT_RUNTIME_AUDIENCE", cls.auth_jwt_runtime_audience),
             auth_require_active_session=_env_bool("AUTH_REQUIRE_ACTIVE_SESSION", cls.auth_require_active_session),
             auth_invite_codes=_env_csv("AUTH_INVITE_CODES", cls.auth_invite_codes),
+            auth_invite_login_enabled=_env_bool("AUTH_INVITE_LOGIN_ENABLED", cls.auth_invite_login_enabled),
             auth_email_token_key=_env("AUTH_EMAIL_TOKEN_KEY", cls.auth_email_token_key),
             push_token_key=_env("PUSH_TOKEN_KEY", cls.push_token_key),
             push_provider=_env("PUSH_PROVIDER", cls.push_provider),

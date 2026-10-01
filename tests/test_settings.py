@@ -22,6 +22,21 @@ def test_settings_from_env_reads_asymmetric_jwt_configuration(monkeypatch: pytes
     assert settings.auth_jwt_runtime_audience == "runtime-api"
 
 
+def test_b_invite_login_flag_reads_false_and_empty_codes_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUTH_INVITE_LOGIN_ENABLED", "false")
+    monkeypatch.setenv("AUTH_INVITE_CODES", "")
+
+    settings = Settings.from_env()
+
+    assert settings.auth_invite_login_enabled is False
+    assert settings.auth_invite_codes == ()
+
+
+def test_a_invite_login_flag_defaults_to_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AUTH_INVITE_LOGIN_ENABLED", raising=False)
+
+    assert Settings.from_env().auth_invite_login_enabled is True
+
 @pytest.mark.parametrize(
     ("private_key", "expected_error"),
     [

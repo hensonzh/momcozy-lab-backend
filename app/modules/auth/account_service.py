@@ -84,6 +84,8 @@ class AuthAccountService:
         invite_code: str,
         device_context: DeviceContext,
     ) -> IssuedTokenPair:
+        if not self.settings.auth_invite_login_enabled:
+            raise ApiError(code="permission_denied", message="Invite login is disabled.", status=403)
         normalized_code = normalize_invite_code(invite_code)
         allowed_codes = {_normalize_invite_code_value(code) for code in self.settings.auth_invite_codes}
         if normalized_code not in allowed_codes:

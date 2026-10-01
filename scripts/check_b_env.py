@@ -31,6 +31,8 @@ EXPECTED = {
     "AGENT_MODEL_ASSET_PUBLIC_BASE_URL": "https://backend-us-dev.lute-momcozylab.luteos.cloud",
     "TRUSTED_HOSTS": "backend-us-dev.lute-momcozylab.luteos.cloud,product-backend,localhost,127.0.0.1",
     "MOMCOZY_BACKEND_TRUST_BUNDLE_FILE": "/etc/ssl/certs/ca-certificates.crt",
+    "AUTH_INVITE_LOGIN_ENABLED": "false",
+    "AUTH_INVITE_CODES": "",
 }
 REQUIRED_SECRETS = (
     "MOMCOZY_POSTGRES_ADMIN_PASSWORD", "MOMCOZY_PRODUCT_POSTGRES_PASSWORD",

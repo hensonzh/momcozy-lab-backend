@@ -27,7 +27,7 @@ jobs:
       - name: Check B contracts and retain A release guard
         run: |
           python -m ruff check app tests scripts
-          python -m pytest tests/test_deployment_templates.py tests/test_environment_delivery.py tests/test_check_b_env.py tests/test_north_america_target.py tests/test_staging_trust_bundle.py tests/test_b_ingress_contract.py tests/test_b_host_layout.py tests/test_b_fresh_bootstrap.py tests/test_b_private_credentials.py tests/test_b_release_admission.py tests/test_b_rollback_admission.py tests/test_b_postgres_recovery.py tests/test_b_redis_recovery.py tests/test_b_minio_recovery_contract.py tests/test_b_pair_config.py tests/test_b_validation_workflow.py tests/test_release_target_guard.py
+          python -m pytest tests/test_deployment_templates.py tests/test_environment_delivery.py tests/test_check_b_env.py tests/test_north_america_target.py tests/test_staging_trust_bundle.py tests/test_b_ingress_contract.py tests/test_b_host_layout.py tests/test_b_fresh_bootstrap.py tests/test_b_private_credentials.py tests/test_auth_api.py tests/test_auth_account_service.py tests/test_settings.py tests/test_b_release_admission.py tests/test_b_rollback_admission.py tests/test_b_postgres_recovery.py tests/test_b_redis_recovery.py tests/test_b_minio_recovery_contract.py tests/test_b_pair_config.py tests/test_b_validation_workflow.py tests/test_release_target_guard.py
           bash -n deploy/us-east-uat/init-postgres.sh
           sh -n deploy/us-east-uat/start-redis.sh
 

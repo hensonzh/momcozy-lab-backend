@@ -152,6 +152,8 @@ async def invite_login(
     request: Request,
     service: AuthAccountService = Depends(get_auth_account_service),
 ) -> TokenResponse:
+    if not request.app.state.settings.auth_invite_login_enabled:
+        raise ApiError(code="permission_denied", message="Invite login is disabled.", status=403)
     issued = await service.invite_login(
         invite_code=body.invite_code,
         device_context=_device_context(request=request, device_id=body.device_id),

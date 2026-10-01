@@ -22,6 +22,22 @@ def test_preflight_accepts_structurally_private_b_env(tmp_path: Path) -> None:
     validate(_private_env(tmp_path))
 
 
+def test_b_invite_login_is_disabled_and_codes_are_empty(tmp_path: Path) -> None:
+    path = _private_env(tmp_path)
+    assert "AUTH_INVITE_LOGIN_ENABLED=false\nAUTH_INVITE_CODES=\n" in path.read_text()
+    assert "AUTH_INVITE_LOGIN_ENABLED=false\nAUTH_INVITE_CODES=\n" in (ROOT / "deploy/config_us-east-uat").read_text()
+    validate(path)
+    for before, after in (
+        ("AUTH_INVITE_LOGIN_ENABLED=false", "AUTH_INVITE_LOGIN_ENABLED=true"),
+        ("AUTH_INVITE_LOGIN_ENABLED=false\n", ""),
+        ("AUTH_INVITE_CODES=\n", "AUTH_INVITE_CODES=MOMCOZY-BETA\n"),
+        ("AUTH_INVITE_CODES=\n", "AUTH_INVITE_CODES=REPLACE_WITH_US_EAST_UAT_AUTH_INVITE_CODES\n"),
+    ):
+        altered = _private_env(tmp_path)
+        altered.write_text(altered.read_text().replace(before, after))
+        with pytest.raises(ValueError, match="AUTH_INVITE"):
+            validate(altered)
+
 def test_preflight_pins_approved_b_origins(tmp_path: Path) -> None:
     path = _private_env(tmp_path)
     original = "https://backend-us-dev.lute-momcozylab.luteos.cloud"

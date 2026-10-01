@@ -69,6 +69,26 @@ def test_invite_login_returns_token_pair_and_device_contract() -> None:
     assert fake_service.invite_login_kwargs["device_context"].device_id == "flutter-device-001"
 
 
+def test_b_email_registration_and_login_work_but_invite_endpoint_is_disabled() -> None:
+    fake_service = FakeAuthAccountService()
+    app = create_app(Settings(app_env="test", auth_invite_login_enabled=False, auth_invite_codes=()))
+    app.dependency_overrides[get_auth_account_service] = lambda: fake_service
+    app.dependency_overrides[get_account_lifecycle_service] = lambda: fake_service
+    client = TestClient(app)
+
+    register = client.post("/v1/auth/register", json={"email": "test@example.com"})
+    login = client.post("/v1/auth/login", json={"email": "test@example.com", "password": "secret123"})
+    invite = client.post("/v1/auth/invite-login", json={"invite_code": "MCZ-ABCD-2345", "device_id": "ios"})
+
+    assert register.status_code == 202
+    assert fake_service.register_email == "test@example.com"
+    assert login.status_code == 200
+    assert fake_service.login_kwargs["email"] == "test@example.com"
+    assert invite.status_code == 403
+    assert invite.json()["error"]["code"] == "permission_denied"
+    assert fake_service.invite_login_kwargs is None
+
+
 def test_login_invalid_credentials_use_error_envelope() -> None:
     fake_service = FakeAuthAccountService(
         login_error=ApiError(code="authentication_required", message="Email or password is invalid.", status=401)
@@ -144,10 +164,14 @@ class FakeAuthAccountService:
         self.user = User(id=uuid4(), status="active")
         self.login_error = login_error
         self.signup_kwargs = None
+        self.register_email = None
         self.invite_login_kwargs = None
         self.login_kwargs = None
         self.refresh_kwargs = None
         self.logout_session_id = None
+
+    async def start_registration(self, *, email):
+        self.register_email = email
 
     async def register(self, **kwargs):
         self.signup_kwargs = kwargs

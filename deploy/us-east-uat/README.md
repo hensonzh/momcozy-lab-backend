@@ -154,11 +154,12 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   did not rotate them. Later that day, Resend SMTP and the A-chain OpenAI key
   were installed in B's private env without committing or printing their
   values. SMTP/STARTTLS login and OpenAI `/v1/models` authentication passed
-  **from the B host**; no mail or model inference was sent. Backend
-  `AUTH_INVITE_CODES` remains a placeholder, so its env admission still fails.
-  Agent's static env and the cross-service pair check pass. Both B HTTPS
-  origins still time out; no :80/:443 listener or public certificate is on
-  the host. None of the services or B release pointers have been started.
+  **from the B host**; no mail or model inference was sent. B now uses
+  regular email registration/login: `AUTH_INVITE_LOGIN_ENABLED=false`
+  and an empty `AUTH_INVITE_CODES`. Apply that B-only policy to the existing
+  private Backend env after the matching commit passes CI. Agent's static env
+  and the cross-service pair check pass. Both B HTTPS origins still time out;
+  no :80/:443 listener or public certificate is on the host. None of the services or B release pointers have been started.
 - A dedicated systemd bind mount maps
   `/data/momcozy-lab-us-east-uat/backups` to
   `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
@@ -212,16 +213,25 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   never rotates; partial provisioning fails closed for manual recovery.
   It does not read A credentials, create Docker volumes, start services or
   configure external providers. Resend `AUTH_SMTP_PASSWORD` and the Agent model
-  API key were subsequently installed as separate, approved provider handoffs;
-  the invite-code decision still blocks Backend admission.
+  API key were subsequently installed as separate, approved provider handoffs.
+  B's consumer login is email-only; no universal invite code is generated.
   Never print the private files or capture the generated values in CI/logs.
+
+- B normal-user auth is email registration, verification, login and password
+  reset. B's private Backend env must contain `AUTH_INVITE_LOGIN_ENABLED=false`
+  and `AUTH_INVITE_CODES=` (an explicitly empty value). Runtime rejects an
+  invite-login attempt when disabled, and B release admission requires both
+  values; the legacy A lane
+  keeps its existing invite-only behavior. Do not reuse A's fixed invite code
+  and do not generate a token merely to satisfy an old env placeholder.
 - A separate private target JSON for each service contains its own approved
   HTTPS origin. The checked-in `.example` now documents those non-secret
   origins; the private declarations remain mode 0600. A valid static target
   check is **not** evidence of a public certificate or running service.
 - The host architecture, Docker/Compose and on-host backup mount are
   verified. Host UFW is inactive; external security-group exposure was not
-  audited. HTTPS/TLS, the invite-code policy, real email delivery, 10-run
+  audited. HTTPS/TLS, applying the B-only email-login policy to the private
+  env, real email delivery, 10-run
   load evidence, live PostgreSQL/MinIO/Redis backup and isolated recovery,
   off-host retention, digest verification on host and a reviewed B-only
   deployment/rollback runner remain gates. The fresh-only Docker guard passed

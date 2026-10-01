@@ -154,6 +154,8 @@ def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
         "LOG_LEVEL": "INFO",
         "READINESS_CHECK_INFRASTRUCTURE": "true",
         "AUTH_REQUIRE_ACTIVE_SESSION": "true",
+        "AUTH_INVITE_LOGIN_ENABLED": "false",
+        "AUTH_INVITE_CODES": "",
         "OBJECT_STORAGE_PROVIDER": "minio",
         "OBJECT_STORAGE_ENDPOINT_URL": "http://minio:9000",
         "AUTH_EMAIL_FROM": "noreply@mail-momcozy-uat.luteos.cloud",
