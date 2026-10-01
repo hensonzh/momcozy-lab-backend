@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Synthetic two-bucket MinIO copy and isolated restore. Never touches B volumes.
 set -Eeuo pipefail
+trap 'echo "B synthetic MinIO restore failed at line ${LINENO}" >&2' ERR
 cd "$(dirname "$0")/.."
 
 image=momcozy-us-east-uat-minio:9e49d5e7a648f00e
