@@ -156,10 +156,13 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   values. SMTP/STARTTLS login and OpenAI `/v1/models` authentication passed
   **from the B host**; no mail or model inference was sent. B now uses
   regular email registration/login: `AUTH_INVITE_LOGIN_ENABLED=false`
-  and an empty `AUTH_INVITE_CODES`. Apply that B-only policy to the existing
-  private Backend env after the matching commit passes CI. Agent's static env
-  and the cross-service pair check pass. Both B HTTPS origins still time out;
-  no :80/:443 listener or public certificate is on the host. None of the services or B release pointers have been started.
+  and an empty `AUTH_INVITE_CODES`. After commit
+  `a9842f9c2bd591ece61c94308751c6dfc3cf7a64` passed B CI, the existing
+  private Backend env was updated in place without rotating credentials.
+  Backend and Agent static env checks, the cross-service pair check and B
+  Backend Compose quiet rendering passed. Both B HTTPS origins still time out;
+  no :80/:443 listener or public certificate is on the host. No services or
+  B release pointers have been started.
 - A dedicated systemd bind mount maps
   `/data/momcozy-lab-us-east-uat/backups` to
   `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
@@ -221,8 +224,7 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   reset. B's private Backend env must contain `AUTH_INVITE_LOGIN_ENABLED=false`
   and `AUTH_INVITE_CODES=` (an explicitly empty value). Runtime rejects an
   invite-login attempt when disabled, and B release admission requires both
-  values; the legacy A lane
-  keeps its existing invite-only behavior. Do not reuse A's fixed invite code
+  values; the legacy A lane keeps its existing invite-only behavior. Do not reuse A's fixed invite code
   and do not generate a token merely to satisfy an old env placeholder.
 - A separate private target JSON for each service contains its own approved
   HTTPS origin. The checked-in `.example` now documents those non-secret
@@ -230,9 +232,8 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   check is **not** evidence of a public certificate or running service.
 - The host architecture, Docker/Compose and on-host backup mount are
   verified. Host UFW is inactive; external security-group exposure was not
-  audited. HTTPS/TLS, applying the B-only email-login policy to the private
-  env, real email delivery, 10-run
-  load evidence, live PostgreSQL/MinIO/Redis backup and isolated recovery,
+  audited. HTTPS/TLS, real email delivery, 10-run load evidence, live
+  PostgreSQL/MinIO/Redis backup and isolated recovery,
   off-host retention, digest verification on host and a reviewed B-only
   deployment/rollback runner remain gates. The fresh-only Docker guard passed
   using `sudo -n`; unprivileged `ubuntu` Docker access failed, so the future
