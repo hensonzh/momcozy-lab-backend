@@ -42,9 +42,12 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   private env templates now exist. The B-only GitHub `dev`
   `backend-b-validation.yml` runs on GitHub `dev`; it checks contracts,
   synthetic PostgreSQL/Redis isolation, two-database synthetic dump/restore,
-  and locally builds the B Dockerfile. Verify the exact commit's CI result
-  before release. The workflow does not publish an image, run migrations
-  against UAT or deploy; release integration and live validation remain. B Compose requires `MOMCOZY_B_ENV_MARKER` so A env
+  and locally builds the B Dockerfile. After those gates pass on a GitHub `dev`
+  push, the separate `b-image` job publishes only the B Dockerfile image to
+  private GHCR as `b-dev-<full SHA>` and records its immutable digest. Verify
+  the exact commit's job and digest before release. It does not run migrations
+  against UAT or deploy; release integration and live validation remain.
+  B Compose requires `MOMCOZY_B_ENV_MARKER` so A env
   cannot pass static rendering by accident; the read-only `scripts/check_b_env.py`
   also verifies B identity, loopback ports, DB 0, private file mode and no
   placeholders. The marker alone does not prove isolation. `scripts/release.py`
@@ -127,14 +130,18 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   stateful volumes, not an independent/off-host copy.** Off-host retention
   and recovery still require a separate approved destination and drill.
 - Clean GitHub `dev` snapshots were staged under each service's
-  `releases/<service>/<commit>` (Backend `e1f65eaf2ea4e997f40e2caa2376438ce71cd0c2`,
-  Agent `759ecebdfcb19a8095d9c8abda08d932ede94697`). Only these
-  committed snapshots were built locally with the B Dockerfiles and revision
-  labels; the pinned MinIO source image was also built. The B PostgreSQL/
-  Redis synthetic isolation check passed on this host with no persistent
-  volumes or exposed ports. **These locally tagged images are not published
-  GHCR digests and do not pass the B release admission.** No `current` pointer,
-  business container, database, bucket or public API has been started.
+  `releases/<service>/<commit>`. The latest staged and locally built snapshots
+  after the B validation CI passed were Backend
+  `62ea6c0d29620d0ed07483c79abf80f3be58847a` and Agent
+  `a689e662a21e91bcb95d4180e671cd5869c94154`. Earlier snapshots remain
+  untouched. Both B images carry their source revision label; the pinned MinIO
+  source image was also built. The B PostgreSQL/Redis synthetic isolation
+  check passed on this host with no persistent volumes or exposed ports.
+  **These locally tagged images are not GHCR digest references and do not
+  pass the B release admission.** The CI-published B images must be verified
+  separately by exact commit and digest before any use on the host. No
+  `current` pointer, business container,
+  database, bucket or public API has been started.
 
 ## Private host handoff (placeholders created; not production configuration)
 
