@@ -46,7 +46,9 @@ docker exec "$source_name" sh -ec '
   mc mirror b/momcozy-product-us-east-uat /tmp/momcozy-b-backup/product >/dev/null
   mc mirror b/momcozy-agent-us-east-uat /tmp/momcozy-b-backup/agent >/dev/null
 '
-docker exec "$source_name" tar -C /tmp/momcozy-b-backup -cf - . | tar -C "$backup_dir" -xf -
+# Do not archive the parent '.' metadata: GNU tar would restore its mode on
+# backup_dir itself, defeating the mode-0700 privacy check on Linux runners.
+docker exec "$source_name" tar -C /tmp/momcozy-b-backup -cf - product agent | tar -C "$backup_dir" -xf -
 [[ -f "$backup_dir/product/recovery-canary" && -f "$backup_dir/agent/recovery-canary" ]]
 [[ "$(python3 -c 'import os, stat, sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$backup_dir")" == 0o700 ]]
 

@@ -21,5 +21,8 @@ def test_synthetic_minio_recovery_is_isolated() -> None:
     assert "trap cleanup EXIT" in text
     assert "stat.S_IMODE" in text  # consistent 0700 check on Linux CI and macOS
     assert "stat -f %Lp" not in text  # GNU stat writes a filesystem report before failing
+    # Archiving '.' restores the source directory's mode onto the 0700 backup root on Linux.
+    assert "tar -C /tmp/momcozy-b-backup -cf - product agent" in text
+    assert "tar -C /tmp/momcozy-b-backup -cf - ." not in text
     for forbidden in ("docker compose", "docker volume", "--publish", "--privileged", "mc mirror --remove", "/opt/momcozy-lab-staging"):
         assert forbidden not in text
