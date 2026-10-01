@@ -16,9 +16,10 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
 - PostgreSQL contains `momcozy_lab_backend_uat` and
   `momcozy_lab_agent_uat` as separate databases/roles. The Agent Compose
   project joins the B network; it does **not** start another stateful stack.
-  This is a new local PostgreSQL instance: the former managed RDS databases
-  are **not** migrated automatically. Decide whether historical data must be
-  migrated before any schema initialization.
+  This is a new local PostgreSQL instance. **On 2026-10-01 the operator
+  confirmed that no historical RDS, Redis or S3 data needs migration.** Do
+  not connect to or copy those managed resources. First bootstrap must use
+  fresh B-only volumes, databases, Redis state and MinIO buckets.
 - Redis is one B service: Product and Agent both use DB 0 with existing
   disjoint key prefixes. B-only ACL denies cross-service keys and DB-switching
   commands; Redis ACL does not provide database-level tenant isolation. Test
@@ -44,6 +45,13 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   pinned MinIO source image for this B tag before first bootstrap:
   `docker build -f deploy/shared/Minio.Dockerfile -t momcozy-us-east-uat-minio:9e49d5e7a648f00e deploy/shared`.
   Do not substitute a mutable public image tag.
+- Before the **first** stateful bootstrap, run the read-only
+  `python scripts/check_b_fresh_bootstrap.py` on the target with Docker access.
+  It refuses any named or Compose-labeled B volumes, network or containers,
+  including stopped ones. On 2026-10-01 an equivalent target-host check found
+  none. This check does not inspect arbitrary unlabelled disk paths, cannot
+  justify deleting a conflicting resource, and is not suitable for later
+  releases after B's stateful stack exists.
 
 ## Release handoff
 
@@ -116,7 +124,7 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   databases automatically. Verify `/v1/health/ready` and real UAT mail flow.
 - This file does not authorize cloud or server changes. Host capacity was
   measured but 10-run load is untested; HTTPS/TLS ingress, SMTP and provider authentication,
-  final bucket names, real secrets, stateful recovery, data-migration strategy
+  final bucket names, real secrets, stateful recovery,
   and actual delivery behavior must still be verified before enabling B. Basic
   TCP connections to `smtp.resend.com:587`, `api.openai.com:443` and
   `ghcr.io:443` succeeded from the host; this does not verify provider
@@ -189,7 +197,7 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   check is **not** evidence of a public certificate or running service.
 - The host architecture, Docker/Compose and on-host backup mount are
   verified. Host UFW is inactive; external security-group exposure was not
-  audited. HTTPS/TLS, real credentials, data-disposition
-  decision, MinIO/Redis backup and isolated recovery, off-host retention,
+  audited. HTTPS/TLS, real credentials, fresh-only bootstrap verification,
+  MinIO/Redis backup and isolated recovery, off-host retention,
   immutable registry images and a reviewed B-only deployment/rollback runner
   remain gates. The synthetic test is not a live backup rehearsal.
