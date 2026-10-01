@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from scripts import provision_b_private_credentials as provision
-from scripts.check_b_pair import validate_pair
+from scripts.check_b_pair import SHARED, validate_pair
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,11 +14,23 @@ def _host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "b"
     for folder in (root, root / "shared", root / "shared/backend", root / "shared/agent"):
         folder.mkdir(mode=0o700)
-    for service in ("backend", "agent"):
-        template = ROOT / ("env/us-east-uat.env.example" if service == "backend" else "../agent/env/us-east-uat.env.example")
-        path = root / "shared" / service / "north-america-staging.env"
-        path.write_bytes(template.read_bytes())
-        path.chmod(0o600)
+    backend_template = (ROOT / "env/us-east-uat.env.example").read_text()
+    backend = root / "shared/backend/north-america-staging.env"
+    backend.write_text(backend_template)
+    backend.chmod(0o600)
+    # GitHub's Backend-only checkout has no sibling Agent repository. Build a
+    # synthetic minimum Agent env from the shared contract; other tests check
+    # the real Agent template in its own repository.
+    backend_values = _values(backend)
+    agent_lines = [f"{key}={backend_values[key]}" for key in SHARED]
+    agent_lines += [
+        f"{key}={provision._placeholder(key)}" for key in (
+            provision.AGENT_SERVICE_KEY, provision.AGENT_ADMIN_KEY, "OPENAI_API_KEY",
+        )
+    ]
+    agent = root / "shared/agent/north-america-staging.env"
+    agent.write_text("\n".join(agent_lines) + "\n")
+    agent.chmod(0o600)
     lock = root / "shared/north-america-staging-release.lock"
     lock.touch(mode=0o600)
     monkeypatch.setattr(provision, "HOST_ROOT", root)
