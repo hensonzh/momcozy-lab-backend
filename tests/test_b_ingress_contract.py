@@ -26,3 +26,26 @@ def test_b_backend_ingress_isolated_from_a() -> None:
         "ssl_verify off", "location /app/", "ssl_certificate /etc/nginx/tls/momcozy-lab-staging",
     ):
         assert forbidden not in text
+
+
+def test_b_http_acme_ingress_isolated_and_denies_other_traffic() -> None:
+    text = (ROOT / "deploy/us-east-uat/nginx-http-acme.conf").read_text()
+    assert "listen 80 default_server;" in text
+    assert "listen 80;" in text
+    assert "backend-us-dev.lute-momcozylab.luteos.cloud" in text
+    assert "agent-us-dev.lute-momcozylab.luteos.cloud" in text
+    assert "location ^~ /.well-known/acme-challenge/" in text
+    assert "root /var/www/momcozy-b-acme;" in text
+    assert "try_files $uri =404;" in text
+    assert "return 444;" in text
+    assert "listen 443" not in text
+    assert "proxy_pass" not in text
+
+
+def test_b_certificate_renewal_reloads_only_valid_running_nginx() -> None:
+    text = (ROOT / "deploy/us-east-uat/reload-nginx-after-renewal.sh").read_text()
+    assert "systemctl is-active --quiet nginx" in text
+    assert "nginx -t" in text
+    assert "systemctl reload nginx" in text
+    assert text.index("nginx -t") < text.index("systemctl reload nginx")
+    assert "docker" not in text
