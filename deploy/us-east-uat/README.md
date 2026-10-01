@@ -151,9 +151,14 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   entered in both private env and target declarations. On 2026-10-01, the
   isolated host generated its own PostgreSQL, Redis, MinIO, JWT, email-token
   and internal service credentials in the two mode-0600 env files. A rerun
-  did not rotate them. **External provider values and invite policy were still
-  pending at this check, and HTTPS/TLS was not reachable.** Env and release
-  preflight must continue to reject deployment until all gates pass.
+  did not rotate them. Later that day, Resend SMTP and the A-chain OpenAI key
+  were installed in B's private env without committing or printing their
+  values. SMTP/STARTTLS login and OpenAI `/v1/models` authentication passed
+  **from the B host**; no mail or model inference was sent. Backend
+  `AUTH_INVITE_CODES` remains a placeholder, so its env admission still fails.
+  Agent's static env and the cross-service pair check pass. Both B HTTPS
+  origins still time out; no :80/:443 listener or public certificate is on
+  the host. None of the services or B release pointers have been started.
 - A dedicated systemd bind mount maps
   `/data/momcozy-lab-us-east-uat/backups` to
   `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
@@ -206,8 +211,9 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   existing mode-0600 files, and checks cross-service shared values. A rerun
   never rotates; partial provisioning fails closed for manual recovery.
   It does not read A credentials, create Docker volumes, start services or
-  configure external providers. Resend `AUTH_SMTP_PASSWORD`, the Agent model
-  API key and the invite-code decision stay separate, blocking admission.
+  configure external providers. Resend `AUTH_SMTP_PASSWORD` and the Agent model
+  API key were subsequently installed as separate, approved provider handoffs;
+  the invite-code decision still blocks Backend admission.
   Never print the private files or capture the generated values in CI/logs.
 - A separate private target JSON for each service contains its own approved
   HTTPS origin. The checked-in `.example` now documents those non-secret
@@ -215,7 +221,10 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   check is **not** evidence of a public certificate or running service.
 - The host architecture, Docker/Compose and on-host backup mount are
   verified. Host UFW is inactive; external security-group exposure was not
-  audited. HTTPS/TLS, real credentials, fresh-only bootstrap verification,
-  MinIO/Redis backup and isolated recovery, off-host retention,
-  immutable registry images and a reviewed B-only deployment/rollback runner
-  remain gates. The synthetic test is not a live backup rehearsal.
+  audited. HTTPS/TLS, the invite-code policy, real email delivery, 10-run
+  load evidence, live PostgreSQL/MinIO/Redis backup and isolated recovery,
+  off-host retention, digest verification on host and a reviewed B-only
+  deployment/rollback runner remain gates. The fresh-only Docker guard passed
+  using `sudo -n`; unprivileged `ubuntu` Docker access failed, so the future
+  runner must explicitly resolve its privilege model. The synthetic test is
+  not a live backup rehearsal.
