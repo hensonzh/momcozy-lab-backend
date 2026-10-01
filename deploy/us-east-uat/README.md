@@ -191,6 +191,18 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   in GitHub, Codeup, logs, command arguments or chat. Compose and application
   secrets originate only from private host files; a real delivery must avoid
   printing `docker compose config` or unmasked process environment.
+- **One-time B-owned credential provisioning:** as the owning `ubuntu` user on
+  the approved US-East host, run
+  `python3 scripts/provision_b_private_credentials.py --apply` from a verified
+  clean GitHub `dev` Backend snapshot. It takes the B release lock, checks
+  private owners/modes and B identity, creates distinct PostgreSQL, Redis,
+  MinIO, JWT, email-token and internal service credentials in the two
+  existing mode-0600 files, and checks cross-service shared values. A rerun
+  never rotates; partial provisioning fails closed for manual recovery.
+  It does not read A credentials, create Docker volumes, start services or
+  configure external providers. Resend `AUTH_SMTP_PASSWORD`, the Agent model
+  API key and the invite-code decision stay separate, blocking admission.
+  Never print the private files or capture the generated values in CI/logs.
 - A separate private target JSON for each service contains its own approved
   HTTPS origin. The checked-in `.example` now documents those non-secret
   origins; the private declarations remain mode 0600. A valid static target
