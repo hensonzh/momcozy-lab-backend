@@ -15,8 +15,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from scripts.b_release import B_ROOT, preflight
-from scripts.check_b_fresh_bootstrap import validate_fresh
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
+from scripts.b_release import B_ROOT, preflight  # noqa: E402
+from scripts.check_b_fresh_bootstrap import validate_fresh  # noqa: E402
 
 
 def _run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:

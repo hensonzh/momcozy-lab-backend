@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+import subprocess
 
 from scripts import b_bootstrap_infra
 
@@ -26,3 +27,12 @@ def test_start_only_b_infra_and_bucket_init(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls[1][-4:] == ["tools", "run", "--rm", "minio-init"]
     assert all("down" not in call and "-v" not in call for call in calls)
     assert all("api" not in call and "migrate" not in call for call in calls)
+
+
+def test_direct_script_invocation_loads_repository_modules() -> None:
+    result = subprocess.run(
+        ["python3", str(Path(__file__).resolve().parents[1] / "scripts/b_bootstrap_infra.py"), "--help"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0
+    assert "--apply" in result.stdout
