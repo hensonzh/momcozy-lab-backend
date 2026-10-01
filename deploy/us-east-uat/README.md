@@ -169,8 +169,10 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   private Backend env was updated in place without rotating credentials.
   Backend and Agent static env checks, the cross-service pair check and B
   Backend Compose quiet rendering passed. Both B HTTPS origins still time out;
-  no :80/:443 listener or public certificate is on the host. No services or
-  B release pointers have been started.
+  no public certificate is on the host. Nginx and Certbot packages were
+  installed, but the package-default Nginx site was immediately stopped and
+  disabled; no B site was enabled. No services or B release pointers have
+  been started.
 - A dedicated systemd bind mount maps
   `/data/momcozy-lab-us-east-uat/backups` to
   `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
@@ -247,3 +249,33 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   using `sudo -n`; unprivileged `ubuntu` Docker access failed, so the future
   runner must explicitly resolve its privilege model. The synthetic test is
   not a live backup rehearsal.
+
+## 2026-10-01 port 8001/8002 and ingress preflight
+
+- The B-only `dev` Backend/Agent sources and target private env now both use
+  `127.0.0.1:8001` / `127.0.0.1:8002`. Only those four non-secret bind lines
+  changed in the mode-0600 private files under the B release lock. Both
+  static env checks, cross-service pair check, quiet Compose renders and
+  read-only B release admissions passed for the CI-published commit/digest
+  pairs. **These checks did not deploy images, databases, workers or Nginx.**
+- Verified attached EC2 group `launch-wizard-25` has exactly one inbound
+  rule: TCP 22. There is no inbound 80 or 443 rule. Temporary host listeners
+  on 0.0.0.0:80 and :443 still timed out from the operator Mac; probes were
+  removed. UFW is inactive and iptables INPUT policy is ACCEPT. Request an
+  approved SG change for 80 (certificate issuance/renewal) and 443 (HTTPS),
+  then confirm external reachability before public issuance. NACL read-only
+  inspection was denied by IAM; don't claim it has been cleared.
+- Ubuntu `nginx` and `certbot` are installed on the B host. The package's
+  default Nginx site started automatically; it was stopped and disabled
+  immediately. Certbot's timer is installed, but there are no B certificates
+  and no enabled B HTTPS server blocks. Do not run a production ACME request
+  before external port 80 is demonstrably reachable. Do not substitute a
+  self-signed certificate. The checked-in B Nginx templates require the real
+  certificates and healthy loopback upstreams before installation.
+- The GHCR images were published by B CI as immutable digests, but the host
+  currently gets `denied` when it tries to inspect those private digests.
+  Configure an approved read-only GHCR pull identity on the B host without
+  writing a token to command arguments, logs or Git. The existing B release
+  entrypoints perform static admission only and explicitly do **not** start
+  containers. A separate reviewed B-only bootstrap/deploy and real
+  PostgreSQL/Redis/MinIO isolated restore/rollback gate are still required.
