@@ -11,8 +11,8 @@ AGENT_TEMPLATE = """MOMCOZY_B_ENV_MARKER=us-east-uat
 MOMCOZY_BACKEND_COMPOSE_PROJECT=momcozy-lab-backend-us-east-uat
 MOMCOZY_AGENT_COMPOSE_PROJECT=momcozy-lab-agent-us-east-uat
 MOMCOZY_NETWORK_NAME=momcozy-lab-us-east-uat
-MOMCOZY_BACKEND_API_BIND=127.0.0.1:8101
-MOMCOZY_AGENT_API_BIND=127.0.0.1:8102
+MOMCOZY_BACKEND_API_BIND=127.0.0.1:8001
+MOMCOZY_AGENT_API_BIND=127.0.0.1:8002
 MOMCOZY_BACKEND_PUBLIC_URL=https://backend-us-dev.lute-momcozylab.luteos.cloud
 MOMCOZY_AGENT_PUBLIC_URL=https://agent-us-dev.lute-momcozylab.luteos.cloud
 MOMCOZY_POSTGRES_ADMIN_USER=momcozy_us_east_uat_admin

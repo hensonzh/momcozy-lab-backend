@@ -34,11 +34,19 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   `https://agent-us-dev.lute-momcozylab.luteos.cloud`; both DNS A records
   resolved to `32.199.186.149` on 2026-10-01. DNS alone is not an ingress or
   certificate check: HTTPS :443 timed out from the operator Mac and target.
+  On 2026-10-01 a fresh read-only EC2 inspection of the **attached**
+  `launch-wizard-25` security group found no inbound TCP 80 or 443 rules.
+  Independent short-lived listeners on both ports on the B host still timed
+  out from the operator Mac; UFW was inactive and the host INPUT policy was
+  ACCEPT. Coordinate an approved 80/443 ingress change and re-test before
+  attempting HTTP-01 issuance or enabling the HTTPS reverse proxy.
   The B containers mount the host's system CA bundle for outbound HTTPS;
   this does not install an ingress TLS certificate or prove public trust.
   The versioned, **not installed** B ingress template is
   `deploy/us-east-uat/nginx-backend.conf`: it listens on :443 with this
-  hostname and proxies only to `127.0.0.1:8101`. It names a future public
+  hostname and proxies only to `127.0.0.1:8001`. Agent uses `127.0.0.1:8002`.
+  These are host-loopback Docker port publishes, not public port exposures.
+  It names a future public
   certificate under `/etc/letsencrypt/live/`; the file is not present yet.
   Do not enable a fake/self-signed public endpoint to bypass TLS verification.
   PostgreSQL, Redis and MinIO must not expose public host ports. Build the
