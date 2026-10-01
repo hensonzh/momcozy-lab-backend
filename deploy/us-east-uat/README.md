@@ -148,9 +148,12 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   `releases/backend`, `releases/agent`, `shared/backend`, `shared/agent`,
   `current` and `previous` directories. The B release lock and both private
   env and target JSON files are mode 0600. The approved B domains have been
-  entered in both private env and target declarations; **the env files still
-  contain `REPLACE_WITH` secrets, and HTTPS/TLS is not reachable**. Env and
-  release preflight must continue to reject deployment.
+  entered in both private env and target declarations. On 2026-10-01, the
+  isolated host generated its own PostgreSQL, Redis, MinIO, JWT, email-token
+  and internal service credentials in the two mode-0600 env files. A rerun
+  did not rotate them. **External provider values and invite policy were still
+  pending at this check, and HTTPS/TLS was not reachable.** Env and release
+  preflight must continue to reject deployment until all gates pass.
 - A dedicated systemd bind mount maps
   `/data/momcozy-lab-us-east-uat/backups` to
   `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
@@ -164,7 +167,10 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   `releases/<service>/<commit>`. The latest staged and locally built snapshots
   after the B validation CI passed were Backend
   `62ea6c0d29620d0ed07483c79abf80f3be58847a` and Agent
-  `a689e662a21e91bcb95d4180e671cd5869c94154`. Earlier snapshots remain
+  `a689e662a21e91bcb95d4180e671cd5869c94154`. An additional clean Backend
+  snapshot `b8339eb79f88bd590f360e61f9c38e5d5ef736b5` passed GitHub B
+  contract and B-image CI and was verified on the host for the one-time
+  credential script; it was **not deployed**. Earlier snapshots remain
   untouched. Both B images carry their source revision label; the pinned MinIO
   source image was also built. The B PostgreSQL/Redis synthetic isolation
   check passed on this host with no persistent volumes or exposed ports.
