@@ -18,6 +18,7 @@ def test_b_validation_only_targets_dev_and_never_deploys() -> None:
     assert "tests/test_staging_trust_bundle.py" in text
     assert "tests/test_b_ingress_contract.py" in text
     assert "tests/test_b_fresh_bootstrap.py" in text
+    assert "tests/test_b_update_release.py" in text
     assert "tests/test_b_private_credentials.py" in text
     assert "tests/test_auth_api.py tests/test_auth_account_service.py tests/test_settings.py" in text
     assert "deploy/Dockerfile" in text

@@ -326,3 +326,30 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   entrypoints perform static admission only. `b_first_release.py` sequences
   first bootstrap, real on-host isolated restores and activation but has not
   been run on this host. Updates and rollback need a separate reviewed runner.
+
+## 2026-10-02 live observation and ongoing-release path
+
+A read-only JumpServer inspection found B PostgreSQL/Redis/MinIO and both business
+Compose projects running; the current Backend and Agent pointers were
+`0d25ec43a8663cf56610a5fd7002e83444e1a12b` and
+`0f8f1eceea91d6ac95265173cd1d45673ee6239a`. Both public HTTPS ready
+endpoints returned `status=ok` with trusted TLS. This supersedes the earlier
+2026-10-01 **not deployed** observation above; it does **not** prove the newer
+GitHub `dev` commits have been deployed, nor prove 10-run or provider E2E.
+
+`b_first_release.py` must **not** be used on this existing environment. For
+subsequent **same-schema** changes, `scripts/b_update_release.py --operation
+update` provides a read-only preflight; add `--apply` only after reviewing the
+approved commit, digest and local OCI image ID. It checks the running B release,
+private pair, new image's Alembic head, and trusted ingress, creates fresh
+PostgreSQL/Redis/MinIO on-host backup/isolated-restore evidence, verifies no
+schema drift, then replaces only that service's business containers. It updates
+`previous` and `current` pointers only after running-container provenance and
+loopback/public readiness pass. If replacement fails, it attempts to restore
+the prior service and leaves the pointers unchanged; a failed restore requires
+manual inspection. `--operation rollback --confirm-client-compatible` performs
+the same-schema reverse switch after the live DB/pointer gate and fresh
+recovery. No automatic migration/downgrade or data-volume recreation is
+supported; schema-changing releases need a separately reviewed migration plan.
+This runner is code plus local tests, **not yet exercised on the B target**.
+Off-host retention remains deferred and is not independent disaster recovery.

@@ -137,16 +137,19 @@ def check_public(service: str) -> None:
 def first_release_lock() -> Iterator[None]:
     """Serialize the entire first release; stage-specific locks remain independent."""
     shared = ROOT / "shared"
-    if (shared.is_symlink() or not shared.is_dir()
+    if ROOT.is_symlink() or not ROOT.is_dir() or shared.is_symlink() or not shared.is_dir():
+        raise ValueError("B first-release lock directory is not private")
+    owner = ROOT.stat().st_uid
+    if (stat.S_IMODE(ROOT.stat().st_mode) != 0o700
             or stat.S_IMODE(shared.stat().st_mode) != 0o700
-            or shared.stat().st_uid != os.geteuid()):
+            or shared.stat().st_uid != owner or os.geteuid() not in (0, owner)):
         raise ValueError("B first-release lock directory is not private")
     path = shared / "north-america-staging-first-release.lock"
     fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         metadata = os.fstat(fd)
         if (not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600
-                or metadata.st_uid != os.geteuid() or metadata.st_nlink != 1):
+                or metadata.st_uid not in (os.geteuid(), owner) or metadata.st_nlink != 1):
             raise ValueError("B first-release lock is not private")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

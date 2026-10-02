@@ -161,3 +161,13 @@ def test_first_release_apply_serialized_without_reusing_stage_lock(tmp_path: Pat
     assert calls == ["ran"]
     with release.first_release_lock():
         pass
+
+
+def test_root_operator_can_lock_ubuntu_owned_private_b_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """B host Docker requires sudo, while its 0700 release root belongs to ubuntu."""
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o700)
+    monkeypatch.setattr(release.os, "geteuid", lambda: 0)
+    with release.first_release_lock():
+        assert (shared / "north-america-staging-first-release.lock").is_file()
