@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, subprocess.SubprocessError):
         print("FAIL B Redis backup/recovery: incomplete; deployment remains blocked", file=sys.stderr)
         return 1
-    print("B Redis backup and isolated recovery passed; MinIO and off-host backup gates remain pending.")
+    print("B Redis backup and isolated recovery passed; verify the other on-host recovery gates separately.")
     return 0
 
 

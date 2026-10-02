@@ -1,5 +1,7 @@
 """First B activation never promotes a failed service or touches stateful volumes."""
 
+import hashlib
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -81,6 +83,59 @@ def test_agent_requires_product_pointer(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(release, "ROOT", tmp_path)
     with pytest.raises(ValueError, match="Product release"):
         release.check_fresh_pointer("agent", tmp_path / "releases/agent" / ("a" * 40))
+
+
+def test_verified_on_host_recovery_allows_activation_without_off_host_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+    source = tmp_path / "releases/backend" / ("a" * 40)
+    source.mkdir(parents=True)
+    (tmp_path / "current").mkdir()
+    backups = tmp_path / "backups"
+
+    def run(kind: str, artifacts: dict[str, bytes], manifest: dict) -> None:
+        folder = backups / kind / "run"
+        folder.mkdir(parents=True, mode=0o700)
+        for name, content in artifacts.items():
+            (folder / name).write_bytes(content)
+        (folder / "recovery-verified.json").write_text(json.dumps({
+            "target": "north-america-staging", **manifest,
+        }))
+
+    databases = ("momcozy_lab_backend_uat", "momcozy_lab_agent_uat")
+    run("postgres", {f"{db}.dump": db.encode() for db in databases}, {
+        "verification": "isolated-postgres-restore",
+        "databases": {db: {"file": f"{db}.dump", "sha256": hashlib.sha256(db.encode()).hexdigest(),
+                           "alembic_revision": "rev"} for db in databases},
+    })
+    run("redis", {"dump.rdb": b"rdb"}, {
+        "verification": "isolated-redis-rdb-restore", "rdb_file": "dump.rdb",
+        "sha256": hashlib.sha256(b"rdb").hexdigest(), "key_count": 0,
+    })
+    run("minio", {"iam.zip": b"iam"}, {
+        "verification": "isolated-minio-two-bucket-iam-restore",
+        "iam_sha256": hashlib.sha256(b"iam").hexdigest(),
+        "objects": {"product": {}, "agent": {}},
+    })
+    for bucket in ("product", "agent"):
+        (backups / "minio/run" / bucket).mkdir()
+
+    monkeypatch.setattr(release, "_validate_backup_mount", lambda root: backups)
+    monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
+    monkeypatch.setattr(release, "check_service_containers_absent", lambda service: None)
+    monkeypatch.setattr(release, "start_services", lambda args: None)
+    monkeypatch.setattr(release, "check_ready", lambda service: None)
+    monkeypatch.setattr(release, "check_running_service_provenance", lambda args: None)
+    monkeypatch.setattr(release, "check_public_ready", lambda service: None)
+    args = SimpleNamespace(service="backend", source=source, commit="a" * 40,
+                           image="ghcr.io/example/backend@sha256:" + "b" * 64,
+                           image_id="sha256:" + "c" * 64)
+    release.activate(args)
+    assert (tmp_path / "current/backend").resolve() == source
+    assert (source / "release-manifest.json").is_file()
+    assert not list(tmp_path.rglob("*.cms"))  # No off-host receipt is required.
+
 
 def test_first_activation_requires_public_ready_before_pointer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release, "ROOT", tmp_path)

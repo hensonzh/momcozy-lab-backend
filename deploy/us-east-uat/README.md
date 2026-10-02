@@ -157,10 +157,12 @@ call A's `staging` release entrypoint.
   RDB drill has a separate CI synthetic test with Product/Agent keys. **Neither
   synthetic drill proves a target-host backup or lossless recovery of live
   changing data**; Redis AOF history is not preserved by the RDB copy.
-  MinIO, real Redis/PostgreSQL drills and off-host retention still block the
-  complete production-data recovery gate. Complete those
-  gates before wiring any reviewed deploy operation. The
-  `scripts/check_b_rollback.py` is read-only: it checks B-only release
+  Verified on-host PostgreSQL, Redis and MinIO backups with isolated
+  recovery remain release gates. Off-host retention is deferred and does not
+  block B release; do not mistake on-host backups for independent disaster
+  recovery. The first-release runner executes these gates only after target
+  preflight; it has not run on the host. The `scripts/check_b_rollback.py` is
+  read-only: it checks B-only release
   symlinks/manifests, equal schema revisions and queries the B-owned
   PostgreSQL container for the live Alembic revision. It does not check
   client compatibility beyond the operator flag. This is **not** a rollback
@@ -222,7 +224,9 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   `scripts/b_postgres_recovery.py` also fails closed if the bind mount/source
   is unavailable. **This backup is on the same `/data` device as Docker and
   stateful volumes, not an independent/off-host copy.** Off-host retention
-  and recovery still require a separate approved destination and drill.
+  is not required for B release as of 2026-10-01; providing it later still
+  requires a separate approved destination and recovery drill. A host or
+  shared-disk failure can lose both live data and these backups.
 - Clean GitHub `dev` snapshots were staged under each service's
   `releases/<service>/<commit>`. The latest staged and locally built snapshots
   after the B validation CI passed were Backend
@@ -285,9 +289,10 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   verified. Host UFW is inactive; external security-group exposure was not
   audited. HTTPS/TLS, real email delivery, 10-run load evidence, live
   PostgreSQL/MinIO/Redis backup and isolated recovery,
-  off-host retention, digest verification on host and a reviewed B-only
-  deployment/rollback runner remain gates. The fresh-only Docker guard passed
-  using `sudo -n`; unprivileged `ubuntu` Docker access failed, so the future
+  digest verification on host and a reviewed B-only update/rollback
+  runner remain gates. The guarded first-release orchestrator is code-complete
+  but has not yet passed its host exercise. Off-host retention is deferred, not a release gate.
+  The fresh-only Docker guard passed using `sudo -n`; unprivileged `ubuntu` Docker access failed, so the future
   runner must explicitly resolve its privilege model. The synthetic test is
   not a live backup rehearsal.
 

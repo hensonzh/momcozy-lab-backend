@@ -227,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError):
         print("FAIL B MinIO backup/recovery: incomplete; state untouched", file=sys.stderr)
         return 1
-    print("B MinIO two-bucket and IAM backup/isolated recovery passed; off-host retention remains pending.")
+    print("B MinIO two-bucket and IAM backup/isolated recovery passed; off-host retention is not a release gate.")
     return 0
 
 
