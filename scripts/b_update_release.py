@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -187,9 +188,38 @@ def fresh_recovery(source: Path) -> None:
         raise ValueError("B update recovery evidence is not fresh")
 
 
+def wait_api_healthy(runtime: argparse.Namespace) -> None:
+    """HTTP readiness may precede Docker's healthcheck start period."""
+    project = f"momcozy-lab-{runtime.service}-us-east-uat"
+    deadline = time.monotonic() + 90
+    while True:
+        ids = subprocess.run(
+            ["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
+             "--filter", "label=com.docker.compose.service=api", "--format", "{{.ID}}"],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        if len(ids) != 1:
+            raise ValueError("B API healthcheck requires exactly one container")
+        container = json.loads(subprocess.run(
+            ["docker", "inspect", ids[0], "--format", "{{json .State}}"],
+            capture_output=True, text=True, check=True,
+        ).stdout)
+        if container.get("Status") != "running":
+            raise ValueError("B API container stopped before healthcheck")
+        health = container.get("Health", {}).get("Status")
+        if health == "healthy":
+            return
+        if health != "starting":
+            raise ValueError("B API healthcheck failed")
+        if time.monotonic() >= deadline:
+            raise ValueError("B API healthcheck did not become healthy")
+        time.sleep(2)
+
+
 def start_checked(runtime: argparse.Namespace) -> None:
     start_services(runtime)
     check_ready(runtime.service)
+    wait_api_healthy(runtime)
     check_running_service_provenance(runtime)
     check_public_ready(runtime.service)
 

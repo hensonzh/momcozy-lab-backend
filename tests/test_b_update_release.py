@@ -158,6 +158,60 @@ def test_preflight_only_calls_read_only_admission(monkeypatch: pytest.MonkeyPatc
     assert calls == ["update"]
 
 
+def test_start_checked_waits_for_docker_health_before_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    runtime = argparse.Namespace(service="backend")
+    monkeypatch.setattr(release, "start_services", lambda args: calls.append("started"))
+    monkeypatch.setattr(release, "check_ready", lambda service: calls.append("ready"))
+    monkeypatch.setattr(release, "wait_api_healthy", lambda args: calls.append("healthy"))
+    monkeypatch.setattr(release, "check_running_service_provenance", lambda args: calls.append("provenance"))
+    monkeypatch.setattr(release, "check_public_ready", lambda service: calls.append("public"))
+    release.start_checked(runtime)
+    assert calls == ["started", "ready", "healthy", "provenance", "public"]
+
+
+def test_api_health_waits_for_starting_then_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+    states = iter(("starting", "starting", "healthy"))
+    now = [0.0]
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command[0] == "docker"
+        if command[1] == "ps":
+            return subprocess.CompletedProcess(command, 0, "abc123\n", "")
+        assert command[1] == "inspect"
+        state = {"Status": "running", "Health": {"Status": next(states)}}
+        return subprocess.CompletedProcess(command, 0, json.dumps(state), "")
+    monkeypatch.setattr(release.subprocess, "run", run)
+    monkeypatch.setattr(release.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(release.time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    release.wait_api_healthy(argparse.Namespace(service="backend"))
+    assert now[0] == 4
+
+
+def test_api_health_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+    now = [0.0]
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        output = "abc123\n" if command[1] == "ps" else json.dumps({"Status": "running", "Health": {"Status": "starting"}})
+        return subprocess.CompletedProcess(command, 0, output, "")
+    monkeypatch.setattr(release.subprocess, "run", run)
+    monkeypatch.setattr(release.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(release.time, "sleep", lambda delay: now.__setitem__(0, now[0] + delay))
+    with pytest.raises(ValueError, match="healthcheck did not become healthy"):
+        release.wait_api_healthy(argparse.Namespace(service="agent"))
+    assert now[0] == 90
+
+
+def test_api_health_wait_rejects_unhealthy_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        output = "abc123\n" if command[1] == "ps" else json.dumps({"Status": "running", "Health": {"Status": "unhealthy"}})
+        return subprocess.CompletedProcess(command, 0, output, "")
+    monkeypatch.setattr(release.subprocess, "run", run)
+    with pytest.raises(ValueError, match="healthcheck failed"):
+        release.wait_api_healthy(argparse.Namespace(service="backend"))
+
+
 def test_image_head_requires_one_offline_revision(monkeypatch: pytest.MonkeyPatch) -> None:
     import subprocess
     seen = []
