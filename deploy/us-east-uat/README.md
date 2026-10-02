@@ -353,3 +353,22 @@ recovery. No automatic migration/downgrade or data-volume recreation is
 supported; schema-changing releases need a separately reviewed migration plan.
 This runner is code plus local tests, **not yet exercised on the B target**.
 Off-host retention remains deferred and is not independent disaster recovery.
+
+## 2026-10-02 GHCR registry transport correction
+
+`b_fetch_oci.py` now supports either a classic PAT in a private tmpfs file
+(`--token-file`, exchanged through `ghcr.io/token` for a package-scoped pull
+bearer) or a preissued package-scoped bearer in the same private tmpfs location
+(`--registry-token-file`). The latter avoids transferring a long-lived GitHub
+PAT to the host. The token file must reside directly under
+`/dev/shm/momcozy-b-ghcr-transfer/` in a mode-0700 directory, owned by the
+invoking account, and itself be a mode-0600 regular single-link file. Never
+print or put either token in Git, a command argument or Docker login config.
+The fetcher validates the requested index digest, exactly one linux/amd64
+child, manifest sizes, all blob digests/sizes, and refuses to overwrite an
+existing OCI archive. A real package-scoped exchange, digest fetch and Docker
+OCI import passed on the operator Mac; **that is not a target-host import or
+service update**. Backend B CI passed for this change (`4903f185076ef2b99deb3f27a4f05e6dbf5220f3`). JumpServer MFA did not
+complete on the next target-host attempts; no remote token, OCI archive, new
+container or release pointer was changed in those attempts. The running
+Backend/Agent pointers must be inspected again before any further apply.
