@@ -70,3 +70,38 @@ def test_registry_exchange_rejects_missing_token_or_wrong_repository(monkeypatch
         b_fetch_oci.registry_token("momcozy-lab-backend", "pat", username="hensonzh")
     with pytest.raises(ValueError, match="unapproved"):
         b_fetch_oci.registry_token("different-repo", "pat", username="hensonzh")
+
+
+def test_preissued_registry_bearer_skips_pat_exchange(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+    import io
+    import json
+    from types import SimpleNamespace
+
+    manifest = json.dumps({"manifests": []}).encode()
+    digest = "sha256:" + hashlib.sha256(manifest).hexdigest()
+    token_root = tmp_path / "momcozy-b-ghcr-transfer"
+    token_root.mkdir(mode=0o700)
+    token_file = token_root / "backend.registry-token"
+    token_file.write_text("scoped-bearer")
+    token_file.chmod(0o600)
+    monkeypatch.setattr(b_fetch_oci, "PRIVATE_ROOT", token_root)
+    monkeypatch.setattr(b_fetch_oci, "registry_token", lambda *a, **kw: pytest.fail("must not exchange PAT"))
+    class Response(io.BytesIO):
+        def __enter__(self) -> "Response": return self
+        def __exit__(self, *args: object) -> None: self.close()
+    def open_request(req: object, timeout: int) -> Response:
+        assert req.get_header("Authorization") == "Bearer scoped-bearer"
+        return Response(manifest)
+    monkeypatch.setattr(b_fetch_oci.urllib.request, "urlopen", open_request)
+    with pytest.raises(ValueError, match="amd64"):
+        b_fetch_oci.fetch_layout(SimpleNamespace(repo="momcozy-lab-backend", digest=digest,
+            output=tmp_path / "image.tar", token_file=None, registry_token_file=token_file))
+    assert not (tmp_path / "image.tar").exists()
+
+
+def test_both_token_sources_are_mutually_exclusive() -> None:
+    with pytest.raises(SystemExit):
+        b_fetch_oci.main(["--repo", "momcozy-lab-backend", "--digest", "sha256:"+"a"*64,
+                          "--output", "/tmp/b.tar", "--token-file", "/tmp/pat",
+                          "--registry-token-file", "/tmp/bearer"])

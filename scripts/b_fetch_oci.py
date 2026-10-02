@@ -30,6 +30,7 @@ ACCEPT = ",".join((
 ))
 REPOSITORIES = ("momcozy-lab-backend", "momcozy-lab-agent")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+PRIVATE_ROOT = Path("/dev/shm/momcozy-b-ghcr-transfer")
 
 
 def validate(repo: str, digest: str, output: Path) -> None:
@@ -59,10 +60,10 @@ def registry_token(repo: str, pat: str, *, username: str) -> str:
 
 def fetch_layout(args: argparse.Namespace) -> None:
     validate(args.repo, args.digest, args.output)
-    token_file = args.token_file
-    private_root = Path("/dev/shm/momcozy-b-ghcr-transfer")
-    if (token_file.parent != private_root or private_root.is_symlink() or not private_root.is_dir()
-            or stat.S_IMODE(private_root.stat().st_mode) != 0o700
+    token_file = args.token_file or args.registry_token_file
+    private_root = PRIVATE_ROOT
+    if (token_file is None or token_file.parent != private_root or private_root.is_symlink()
+            or not private_root.is_dir() or stat.S_IMODE(private_root.stat().st_mode) != 0o700
             or private_root.stat().st_uid != os.geteuid() or token_file.is_symlink()
             or not token_file.is_file() or stat.S_IMODE(token_file.stat().st_mode) != 0o600
             or token_file.stat().st_uid != os.geteuid() or token_file.stat().st_nlink != 1):
@@ -70,7 +71,8 @@ def fetch_layout(args: argparse.Namespace) -> None:
     token = token_file.read_text().strip()
     if not token:
         raise ValueError("B GHCR token is empty")
-    bearer = registry_token(args.repo, token, username="hensonzh")
+    bearer = (registry_token(args.repo, token, username="hensonzh")
+              if args.token_file else token)
     base = f"https://ghcr.io/v2/hensonzh/{args.repo}"
 
     def fetch(kind: str, digest: str) -> bytes:
@@ -129,13 +131,15 @@ def fetch_layout(args: argparse.Namespace) -> None:
     print(f"B {args.repo} verified OCI index {args.digest}; archive size {args.output.stat().st_size}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", choices=REPOSITORIES, required=True)
     parser.add_argument("--digest", required=True)
-    parser.add_argument("--token-file", type=Path, required=True)
+    credentials = parser.add_mutually_exclusive_group(required=True)
+    credentials.add_argument("--token-file", type=Path, help="Classic PAT in private tmpfs; exchange for scoped registry token")
+    credentials.add_argument("--registry-token-file", type=Path, help="Preissued, short-lived read-only registry token in private tmpfs")
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         fetch_layout(args)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
