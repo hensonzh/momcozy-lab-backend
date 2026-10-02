@@ -9,14 +9,17 @@ The archive can be imported only after its source digest and blobs are checked.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import os
 import re
 import stat
 import sys
 import tarfile
 import tempfile
 import urllib.request
+from urllib.parse import urlencode
 from pathlib import Path
 
 ACCEPT = ",".join((
@@ -36,16 +39,38 @@ def validate(repo: str, digest: str, output: Path) -> None:
         raise ValueError("OCI output already exists")
 
 
+def registry_token(repo: str, pat: str, *, username: str) -> str:
+    """Exchange a classic PAT for a read-only token scoped to one GHCR package."""
+    if repo not in REPOSITORIES or username != "hensonzh" or not pat:
+        raise ValueError("unapproved GHCR package or credential")
+    scope = f"repository:hensonzh/{repo}:pull"
+    query = urlencode({"service": "ghcr.io", "scope": scope})
+    basic = base64.b64encode(f"{username}:{pat}".encode()).decode()
+    request = urllib.request.Request(
+        f"https://ghcr.io/token?{query}", headers={"Authorization": "Basic " + basic},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        data = json.load(response)
+    bearer = data.get("token") if isinstance(data, dict) else None
+    if not isinstance(bearer, str) or not bearer:
+        raise ValueError("GHCR did not grant a scoped registry token")
+    return bearer
+
+
 def fetch_layout(args: argparse.Namespace) -> None:
     validate(args.repo, args.digest, args.output)
     token_file = args.token_file
-    if (token_file.is_symlink() or not token_file.is_file()
-            or stat.S_IMODE(token_file.stat().st_mode) != 0o600
-            or not str(token_file).startswith("/dev/shm/momcozy-b-ghcr-transfer/")):
+    private_root = Path("/dev/shm/momcozy-b-ghcr-transfer")
+    if (token_file.parent != private_root or private_root.is_symlink() or not private_root.is_dir()
+            or stat.S_IMODE(private_root.stat().st_mode) != 0o700
+            or private_root.stat().st_uid != os.geteuid() or token_file.is_symlink()
+            or not token_file.is_file() or stat.S_IMODE(token_file.stat().st_mode) != 0o600
+            or token_file.stat().st_uid != os.geteuid() or token_file.stat().st_nlink != 1):
         raise ValueError("B GHCR token must be a private tmpfs file")
     token = token_file.read_text().strip()
     if not token:
         raise ValueError("B GHCR token is empty")
+    bearer = registry_token(args.repo, token, username="hensonzh")
     base = f"https://ghcr.io/v2/hensonzh/{args.repo}"
 
     def fetch(kind: str, digest: str) -> bytes:
@@ -53,7 +78,7 @@ def fetch_layout(args: argparse.Namespace) -> None:
             raise ValueError("registry descriptor is not a SHA256 digest")
         req = urllib.request.Request(
             f"{base}/{kind}/{digest}",
-            headers={"Authorization": "Bearer " + token, "Accept": ACCEPT},
+            headers={"Authorization": "Bearer " + bearer, "Accept": ACCEPT},
         )
         with urllib.request.urlopen(req, timeout=90) as response:
             content = response.read()
@@ -90,11 +115,17 @@ def fetch_layout(args: argparse.Namespace) -> None:
         put(manifest_raw)
         (folder / "index.json").write_text(json.dumps({"schemaVersion": 2, "manifests": [child]}))
         # Only digest-named known files enter the archive; no arbitrary paths.
-        with tarfile.open(args.output, "w") as archive:
-            for filename in ("oci-layout", "index.json"):
-                archive.add(folder / filename, arcname=filename, recursive=False)
-            for file in blobs.iterdir():
-                archive.add(file, arcname="blobs/sha256/" + file.name, recursive=False)
+        # Open outside try: an existing archive must never be removed on failure.
+        fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as stream, tarfile.open(fileobj=stream, mode="w") as archive:
+                for filename in ("oci-layout", "index.json"):
+                    archive.add(folder / filename, arcname=filename, recursive=False)
+                for file in blobs.iterdir():
+                    archive.add(file, arcname="blobs/sha256/" + file.name, recursive=False)
+        except Exception:
+            args.output.unlink(missing_ok=True)
+            raise
     print(f"B {args.repo} verified OCI index {args.digest}; archive size {args.output.stat().st_size}")
 
 

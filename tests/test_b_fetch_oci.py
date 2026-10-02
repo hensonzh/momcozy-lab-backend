@@ -40,3 +40,33 @@ def test_script_direct_invocation() -> None:
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0
+
+
+def test_registry_exchange_uses_basic_pat_then_scoped_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import base64
+    import io
+    import json
+    import urllib.request
+
+    seen: list[urllib.request.Request] = []
+    class Response(io.BytesIO):
+        def __enter__(self) -> "Response": return self
+        def __exit__(self, *args: object) -> None: self.close()
+    def open_request(req: urllib.request.Request, timeout: int) -> Response:
+        seen.append(req)
+        return Response(json.dumps({"token": "registry-bearer"}).encode())
+    monkeypatch.setattr(b_fetch_oci.urllib.request, "urlopen", open_request)
+    bearer = b_fetch_oci.registry_token("momcozy-lab-agent", "ghp-private", username="hensonzh")
+    assert bearer == "registry-bearer"
+    assert seen[0].full_url == "https://ghcr.io/token?service=ghcr.io&scope=repository%3Ahensonzh%2Fmomcozy-lab-agent%3Apull"
+    assert seen[0].get_header("Authorization") == "Basic " + base64.b64encode(b"hensonzh:ghp-private").decode()
+    assert len(seen) == 1
+
+
+def test_registry_exchange_rejects_missing_token_or_wrong_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    import io
+    monkeypatch.setattr(b_fetch_oci.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(b"{}"))
+    with pytest.raises(ValueError, match="scoped registry token"):
+        b_fetch_oci.registry_token("momcozy-lab-backend", "pat", username="hensonzh")
+    with pytest.raises(ValueError, match="unapproved"):
+        b_fetch_oci.registry_token("different-repo", "pat", username="hensonzh")
