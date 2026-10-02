@@ -17,11 +17,13 @@ def test_refuses_existing_b_state_before_compose(monkeypatch: pytest.MonkeyPatch
     assert not calls
 
 
-def test_start_only_b_infra_and_bucket_init(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_only_b_infra_and_bucket_init(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[list[str]] = []
     monkeypatch.setattr(b_bootstrap_infra, "validate_fresh", lambda: None)
     monkeypatch.setattr(b_bootstrap_infra, "_run", lambda command, **kwargs: calls.append(command))
-    b_bootstrap_infra.start_fresh(Path("/approved"), Path("/private.env"), "ghcr.io/hensonzh/momcozy-lab-backend@sha256:" + "a" * 64)
+    private = tmp_path / "private.env"
+    private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
+    b_bootstrap_infra.start_fresh(Path("/approved"), private, "ghcr.io/hensonzh/momcozy-lab-backend@sha256:" + "a" * 64)
     assert len(calls) == 2
     assert calls[0][-6:] == ["up", "-d", "--wait", "postgres", "redis", "minio"]
     assert calls[1][-4:] == ["tools", "run", "--rm", "minio-init"]

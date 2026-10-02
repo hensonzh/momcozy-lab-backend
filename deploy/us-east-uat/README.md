@@ -1,9 +1,11 @@
 # Product Backend — US-East UAT (B) single-host strategy
 
-Decision: 2026-09-30. This is a **design and handoff**, not an executable
-release. The retired B Kubernetes workloads and migration Job templates were
-removed. A's root Dockerfile, Compose files, private env and GitHub delivery
-workflow remain unchanged; B must not call A's `staging` release entrypoint.
+Decision: 2026-09-30. Updated 2026-10-02. B has a guarded first-release
+orchestrator but has not been exercised on the target host; subsequent
+update/rollback remain separate unfinished work. Retired Kubernetes workloads
+and migration Job templates were removed. A's root Dockerfile, Compose
+files, private env and GitHub delivery workflow remain unchanged; B must not
+call A's `staging` release entrypoint.
 
 ## Ownership and isolation
 
@@ -48,10 +50,15 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   These are host-loopback Docker port publishes, not public port exposures.
   It names a future public
   certificate under `/etc/letsencrypt/live/`; the file is not present yet.
-  Do not enable a fake/self-signed public endpoint to bypass TLS verification.
+  Install the trusted B-only HTTPS site *before* the first-release runner:
+  Nginx may return 502 until the upstream is activated, which is **not**
+  readiness. The runner checks the public certificate before touching B state
+  and checks real HTTP readiness after each activation. This avoids requiring
+  a running API as a prerequisite for installing its own reverse proxy. Do
+  not enable a fake/self-signed public endpoint to bypass TLS verification.
   PostgreSQL, Redis and MinIO must not expose public host ports. Build the
   pinned MinIO source image for this B tag before first bootstrap:
-  `docker build -f deploy/shared/Minio.Dockerfile -t momcozy-us-east-uat-minio:9e49d5e7a648f00e deploy/shared`.
+  `docker build --platform linux/amd64 -f deploy/us-east-uat/Minio.Dockerfile -t momcozy-us-east-uat-minio:9e49d5e7a648f00e deploy/shared`.
   Do not substitute a mutable public image tag.
 - Before the **first** stateful bootstrap, run the read-only
   `python scripts/check_b_fresh_bootstrap.py` on the target with Docker access.
@@ -73,8 +80,9 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   Redis RDB and MinIO two-bucket synthetic backup/isolated restores, and
   locally builds the B Dockerfile. After those gates pass on a GitHub `dev`
   push, the separate `b-image` job publishes only the B Dockerfile image to
-  private GHCR as `b-dev-<full SHA>` and records its immutable digest. Verify
-  the exact commit's job and digest before release. It does not run migrations
+  private GHCR as `b-dev-<full SHA>`, then inspects and runs offline checks
+  against the exact published digest before recording it. Verify the exact
+  commit's successful job and digest before release. It does not run migrations
   against UAT or deploy; release integration and live validation remain.
   B Compose requires `MOMCOZY_B_ENV_MARKER` so A env
   cannot pass static rendering by accident; the read-only `scripts/check_b_env.py`
@@ -83,20 +91,52 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   still refuses B deployment. New `scripts/b_release.py` is a B-only,
   read-only admission check; it validates a clean `dev` source commit, immutable
   image digest, private target declaration and private Backend env, then renders
-  B Compose without printing its contents. Use the separate
-  `scripts/check_b_pair.py` on the host to verify Product/Agent shared
-  credentials and B identities agree before service startup. It does not
-  deploy and does not
+  B Compose without printing its contents. Its subprocess uses a B-only
+  allowlisted environment; mutating B host scripts explicitly bind Docker to
+  the local Unix socket and reject inherited remote context/host overrides.
+  Do not bypass them by running Compose from an interactive shell where A's
+  variables may override `--env-file`. The
+  admission validates Product/Agent shared credentials and B identities
+  before startup; it does not deploy and does not
   prove the source-to-image label, CI provenance or target host state.
+- **First release only**: `scripts/b_first_release.py --preflight` is read-only;
+  it checks target identity, fresh Docker state, trusted TLS, local image
+  identities and the B backup bind mount without starting services. Once
+  independently reviewed, `scripts/b_first_release.py --apply` requires both
+  immutable image digest/commit pairs, the matching imported local OCI image
+  IDs, clean checked-out `dev` release directories, private B env/target files
+  and a pre-existing trusted public TLS ingress. It refuses any existing B
+  Compose state, then runs B-only infrastructure bootstrap, two Alembic
+  migrations, *fresh* PostgreSQL/Redis/MinIO isolated restores, Product
+  activation/public HTTPS readiness, and Agent activation/public readiness.
+  A private, dedicated first-release lock covers the whole sequence, while
+  the existing B stage lock remains unchanged. Any failed stage stops without
+  an automatic downgrade or deletion. Do not
+  rerun after partial state without an explicit recovery review. This entry
+  does not install Nginx/certificates or fetch/import images; use the approved
+  GHCR digest-to-OCI procedure first. Existing deployment and schema changes
+  still require a separate reviewed update/rollback runner. SMTP/model
+  provider E2E and 10-run load are independent acceptance checks, not gates
+  on creating App CI artifacts.
+- B self-hosted PostgreSQL and Redis Compose images and their isolated restore
+  drills use the same fixed Docker Hub digest. B's separate
+  `deploy/us-east-uat/Minio.Dockerfile` pins its Go/Alpine bases; A continues
+  using `deploy/shared/Minio.Dockerfile` unchanged. The local B MinIO tag is
+  accepted only after checking its upstream revision; record the actual B
+  image ID during target-host preflight and do not substitute a public tag.
+  The Go/Alpine bases are digest-pinned, but APK package resolution and the
+  MinIO build itself are not byte-for-byte reproducible; verify the target
+  image identity before stateful bootstrap.
 - The private Backend env must provide B-only credentials, service names and
   URLs (Product `DATABASE_URL`, `REDIS_URL` ending `/0`, MinIO bucket and
   scoped keys, JWT/service keys, Resend SMTP key). Use the same B identity
   contract as Agent, not A's `env/staging.env`. Never commit a populated env,
   credentials or generated Compose rendering to Git.
 - Run `python scripts/check_b_env.py --env-file /absolute/path/to/private-backend.env`
-  before `docker compose --env-file /absolute/path/to/private-backend.env -f docker-compose.us-east-uat.yml config --quiet` (set `MOMCOZY_BACKEND_ENV_FILE`
-  and immutable `MOMCOZY_BACKEND_IMAGE` outside the file). Static checks do not
-  verify credentials, provider connectivity, resource capacity or actual TLS.
+  then the B-only read-only `scripts/b_release.py` admission, which renders
+  Compose with a restricted subprocess environment. Do not run raw `docker compose`
+  from an interactive shell: shell variables can override the private env.
+  Static checks do not verify provider connectivity, capacity or actual TLS.
 - Before starting application containers: initialize two DBs/roles, Redis
   ACLs and two buckets; validate an isolated backup and restore plan. The
   synthetic `scripts/check_b_infra_contract.sh` uses ephemeral local containers
@@ -125,9 +165,10 @@ workflow remain unchanged; B must not call A's `staging` release entrypoint.
   PostgreSQL container for the live Alembic revision. It does not check
   client compatibility beyond the operator flag. This is **not** a rollback
   action; the future runner must recheck under the B release lock immediately
-  before switching services. Run the
-  Product Alembic migration with appropriate DDL rights, then start and check
-  Product API and both workers. Deploy Agent **after** Product is healthy.
+  before switching services. On the *first empty* B deployment, migrate both
+  databases with separate DDL roles, prove the fresh recovery of both databases
+  and shared stores, then start and check Product API and both workers. Activate
+  Agent **after** Product is publicly healthy.
   Keep B-specific rollback and schema-compatibility gates; do not downgrade
   databases automatically. Verify `/v1/health/ready` and real UAT mail flow.
 - This file does not authorize cloud or server changes. Host capacity was
@@ -271,11 +312,12 @@ Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
   and no enabled B HTTPS server blocks. Do not run a production ACME request
   before external port 80 is demonstrably reachable. Do not substitute a
   self-signed certificate. The checked-in B Nginx templates require the real
-  certificates and healthy loopback upstreams before installation.
+  certificates and reviewed unknown-host policy before installation; a 502
+  until business containers start is not public readiness.
 - The GHCR images were published by B CI as immutable digests, but the host
   currently gets `denied` when it tries to inspect those private digests.
   Configure an approved read-only GHCR pull identity on the B host without
-  writing a token to command arguments, logs or Git. The existing B release
-  entrypoints perform static admission only and explicitly do **not** start
-  containers. A separate reviewed B-only bootstrap/deploy and real
-  PostgreSQL/Redis/MinIO isolated restore/rollback gate are still required.
+  writing a token to command arguments, logs or Git. The `b_release.py`
+  entrypoints perform static admission only. `b_first_release.py` sequences
+  first bootstrap, real on-host isolated restores and activation but has not
+  been run on this host. Updates and rollback need a separate reviewed runner.

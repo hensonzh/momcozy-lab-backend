@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import fcntl
-import os
 import stat
 import subprocess
 import sys
@@ -19,6 +18,8 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from scripts.b_docker_context import require_local_docker  # noqa: E402
+from scripts.b_compose_env import compose_env  # noqa: E402
 from scripts.b_release import B_ROOT, preflight  # noqa: E402
 from scripts.check_b_fresh_bootstrap import validate_fresh  # noqa: E402
 
@@ -32,7 +33,7 @@ def _run(command: list[str], *, cwd: Path, env: dict[str, str]) -> None:
 
 def start_fresh(source: Path, env_path: Path, image: str) -> None:
     validate_fresh()
-    env = {**os.environ, "MOMCOZY_BACKEND_ENV_FILE": str(env_path), "MOMCOZY_BACKEND_IMAGE": image}
+    env = compose_env(env_path, image_variable="MOMCOZY_BACKEND_IMAGE", image=image)
     command = ["docker", "compose", "--env-file", str(env_path), "-f", "docker-compose.us-east-uat.yml"]
     _run([*command, "up", "-d", "--wait", "postgres", "redis", "minio"], cwd=source, env=env)
     _run([*command, "--profile", "tools", "run", "--rm", "minio-init"], cwd=source, env=env)
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No B infrastructure changed; --apply is required.")
         return 0
     try:
+        require_local_docker()
         preflight(args)
         lock = B_ROOT / "shared/north-america-staging-release.lock"
         if lock.is_symlink() or not lock.is_file() or stat.S_IMODE(lock.stat().st_mode) != 0o600:

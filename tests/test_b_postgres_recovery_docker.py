@@ -27,7 +27,7 @@ def test_two_database_dump_and_isolated_restore() -> None:
         "-e", "MOMCOZY_AGENT_POSTGRES_USER=momcozy_lab_agent_uat",
         "-e", "MOMCOZY_AGENT_POSTGRES_PASSWORD=synthetic_agent_password",
         "-v", f"{ROOT / 'deploy/us-east-uat/init-postgres.sh'}:/docker-entrypoint-initdb.d/10-init-momcozy-databases.sh:ro",
-        "postgres:16",
+        "postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54",
     ]
     subprocess.run(command, capture_output=True, check=True)
     try:

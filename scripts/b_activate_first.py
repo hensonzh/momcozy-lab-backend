@@ -13,6 +13,7 @@ import fcntl
 import json
 import os
 import re
+import ssl
 import stat
 import subprocess
 import sys
@@ -24,6 +25,8 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from scripts.b_docker_context import require_local_docker  # noqa: E402
+from scripts.b_compose_env import compose_env  # noqa: E402
 from scripts.b_migrate_first import verify_image  # noqa: E402
 from scripts.b_offhost_backup import select_latest  # noqa: E402
 from scripts.b_postgres_recovery import _validate_backup_mount  # noqa: E402
@@ -100,11 +103,8 @@ def _compose(args: argparse.Namespace, command: list[str]) -> list[str]:
 
 
 def _environment(args: argparse.Namespace) -> dict[str, str]:
-    result = {**os.environ, f"MOMCOZY_{args.service.upper()}_ENV_FILE": str(args.env_file),
-              f"MOMCOZY_{args.service.upper()}_IMAGE": args.local_image}
-    if args.service == "agent":
-        result["MOMCOZY_AGENT_RELEASE_ID"] = args.commit
-    return result
+    return compose_env(args.env_file, image_variable=f"MOMCOZY_{args.service.upper()}_IMAGE",
+                       image=args.local_image, release_id=args.commit if args.service == "agent" else None)
 
 
 def start_services(args: argparse.Namespace) -> None:
@@ -141,6 +141,24 @@ def check_ready(service: str) -> None:
         raise ValueError("B API loopback port is not isolated")
 
 
+def check_public_ready(service: str) -> None:
+    if service not in PORTS:
+        raise ValueError("unknown B service")
+    host = ("backend-us-dev.lute-momcozylab.luteos.cloud" if service == "backend"
+            else "agent-us-dev.lute-momcozylab.luteos.cloud")
+    url = f"https://{host}/v1/health/ready"
+    for attempt in range(30):
+        try:
+            with urllib.request.urlopen(url, timeout=3, context=ssl.create_default_context()) as response:
+                if response.status == 200 and json.load(response).get("status") == "ok":
+                    return
+        except (OSError, ValueError, KeyError):
+            pass
+        if attempt != 29:
+            time.sleep(2)
+    raise ValueError("B public HTTPS readiness failed")
+
+
 def activate(args: argparse.Namespace) -> None:
     check_fresh_pointer(args.service, args.source)
     if getattr(args, "recover_running", False):
@@ -159,6 +177,7 @@ def activate(args: argparse.Namespace) -> None:
         start_services(args)
     check_ready(args.service)
     check_running_service_provenance(args)
+    check_public_ready(args.service)
     manifest = args.source / "release-manifest.json"
     payload = {"deployment_target": "north-america-staging", "service": args.service,
                "commit": args.commit, "image_ref": args.image, "migration_revision": revision,
@@ -186,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No B services changed; --apply required.")
         return 0
     try:
+        require_local_docker()
         if args.service == "backend":
             if args.agent_env is None:
                 raise ValueError("B Product requires Agent env cross-check")

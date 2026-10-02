@@ -34,9 +34,11 @@ def test_ready_rejects_public_listener(local: str, monkeypatch: pytest.MonkeyPat
         release.check_ready("backend")
 
 
-def test_recover_requires_exact_business_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recover_requires_exact_business_provenance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     source = Path("/opt/momcozy-lab-us-east-uat/releases/backend/" + "a" * 40)
-    args = SimpleNamespace(service="backend", source=source, env_file=Path("/private/backend.env"),
+    private = tmp_path / "backend.env"
+    private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
+    args = SimpleNamespace(service="backend", source=source, env_file=private,
                            image_id="sha256:" + "b" * 64, local_image="ghcr.io/example/backend:b-oci-aaaaaaa")
     seen = []
     running_image = args.image_id
@@ -74,6 +76,7 @@ def test_recover_never_restarts_business_containers(tmp_path: Path, monkeypatch:
     pg.mkdir(parents=True)
     (pg / "recovery-verified.json").write_text('{"databases":{"momcozy_lab_backend_uat":{"alembic_revision":"rev"}}}')
     monkeypatch.setattr(release, "check_running_service_provenance", lambda args: None)
+    monkeypatch.setattr(release, "check_public_ready", lambda service: None)
     monkeypatch.setattr(release, "check_service_containers_absent", lambda *a: pytest.fail("must not require absence"))
     monkeypatch.setattr(release, "start_services", lambda *a: pytest.fail("must not restart"))
     monkeypatch.setattr(release, "check_ready", lambda *a: None)

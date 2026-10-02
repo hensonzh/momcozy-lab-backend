@@ -20,7 +20,7 @@ docker run -d --rm --name "$postgres_name" --network none \
   -e MOMCOZY_AGENT_POSTGRES_USER=momcozy_lab_agent_uat \
   -e MOMCOZY_AGENT_POSTGRES_PASSWORD=synthetic_agent_password \
   -v "$PWD/deploy/us-east-uat/init-postgres.sh:/docker-entrypoint-initdb.d/10-init-momcozy-databases.sh:ro" \
-  postgres:16 >/dev/null
+  postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54 >/dev/null
 
 # Wait for the entrypoint's init script, not just pg_isready (which can become
 # true before the database creation finishes).
@@ -50,7 +50,7 @@ docker run -d --rm --name "$redis_name" --network none --tmpfs /run/redis:mode=0
   -e MOMCOZY_PRODUCT_REDIS_PASSWORD=synthetic_product_password \
   -e MOMCOZY_AGENT_REDIS_PASSWORD=synthetic_agent_password \
   -v "$PWD/deploy/us-east-uat/start-redis.sh:/usr/local/bin/start-momcozy-redis:ro" \
-  --entrypoint /bin/sh redis:7.4-alpine /usr/local/bin/start-momcozy-redis >/dev/null
+  --entrypoint /bin/sh redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499 /usr/local/bin/start-momcozy-redis >/dev/null
 for attempt in {1..30}; do
   if [[ "$(docker inspect -f '{{.State.Running}}' "$redis_name")" != true ]]; then
     echo 'B Redis ACL bootstrap exited early' >&2; exit 1

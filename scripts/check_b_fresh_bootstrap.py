@@ -5,6 +5,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
+
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
+from scripts.b_docker_context import require_local_docker  # noqa: E402
 
 PROJECTS = ("momcozy-lab-backend-us-east-uat", "momcozy-lab-agent-us-east-uat")
 NETWORK = "momcozy-lab-us-east-uat"
@@ -34,6 +41,7 @@ def validate_fresh() -> None:
 
 def main() -> int:
     try:
+        require_local_docker()
         validate_fresh()
     except (OSError, ValueError, subprocess.SubprocessError):
         print("FAIL B fresh bootstrap: existing state or unavailable Docker; no changes made", file=sys.stderr)

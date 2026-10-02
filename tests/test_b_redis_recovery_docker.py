@@ -23,7 +23,7 @@ def test_synthetic_b_redis_rdb_is_restorable() -> None:
         "-e", "MOMCOZY_PRODUCT_REDIS_PASSWORD=synthetic_product_password",
         "-e", "MOMCOZY_AGENT_REDIS_PASSWORD=synthetic_agent_password",
         "-v", f"{ROOT / 'deploy/us-east-uat/start-redis.sh'}:/usr/local/bin/start-momcozy-redis:ro",
-        "--entrypoint", "/bin/sh", "redis:7.4-alpine", "/usr/local/bin/start-momcozy-redis",
+        "--entrypoint", "/bin/sh", "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499", "/usr/local/bin/start-momcozy-redis",
     ], capture_output=True, check=True)
     try:
         for _ in range(30):

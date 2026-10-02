@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
-import os
 import re
 import stat
 import subprocess
@@ -22,6 +21,8 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from scripts.b_docker_context import require_local_docker  # noqa: E402
+from scripts.b_compose_env import compose_env  # noqa: E402
 from scripts.b_release import B_ROOT, preflight  # noqa: E402
 
 COMMIT = re.compile(r"[0-9a-f]{40}")
@@ -66,10 +67,8 @@ def verify_image(tag: str, commit: str, service: str, expected_id: str) -> None:
 
 
 def _compose(source: Path, env_file: Path, image: str, service: str, commit: str, command: list[str]) -> None:
-    variables = {**os.environ, f"MOMCOZY_{service.upper()}_ENV_FILE": str(env_file),
-                 f"MOMCOZY_{service.upper()}_IMAGE": image}
-    if service == "agent":
-        variables["MOMCOZY_AGENT_RELEASE_ID"] = commit
+    variables = compose_env(env_file, image_variable=f"MOMCOZY_{service.upper()}_IMAGE",
+                            image=image, release_id=commit if service == "agent" else None)
     result = subprocess.run(
         ["docker", "compose", "--env-file", str(env_file), "-f", "docker-compose.us-east-uat.yml",
          "--profile", "tools", *command], cwd=source, env=variables, capture_output=True, check=False,
@@ -118,6 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No B schema changed; --apply is required.")
         return 0
     try:
+        require_local_docker()
         preflight(argparse.Namespace(target=args.backend_target, source=args.backend_source, commit=args.backend_commit,
                                      image=args.backend_image, backend_env=args.backend_env, agent_env=args.agent_env))
         agent_script = args.agent_source / "scripts/b_release.py"

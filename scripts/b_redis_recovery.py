@@ -25,9 +25,10 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from scripts.b_docker_context import require_local_docker  # noqa: E402
 from scripts.b_postgres_recovery import ROOT, _validate_backup_mount, validate_root  # noqa: E402
 
-REDIS_IMAGE = "redis:7.4-alpine"
+REDIS_IMAGE = "redis:7.4-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499"
 CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}")
 
 
@@ -191,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No changes made. --apply performs B Redis backup and isolated recovery on the approved host.")
         return 0
     try:
+        require_local_docker()
         backup_and_drill(ROOT)
     except (OSError, ValueError, subprocess.SubprocessError):
         print("FAIL B Redis backup/recovery: incomplete; deployment remains blocked", file=sys.stderr)

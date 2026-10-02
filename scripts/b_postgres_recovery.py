@@ -21,9 +21,15 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
+from scripts.b_docker_context import require_local_docker  # noqa: E402
+
 ROOT = Path("/opt/momcozy-lab-us-east-uat")
 DATABASES = ("momcozy_lab_backend_uat", "momcozy_lab_agent_uat")
-POSTGRES_IMAGE = "postgres:16"
+POSTGRES_IMAGE = "postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54"
 BACKUP_SOURCE = Path("/data/momcozy-lab-us-east-uat/backups")
 
 
@@ -184,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No changes made. --apply performs B PostgreSQL backup and isolated recovery on the approved host.")
         return 0
     try:
+        require_local_docker()
         backup_and_drill(ROOT)
     except (OSError, ValueError, subprocess.SubprocessError):
         print("FAIL B PostgreSQL backup/recovery: incomplete; deployment remains blocked", file=sys.stderr)

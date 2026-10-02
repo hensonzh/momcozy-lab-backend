@@ -26,6 +26,7 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
+from scripts.b_docker_context import require_local_docker  # noqa: E402
 from scripts.b_postgres_recovery import ROOT, _validate_backup_mount, validate_root  # noqa: E402
 
 IMAGE = "momcozy-us-east-uat-minio:9e49d5e7a648f00e"
@@ -221,6 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         print("No B MinIO backup made; --apply is required.")
         return 0
     try:
+        require_local_docker()
         backup_and_drill(ROOT)
     except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError):
         print("FAIL B MinIO backup/recovery: incomplete; state untouched", file=sys.stderr)

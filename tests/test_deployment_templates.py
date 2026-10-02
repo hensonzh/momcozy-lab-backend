@@ -194,7 +194,10 @@ def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
     }
     assert not (root / "deploy/us-east-uat/workloads.yaml").exists()
     assert not (root / "deploy/us-east-uat/migration-job.yaml").exists()
-    assert "not an executable" in (root / "deploy/us-east-uat/README.md").read_text()
+    handoff = (root / "deploy/us-east-uat/README.md").read_text()
+    assert "scripts/b_first_release.py --apply" in handoff
+    assert "has not been exercised on the target host" in handoff
+    assert "update/rollback remain separate unfinished work" in handoff
 
 
 def test_us_east_uat_compose_isolated_from_a_and_owns_stateful_services() -> None:

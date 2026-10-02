@@ -11,6 +11,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+
+from scripts.b_docker_context import require_local_docker  # noqa: E402
+
 ROOT = Path("/opt/momcozy-lab-us-east-uat")
 REVISION = re.compile(r"^[0-9a-zA-Z_.-]+$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -79,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = args.release_root
     try:
+        require_local_docker()
         if root != ROOT or root.is_symlink():
             raise ValueError("B rollback root is not approved")
         current = root / "current" / args.service / "release-manifest.json"

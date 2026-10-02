@@ -9,10 +9,12 @@ import pytest
 from scripts import b_activate_first as release
 
 
-def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = []
     monkeypatch.setattr(release, "_run", lambda command, **kwargs: calls.append(command) or "")
-    args = SimpleNamespace(service="backend", source=Path("/b"), env_file=Path("/env"),
+    private = tmp_path / "b.env"
+    private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
+    args = SimpleNamespace(service="backend", source=Path("/b"), env_file=private,
                            local_image="b:verified", commit="a" * 40)
     release.start_services(args)
     assert calls
@@ -79,3 +81,27 @@ def test_agent_requires_product_pointer(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(release, "ROOT", tmp_path)
     with pytest.raises(ValueError, match="Product release"):
         release.check_fresh_pointer("agent", tmp_path / "releases/agent" / ("a" * 40))
+
+def test_first_activation_requires_public_ready_before_pointer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+    source = tmp_path / "releases/backend" / ("a" * 40)
+    source.mkdir(parents=True)
+    (tmp_path / "current").mkdir()
+    pg = tmp_path / "backup/postgres"
+    pg.mkdir(parents=True)
+    (pg / "recovery-verified.json").write_text('{"databases":{"momcozy_lab_backend_uat":{"alembic_revision":"rev"}}}')
+    monkeypatch.setattr(release, "_validate_backup_mount", lambda root: pg.parent)
+    monkeypatch.setattr(release, "select_latest", lambda root: {"postgres": pg})
+    monkeypatch.setattr(release, "check_service_containers_absent", lambda service: None)
+    monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
+    monkeypatch.setattr(release, "start_services", lambda args: None)
+    monkeypatch.setattr(release, "check_ready", lambda service: None)
+    monkeypatch.setattr(release, "check_running_service_provenance", lambda args: None)
+    monkeypatch.setattr(release, "check_public_ready", lambda service: (_ for _ in ()).throw(ValueError("public not ready")))
+    args = SimpleNamespace(service="backend", source=source, commit="a" * 40,
+                           image="ghcr.io/example/backend@sha256:" + "b" * 64,
+                           image_id="sha256:" + "c" * 64)
+    with pytest.raises(ValueError, match="public not ready"):
+        release.activate(args)
+    assert not (tmp_path / "current/backend").exists()
+    assert not (source / "release-manifest.json").exists()
