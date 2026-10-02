@@ -177,11 +177,15 @@ def prepare(args: argparse.Namespace) -> tuple[argparse.Namespace, argparse.Name
     return old, desired, revision
 
 
-def fresh_recovery(source: Path) -> None:
+def fresh_recovery() -> None:
+    # PostgreSQL, Redis and MinIO recovery scripts belong to the Backend release,
+    # including when the service being updated is Agent.
+    backend_source, backend_manifest = _slot("backend", "current")
+    _snapshot(backend_source, backend_manifest["commit"])
     root = _validate_backup_mount(ROOT)
     before = existing_recovery_markers(root)
     for kind in ("postgres", "redis", "minio"):
-        run_stage(kind + "-recovery", [str(source / "scripts" / f"b_{kind}_recovery.py"), "--apply"])
+        run_stage(kind + "-recovery", [str(backend_source / "scripts" / f"b_{kind}_recovery.py"), "--apply"])
     after = select_latest(root)
     if any(kind not in after or after[kind] / "recovery-verified.json" in before
            for kind in ("postgres", "redis", "minio")):
@@ -254,7 +258,7 @@ def switch_links(service: str, old: Path, desired: Path) -> None:
 
 def perform(args: argparse.Namespace) -> None:
     old, desired, revision = prepare(args)
-    fresh_recovery(old.source)
+    fresh_recovery()
     current_source, current_manifest = _slot(args.service, "current")
     if current_source != old.source or current_manifest["local_image_id"] != old.image_id:
         raise ValueError("B current release changed during backup")

@@ -55,7 +55,7 @@ def test_update_pointer_switch_follows_recovery_and_readiness(tmp_path: Path, mo
     new_args = argparse.Namespace(service="agent", source=new)
     monkeypatch.setattr(release, "prepare", lambda args: (previous_args, new_args, "rev"))
     calls: list[str] = []
-    monkeypatch.setattr(release, "fresh_recovery", lambda source: calls.append("recovered"))
+    monkeypatch.setattr(release, "fresh_recovery", lambda: calls.append("recovered"))
     monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
     monkeypatch.setattr(release, "verify_running", lambda *args: None)
     def checked(value: argparse.Namespace) -> None:
@@ -80,7 +80,7 @@ def test_failed_update_restores_old_without_pointer_change(tmp_path: Path, monke
     args = argparse.Namespace(service="backend", operation="update", source=new, commit=new.name)
     old_args, new_args = argparse.Namespace(source=old, image_id="sha256:" + "c" * 64), argparse.Namespace(source=new)
     monkeypatch.setattr(release, "prepare", lambda args: (old_args, new_args, "rev"))
-    monkeypatch.setattr(release, "fresh_recovery", lambda source: None)
+    monkeypatch.setattr(release, "fresh_recovery", lambda: None)
     monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
     monkeypatch.setattr(release, "verify_running", lambda *args: None)
     calls: list[str] = []
@@ -127,7 +127,7 @@ def test_rollback_switches_only_after_ready(tmp_path: Path, monkeypatch: pytest.
     args = argparse.Namespace(service="agent", operation="rollback")
     old_args, desired = argparse.Namespace(source=current, image_id="sha256:" + "c" * 64), argparse.Namespace(source=previous)
     monkeypatch.setattr(release, "prepare", lambda args: (old_args, desired, "rev"))
-    monkeypatch.setattr(release, "fresh_recovery", lambda source: None)
+    monkeypatch.setattr(release, "fresh_recovery", lambda: None)
     monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
     monkeypatch.setattr(release, "verify_running", lambda *args: None)
     def checked(value: argparse.Namespace) -> None:
@@ -141,7 +141,7 @@ def test_rollback_switches_only_after_ready(tmp_path: Path, monkeypatch: pytest.
 
 def test_schema_race_after_backup_never_starts_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(release, "prepare", lambda args: (argparse.Namespace(source=tmp_path, image_id="sha256:" + "c" * 64), object(), "rev"))
-    monkeypatch.setattr(release, "fresh_recovery", lambda source: None)
+    monkeypatch.setattr(release, "fresh_recovery", lambda: None)
     monkeypatch.setattr(release, "read_live_revision", lambda service: "changed")
     monkeypatch.setattr(release, "_slot", lambda service, slot: (tmp_path, {"local_image_id": "sha256:" + "c" * 64}))
     monkeypatch.setattr(release, "start_checked", lambda args: pytest.fail("schema drift must prevent switch"))
@@ -156,6 +156,37 @@ def test_preflight_only_calls_read_only_admission(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(release, "perform", lambda args: pytest.fail("preflight must not mutate"))
     assert release.main(["--operation", "update", "--service", "backend"]) == 0
     assert calls == ["update"]
+
+
+def test_agent_recovery_uses_current_backend_scripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend_source = tmp_path / "releases/backend" / ("b" * 40)
+    backend_source.mkdir(parents=True)
+    backup_root = tmp_path / "backups"
+    prior = {kind: backup_root / kind / "prior/recovery-verified.json" for kind in ("postgres", "redis", "minio")}
+    fresh = {kind: backup_root / kind / "fresh" for kind in prior}
+    calls: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(release, "_slot", lambda service, slot: (backend_source, {"commit": backend_source.name}) if (service, slot) == ("backend", "current") else pytest.fail("wrong release"))
+    monkeypatch.setattr(release, "_snapshot", lambda source, commit: calls.append(("verified-backend-source", [str(source), commit])))
+    monkeypatch.setattr(release, "_validate_backup_mount", lambda root: backup_root)
+    monkeypatch.setattr(release, "existing_recovery_markers", lambda root: set(prior.values()))
+    monkeypatch.setattr(release, "run_stage", lambda stage, argv: calls.append((stage, argv)))
+    monkeypatch.setattr(release, "select_latest", lambda root: fresh)
+    release.fresh_recovery()
+    assert [stage for stage, _ in calls] == ["verified-backend-source", "postgres-recovery", "redis-recovery", "minio-recovery"]
+    assert [argv for _, argv in calls[1:]] == [
+        [str(backend_source / "scripts" / f"b_{kind}_recovery.py"), "--apply"]
+        for kind in ("postgres", "redis", "minio")
+    ]
+
+
+def test_agent_recovery_refuses_dirty_backend_source_before_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    backend_source = tmp_path / "releases/backend" / ("b" * 40)
+    backend_source.mkdir(parents=True)
+    monkeypatch.setattr(release, "_slot", lambda service, slot: (backend_source, {"commit": backend_source.name}))
+    monkeypatch.setattr(release, "_snapshot", lambda source, commit: (_ for _ in ()).throw(ValueError("dirty Backend release")))
+    monkeypatch.setattr(release, "run_stage", lambda *args: pytest.fail("untrusted source must not run backups"))
+    with pytest.raises(ValueError, match="dirty Backend release"):
+        release.fresh_recovery()
 
 
 def test_start_checked_waits_for_docker_health_before_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
