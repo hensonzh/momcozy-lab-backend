@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ...core.errors import ApiError
 from ..audit import AuditService, IdempotencyService, parse_idempotency_response_ref, request_hash
@@ -441,24 +442,33 @@ class RecordsService:
         start_date: date | None = None,
         days: int = 30,
         include_today: bool = True,
+        timezone_name: str = "UTC",
     ) -> MilkTrendListResponse:
         if not domain.is_valid_trend_days(days):
             raise ApiError(code="validation_failed", message="days must be between 1 and 90.", status=422)
-        first_day = start_date or domain.default_trend_start_date(now=_utcnow(), days=days, include_today=include_today)
-        start_at, end_at = domain.trend_datetime_window(first_day=first_day, days=days)
+        try:
+            zone = ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ApiError(code="validation_failed", message="Unknown timezone.", status=422) from error
+        first_day = start_date or domain.default_trend_start_date(now=_utcnow(), days=days, include_today=include_today, zone=zone)
+        start_at, end_at = domain.trend_datetime_window(first_day=first_day, days=days, zone=zone)
         pumpings = await self.repository.list_pumpings(
             owner_user_id=owner_user_id,
             start_at=start_at,
             end_at=end_at,
             limit=1000,
         )
-        trend_days = domain.build_measured_milk_trend_days(pumpings=pumpings, first_day=first_day, days=days)
+        trend_days = domain.build_measured_milk_trend_days(
+            pumpings=pumpings, first_day=first_day, days=days, zone=zone,
+            complete=len(pumpings) < 1000,
+        )
         items = [
             MilkTrendDayRead(
                 date=trend_day.date,
                 pumped_milk_volume_ml=trend_day.pumped_milk_volume_ml,
                 pumping_count=trend_day.pumping_count,
-                measured_only=True,
+                measured_only=trend_day.measured_only and trend_day.complete,
+                complete=trend_day.complete,
             )
             for trend_day in trend_days
         ]

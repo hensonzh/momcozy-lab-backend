@@ -120,7 +120,8 @@ blank values to `null`, trims whitespace, and rejects values over 255
 characters.
 
 Current retryable write surfaces include files, profile infants, records,
-plans/tasks, device telemetry, notifications, and support tickets.
+device telemetry, and notifications. Legacy plan/task and support-ticket
+writes retain their idempotency contract for compatibility with older clients.
 
 ## Owner Scope
 
@@ -197,7 +198,10 @@ Schedule resources are owner-scoped and never accept a mobile-provided
 `user_id` as authority. `GET /v1/schedule` returns personal calendar entries
 for a bounded date range, plus `has_more`. `POST /v1/schedule/personal` creates
 an idempotent entry. `PATCH` and `DELETE` use `expected_updated_at` to avoid
-losing concurrent changes. The separate `/v1/plans` surface remains deprecated.
+losing concurrent changes. The separate `/v1/plans` surface is isolated
+as a deprecated compatibility router for released clients; current Flutter
+features must use `/v1/schedule`. It cannot be removed from a live `/v1` host
+without the API retirement evidence and compatibility gate.
 
 ## Product Assets
 
@@ -210,7 +214,14 @@ filesystem paths, or object-storage keys.
 ## Voice
 
 - Transcription: `POST /v1/speech/transcribe-chunk`
-- PCM playback: `GET /v1/realtime-voice-stream?text=...`
+- PCM playback for new clients: `POST /v1/realtime-voice-stream` with
+  `{"text": "..."}` as JSON, no text or credential in the URL. The response
+  retains PCM16, sample-rate and mono-channel headers and sets
+  `Cache-Control: no-store`; errors before the first chunk use the existing
+  JSON envelope. Limit synthesis to 1–4000 non-whitespace characters.
+- Compatibility only: `GET /v1/realtime-voice-stream?text=...` remains
+  available for existing clients but leaks private text into the request URL;
+  new App features must not call it.
 - Realtime session: `WEBSOCKET /v1/realtime-voice-session`
 
 HTTP voice endpoints require `Authorization: Bearer <access_token>` and never
@@ -218,12 +229,13 @@ accept tokens in URLs. The realtime WebSocket also authenticates through the
 `Authorization` header.
 
 Voice playback follows the legacy Doubao/Volcengine realtime TTS provider.
-Set `VOICE_PROVIDER=doubao`, `VOICE_API_KEY`, and the TTS resource/voice
-settings from `env/compose.*.env.example`. The Flutter client calls
-`GET /v1/realtime-voice-stream?text=...` with an Authorization header and plays
-the returned PCM chunks through the native PCM player. `VOICE_PROVIDER=disabled`
-keeps the stable `code=voice_provider_disabled` error contract, and
-`VOICE_PROVIDER=local_stub` remains local/test-only.
+Set `VOICE_PROVIDER=doubao`, the private server-side `VOICE_API_KEY`, and the
+TTS resource/voice settings from `env/compose.*.env.example`. New Flutter
+client work must use the POST body contract, bearer authorization, and a
+verified, cancellable PCM player before enabling autoplay; the route alone
+does not prove audio works or authorize sending assistant text to a vendor.
+`VOICE_PROVIDER=disabled` keeps the stable `code=voice_provider_disabled`
+error contract, and `VOICE_PROVIDER=local_stub` remains local/test-only.
 
 `VISION_PROVIDER=disabled` remains the default stable production contract. The
 production replacement for the legacy vision WebSocket is
@@ -253,6 +265,6 @@ Flutter repositories should be generated from or validated against the OpenAPI
 snapshot. Do not build new client code against legacy raw response shapes.
 
 Use `docs/flutter-smoke-flows.json` as the initial integration
-smoke fixture for auth, core records/plans/files, and voice contract checks.
+smoke fixture for auth, current records/schedule/files, and voice contract checks.
 Use `docs/flutter-client-compatibility.md` for generated
 client regeneration and breaking-change rules.

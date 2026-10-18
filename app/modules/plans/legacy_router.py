@@ -13,7 +13,7 @@ from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from .repository import PlansRepository
-from .schemas import (
+from .legacy_schemas import (
     PlanCreate,
     PlanListResponse,
     PlanRead,

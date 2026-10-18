@@ -13,14 +13,20 @@ from ..audit import AuditService, IdempotencyService
 from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from .repository import SupportTicketsRepository
-from .schemas import SupportTicketCreate, SupportTicketListResponse, SupportTicketRead
+from .legacy_schemas import SupportTicketCreate, SupportTicketListResponse, SupportTicketRead
 from .service import SupportTicketsService
 
 
 router = SurfaceAPIRouter(
     prefix="/support",
     tags=["support"],
-    api_surface_metadata=api_surface("public_app_api", owner="support", clients=["flutter"]),
+    api_surface_metadata=api_surface(
+        "deprecated_api",
+        owner="support",
+        clients=["legacy-flutter"],
+        stability="deprecated",
+        notes="Retained for released clients; the chat-first App has no support-ticket API dependency.",
+    ),
 )
 
 

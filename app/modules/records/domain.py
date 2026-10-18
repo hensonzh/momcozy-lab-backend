@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .models import PumpingRecord
 
@@ -43,6 +44,8 @@ class MeasuredMilkTrendDay:
     date: date
     pumped_milk_volume_ml: float
     pumping_count: int
+    measured_only: bool = True
+    complete: bool = True
 
 
 def is_valid_list_limit(limit: int) -> bool:
@@ -91,15 +94,16 @@ def growth_measurements_after_update(
     )
 
 
-def default_trend_start_date(*, now: datetime, days: int, include_today: bool) -> date:
-    today = _as_utc_date(now)
+def default_trend_start_date(*, now: datetime, days: int, include_today: bool, zone: ZoneInfo = ZoneInfo("UTC")) -> date:
+    today = _as_zone_date(now, zone)
     end_day = today if include_today else today - timedelta(days=1)
     return end_day - timedelta(days=days - 1)
 
 
-def trend_datetime_window(*, first_day: date, days: int) -> tuple[datetime, datetime]:
-    start_at = datetime.combine(first_day, time.min, tzinfo=timezone.utc)
-    return start_at, start_at + timedelta(days=days)
+def trend_datetime_window(*, first_day: date, days: int, zone: ZoneInfo = ZoneInfo("UTC")) -> tuple[datetime, datetime]:
+    start_at = datetime.combine(first_day, time.min, tzinfo=zone).astimezone(timezone.utc)
+    end_at = datetime.combine(first_day + timedelta(days=days), time.min, tzinfo=zone).astimezone(timezone.utc)
+    return start_at, end_at
 
 
 def build_measured_milk_trend_days(
@@ -107,15 +111,21 @@ def build_measured_milk_trend_days(
     pumpings: list[PumpingRecord],
     first_day: date,
     days: int,
+    zone: ZoneInfo = ZoneInfo("UTC"),
+    complete: bool = True,
 ) -> list[MeasuredMilkTrendDay]:
     totals_by_day: dict[date, float] = {}
     counts_by_day: dict[date, int] = {}
+    unknown_by_day: set[date] = set()
     last_day = first_day + timedelta(days=days)
     for pumping in pumpings:
-        pump_day = _as_utc_date(pumping.pump_start_time)
+        pump_day = _as_zone_date(pumping.pump_start_time, zone)
         if pump_day < first_day or pump_day >= last_day:
             continue
-        totals_by_day[pump_day] = totals_by_day.get(pump_day, 0.0) + float(pumping.milk_volume_ml or 0)
+        if pumping.milk_volume_ml is None:
+            unknown_by_day.add(pump_day)
+        else:
+            totals_by_day[pump_day] = totals_by_day.get(pump_day, 0.0) + float(pumping.milk_volume_ml)
         counts_by_day[pump_day] = counts_by_day.get(pump_day, 0) + 1
 
     return [
@@ -123,12 +133,14 @@ def build_measured_milk_trend_days(
             date=first_day + timedelta(days=offset),
             pumped_milk_volume_ml=round(totals_by_day.get(first_day + timedelta(days=offset), 0.0), 2),
             pumping_count=counts_by_day.get(first_day + timedelta(days=offset), 0),
+            measured_only=first_day + timedelta(days=offset) not in unknown_by_day,
+            complete=complete,
         )
         for offset in range(days)
     ]
 
 
-def _as_utc_date(value: datetime) -> date:
+def _as_zone_date(value: datetime, zone: ZoneInfo) -> date:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).date()
+    return value.astimezone(zone).date()

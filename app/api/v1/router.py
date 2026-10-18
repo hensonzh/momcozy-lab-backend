@@ -21,12 +21,12 @@ from ...modules.onboarding.router import router as onboarding_router
 from ...modules.lactation.router import router as lactation_router
 from ...modules.baby.router import router as baby_records_router
 from ...modules.baby.profile_router import router as baby_profiles_router
-from ...modules.plans.router import router as plans_router
+from ...modules.plans.legacy_router import router as legacy_plans_router
 from ...modules.profiles.agent_router import router as agent_profiles_router
 from ...modules.profiles.router import router as profiles_router
 from ...modules.profiles.me_router import router as me_experience_router
 from ...modules.records.router import router as records_router
-from ...modules.support.router import router as support_router
+from ...modules.support.legacy_router import router as legacy_support_router
 from ...modules.voice.router import router as voice_router
 from ...modules.schedule.router import router as schedule_router
 
@@ -47,12 +47,14 @@ router.include_router(onboarding_router)
 router.include_router(lactation_router)
 router.include_router(baby_records_router)
 router.include_router(baby_profiles_router)
-router.include_router(plans_router)
+# Released v1 clients still require the old plans contract; do not add new App callers.
+router.include_router(legacy_plans_router)
 router.include_router(agent_profiles_router)
 router.include_router(profiles_router)
 router.include_router(me_experience_router)
 router.include_router(records_router)
-router.include_router(support_router)
+# The old support-ticket contract has the same retirement boundary.
+router.include_router(legacy_support_router)
 router.include_router(voice_router)
 router.include_router(schedule_router)
 

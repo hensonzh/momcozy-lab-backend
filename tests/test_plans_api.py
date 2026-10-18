@@ -7,7 +7,7 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.auth import CurrentUser
 from app.modules.plans.models import Plan, PlanTask
-from app.modules.plans.router import get_plans_service
+from app.modules.plans.legacy_router import get_plans_service
 
 
 def test_create_plan_requires_current_user() -> None:

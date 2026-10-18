@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from app.modules.records import domain
 from app.modules.records.models import PumpingRecord
@@ -66,6 +67,38 @@ def test_records_domain_builds_measured_milk_trends_from_timezone_aware_and_naiv
     assert trends[1].date == date(2026, 7, 2)
     assert trends[1].pumped_milk_volume_ml == 0
     assert trends[1].pumping_count == 0
+
+
+def test_milk_trends_distinguish_unmeasured_records_and_local_calendar_days() -> None:
+    zone = ZoneInfo("Asia/Shanghai")
+    measured = _pumping(start_time=datetime(2026, 7, 1, 23, 30, tzinfo=timezone.utc), volume=45)
+    unmeasured = _pumping(start_time=datetime(2026, 7, 2, 1, 0, tzinfo=timezone.utc), volume=None)
+    previous_day = _pumping(start_time=datetime(2026, 7, 1, 15, 30, tzinfo=timezone.utc), volume=500)
+
+    trends = domain.build_measured_milk_trend_days(
+        pumpings=[measured, unmeasured, previous_day],
+        first_day=date(2026, 7, 2),
+        days=1,
+        zone=zone,
+    )
+
+    assert trends[0].date == date(2026, 7, 2)
+    assert trends[0].pumping_count == 2
+    assert trends[0].pumped_milk_volume_ml == 45
+    assert trends[0].measured_only is False
+
+
+def test_milk_trend_window_honors_daylight_saving_in_selected_timezone() -> None:
+    zone = ZoneInfo("America/New_York")
+    start, end = domain.trend_datetime_window(first_day=date(2026, 11, 1), days=1, zone=zone)
+    assert start == datetime(2026, 11, 1, 4, 0, tzinfo=timezone.utc)
+    assert end == datetime(2026, 11, 2, 5, 0, tzinfo=timezone.utc)
+    assert domain.default_trend_start_date(
+        now=datetime(2026, 11, 2, 2, 0, tzinfo=timezone.utc),
+        days=1,
+        include_today=True,
+        zone=zone,
+    ) == date(2026, 11, 1)
 
 
 def test_records_domain_builds_default_trend_dates_and_query_window() -> None:

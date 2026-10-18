@@ -54,8 +54,10 @@ window, or API version.
 - Personal schedule writes use `Idempotency-Key` on create and
   `expected_updated_at` on update/delete. Care Plan task feedback uses the
   publication id, stable task source key, and `expected_version`.
-- The legacy `/v1/plans` operations are deprecated and are
-  not valid Flutter client dependencies.
+- The legacy `/v1/plans` and `/v1/support/tickets` operations are
+  compatibility-only for released clients and are not valid dependencies
+  for the current chat-first Flutter App. Do not remove them from a deployed
+  `/v1` host without measured retirement evidence and the release gate.
 - Treat `voice_provider_disabled` and `vision_provider_disabled` as stable
   unavailable states. Do not fall back to retired endpoints.
 - Treat Product `file_id` as attachment identity. Signed object URLs are

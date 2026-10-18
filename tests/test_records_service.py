@@ -381,6 +381,53 @@ def test_records_service_builds_measured_milk_trends_from_pumping_records() -> N
     assert repository.list_pumpings_kwargs["limit"] == 1000
 
 
+def test_milk_trends_use_local_calendar_and_do_not_claim_missing_amounts_or_capped_totals() -> None:
+    owner = uuid4()
+    known = _pumping(owner_user_id=owner)
+    known.pump_start_time = datetime(2026, 7, 1, 23, 30, tzinfo=timezone.utc)
+    known.milk_volume_ml = 45
+    unknown = _pumping(owner_user_id=owner)
+    unknown.pump_start_time = datetime(2026, 7, 2, 0, 30, tzinfo=timezone.utc)
+    unknown.milk_volume_ml = None
+    repository = FakeRecordsRepository(pumpings=[known, unknown])
+    service = RecordsService(repository=repository)
+
+    trends = asyncio.run(service.get_milk_trends(
+        owner_user_id=owner,
+        start_date=date(2026, 7, 2),
+        days=1,
+        timezone_name="Asia/Shanghai",
+    ))
+    day = trends.items[0]
+    assert day.pumping_count == 2
+    assert day.pumped_milk_volume_ml == 45
+    assert day.measured_only is False
+    assert day.complete is True
+    assert repository.list_pumpings_kwargs["owner_user_id"] == owner
+    assert repository.list_pumpings_kwargs["start_at"] == datetime(2026, 7, 1, 16, 0, tzinfo=timezone.utc)
+    assert repository.list_pumpings_kwargs["end_at"] == datetime(2026, 7, 2, 16, 0, tzinfo=timezone.utc)
+
+    repository.pumpings = [known] * 1000
+    capped = asyncio.run(service.get_milk_trends(
+        owner_user_id=owner,
+        start_date=date(2026, 7, 2),
+        days=1,
+        timezone_name="Asia/Shanghai",
+    ))
+    assert capped.items[0].complete is False
+    assert capped.items[0].measured_only is False
+    assert capped.items[0].pumping_count == 1000
+
+    with pytest.raises(ApiError) as error:
+        asyncio.run(service.get_milk_trends(
+            owner_user_id=owner,
+            start_date=date(2026, 7, 2),
+            days=1,
+            timezone_name="Not/A_Real_Zone",
+        ))
+    assert error.value.status == 422
+
+
 def test_records_service_creates_growth_with_infant_scope_idempotency_and_audit() -> None:
     owner_user_id = uuid4()
     infant_id = uuid4()

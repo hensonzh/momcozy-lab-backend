@@ -6,7 +6,7 @@ from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.auth import CurrentUser
 from app.modules.support.models import SupportTicket
-from app.modules.support.router import get_support_tickets_service
+from app.modules.support.legacy_router import get_support_tickets_service
 
 
 def test_support_tickets_require_current_user() -> None:

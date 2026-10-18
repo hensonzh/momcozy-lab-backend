@@ -94,7 +94,6 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/babies",
         "/v1/records/feeding",
         "/v1/records/milk-trends",
-        "/v1/plans",
         "/v1/devices/pump-telemetry",
         "/v1/devices/pump-workstate",
         "/v1/devices/pump-workstate/latest",
@@ -107,6 +106,24 @@ def test_openapi_contains_core_flutter_handoff_paths() -> None:
         "/v1/realtime-voice-stream",
     ]:
         assert path in paths
+
+
+def test_old_ui_surfaces_are_compatibility_only() -> None:
+    paths = build_openapi_schema()["paths"]
+    plan_paths = {path for path in paths if path == "/v1/plans" or path.startswith("/v1/plans/")}
+    support_paths = {path for path in paths if path.startswith("/v1/support/tickets")}
+    assert len(plan_paths) == 7
+    assert len(support_paths) == 2
+    operations = 0
+    for path in plan_paths | support_paths:
+        for method, operation in paths[path].items():
+            if method not in HTTP_METHODS:
+                continue
+            operations += 1
+            assert operation[API_SURFACE_FIELD] == "deprecated_api"
+            assert operation[API_CLIENT_FIELD] == ["legacy-flutter"]
+            assert operation[API_STABILITY_FIELD] == "deprecated"
+    assert operations == 13
 
 
 def test_openapi_contains_runtime_to_product_internal_contracts_only() -> None:

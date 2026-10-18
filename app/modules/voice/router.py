@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from fastapi import Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
@@ -10,7 +11,7 @@ from ...api.dependencies import authenticate_request_user, require_current_user
 from ...api.surface import SurfaceAPIRouter, api_surface
 from ...core.errors import ApiError
 from ..auth import CurrentUser
-from .schemas import SpeechTranscriptionResponse
+from .schemas import PrivateSpeechSynthesisRequest, SpeechTranscriptionResponse
 from .service import VoiceService
 
 
@@ -19,6 +20,12 @@ router = SurfaceAPIRouter(
     api_surface_metadata=api_surface("public_app_api", owner="voice", clients=["flutter"]),
 )
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+PCM_STREAM_RESPONSES = {
+    200: {
+        "description": "PCM16 mono audio stream",
+        "content": {"audio/pcm": {"schema": {"type": "string", "format": "binary"}}},
+    },
+}
 
 
 def get_voice_service(request: Request) -> VoiceService:
@@ -46,7 +53,12 @@ async def transcribe_speech_chunk(
 
 @router.get(
     "/realtime-voice-stream",
-    openapi_extra=api_surface("runtime_stream_api", owner="voice", clients=["flutter"]),
+    response_class=StreamingResponse,
+    responses=PCM_STREAM_RESPONSES,
+    openapi_extra=api_surface(
+        "runtime_stream_api", owner="voice", clients=["flutter"],
+        stability="deprecated", notes="Use POST to keep synthesized text out of URLs.",
+    ),
 )
 async def realtime_voice_stream(
     request: Request,
@@ -54,13 +66,45 @@ async def realtime_voice_stream(
     current_user: CurrentUser = Depends(require_current_user),
     service: VoiceService = Depends(get_voice_service),
 ) -> StreamingResponse:
-    stream = service.synthesize_pcm_stream(actor_user_id=current_user.user_id, text=text)
+    return await _pcm_response(
+        request=request, service=service, owner_user_id=current_user.user_id, text=text,
+    )
+
+
+@router.post(
+    "/realtime-voice-stream",
+    response_class=StreamingResponse,
+    responses=PCM_STREAM_RESPONSES,
+    openapi_extra=api_surface("runtime_stream_api", owner="voice", clients=["flutter"]),
+)
+async def private_realtime_voice_stream(
+    request: Request,
+    payload: PrivateSpeechSynthesisRequest,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: VoiceService = Depends(get_voice_service),
+) -> StreamingResponse:
+    if request.query_params:
+        raise ApiError(
+            code="validation_failed",
+            message="Voice stream query parameters are not supported.",
+            status=422,
+        )
+    return await _pcm_response(
+        request=request, service=service, owner_user_id=current_user.user_id, text=payload.text,
+    )
+
+
+async def _pcm_response(
+    *, request: Request, service: VoiceService, owner_user_id: UUID, text: str,
+) -> StreamingResponse:
+    stream = service.synthesize_pcm_stream(actor_user_id=owner_user_id, text=text)
     stream = await _prefetch_pcm_stream(stream)
     sample_rate = request.app.state.settings.voice_tts_sample_rate
     return StreamingResponse(
         stream,
         media_type=f"audio/pcm; rate={sample_rate}; channels=1",
         headers={
+            "Cache-Control": "no-store",
             "X-Mai-Audio-Format": "pcm16",
             "X-Mai-Audio-Sample-Rate": str(sample_rate),
             "X-Mai-Audio-Channels": "1",

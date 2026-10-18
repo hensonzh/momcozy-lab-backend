@@ -134,12 +134,30 @@ def test_milk_trends_use_current_user_and_measured_records_only() -> None:
     assert response.status_code == 200
     assert response.json()["items"][0]["pumped_milk_volume_ml"] == 125.5
     assert response.json()["items"][0]["measured_only"] is True
+    assert response.json()["items"][0]["complete"] is True
     assert fake_service.milk_trends_kwargs == {
         "owner_user_id": user_id,
         "start_date": date(2026, 7, 1),
         "days": 2,
         "include_today": True,
+        "timezone_name": "UTC",
     }
+
+
+def test_milk_trends_pass_authenticated_owner_and_selected_timezone_to_service() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).get(
+        "/v1/records/milk-trends?start_date=2026-07-02&days=7&timezone=Asia/Shanghai"
+    )
+
+    assert response.status_code == 200
+    assert fake_service.milk_trends_kwargs["owner_user_id"] == user_id
+    assert fake_service.milk_trends_kwargs["timezone_name"] == "Asia/Shanghai"
 
 
 def test_create_growth_uses_current_user_request_id_and_idempotency() -> None:
@@ -270,6 +288,7 @@ class FakeRecordsService:
                     pumped_milk_volume_ml=125.5,
                     pumping_count=2,
                     measured_only=True,
+                    complete=True,
                 )
             ],
             days=kwargs["days"],

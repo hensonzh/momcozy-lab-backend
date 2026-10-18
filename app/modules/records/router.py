@@ -147,6 +147,7 @@ async def get_milk_trends(
     start_date: date | None = None,
     days: int = Query(default=30, ge=1, le=90),
     include_today: bool = Query(default=True),
+    timezone_name: str = Query(default="UTC", alias="timezone", min_length=1, max_length=80),
     current_user: CurrentUser = Depends(require_current_user),
     service: RecordsService = Depends(get_records_service),
 ) -> MilkTrendListResponse:
@@ -155,6 +156,7 @@ async def get_milk_trends(
         start_date=start_date,
         days=days,
         include_today=include_today,
+        timezone_name=timezone_name,
     )
 
 

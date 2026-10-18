@@ -85,7 +85,13 @@ def test_fresh_local_accounts_are_distinct_verified_and_do_not_change_existing_a
                     assert user.status == "active"
                     assert user.email_verified_at is not None
                     profile = await session.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
-                    assert profile.preferred_name == "Mia"
+                    maternal = await session.scalar(
+                        select(MaternalProfile).where(MaternalProfile.owner_user_id == user_id)
+                    )
+                    # The emulator account starts at the real chat-first gate.
+                    # Legacy reusable demo facts must not masquerade as answers.
+                    assert profile is None
+                    assert maternal is None
             for user_id, email, password in (
                 (first_id, first_email, first_password),
                 (second_id, second_email, second_password),

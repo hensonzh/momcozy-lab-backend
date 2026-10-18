@@ -52,7 +52,8 @@ async def create_fresh_local_test_account(session: AsyncSession, settings: Setti
     user, _identity = await accounts.create_email_user(email=email, password_hash=hash_password(password))
     user.status = AccountStatus.ACTIVE
     user.email_verified_at = datetime.now(timezone.utc)
-    await _fill_missing_demo_profile(session, accounts, user, today=today)
+    # A fresh emulator account exercises onboarding from an empty profile.
+    # Only the reusable dev@example.test account receives legacy demo facts.
     return user.id, email, password
 
 

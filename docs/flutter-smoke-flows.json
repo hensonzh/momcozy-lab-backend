@@ -125,13 +125,16 @@
           ]
         },
         {
-          "method": "GET",
-          "path": "/v1/realtime-voice-stream?text=hello",
+          "method": "POST",
+          "path": "/v1/realtime-voice-stream",
           "headers": [
             "${auth_header}"
           ],
+          "body": {
+            "text": "hello"
+          },
           "assertions": [
-            "no token query parameter",
+            "no assistant text or token in the URL",
             "returns audio/pcm or stable voice_provider_disabled error"
           ]
         }

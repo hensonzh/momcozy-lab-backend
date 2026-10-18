@@ -84,7 +84,8 @@ class MilkTrendDayRead(BaseModel):
     date: date
     pumped_milk_volume_ml: float
     pumping_count: int
-    measured_only: bool = True
+    measured_only: bool = Field(description="True only when all included pumping sessions have a recorded milk volume and the window is complete.")
+    complete: bool = Field(description="False when the bounded owner-scoped read may have omitted pumping records; totals and counts are then lower bounds.")
 
 
 class MilkTrendListResponse(BaseModel):

@@ -75,6 +75,8 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/notifications/{notification_id}/open` | notifications | flutter | stable | Open Notification |
 | PATCH | `/v1/notifications/{notification_id}/read` | notifications | flutter | stable | Set Notification Read State |
 | GET | `/v1/onboarding/me` | onboarding | flutter | stable | Read Onboarding |
+| GET | `/v1/onboarding/me/chat-first` | onboarding | flutter | stable | Read Chat First Onboarding |
+| PUT | `/v1/onboarding/me/chat-first` | onboarding | flutter | stable | Complete Chat First Onboarding |
 | PUT | `/v1/onboarding/me/profile` | onboarding | flutter | stable | Confirm Onboarding |
 | GET | `/v1/profile/lactation` | profiles | flutter | stable | Get My Maternal Lactation Profile |
 | PATCH | `/v1/profile/lactation` | profiles | flutter | stable | Update My Maternal Lactation Profile |
@@ -101,16 +103,14 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Delete Personal |
 | PATCH | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Update Personal |
 | POST | `/v1/speech/transcribe-chunk` | voice | flutter | stable | Transcribe Speech Chunk |
-| GET | `/v1/support/tickets` | support | flutter | stable | List Support Tickets |
-| POST | `/v1/support/tickets` | support | flutter | stable | Create Support Ticket |
-| GET | `/v1/support/tickets/{ticket_id}` | support | flutter | stable | Get Support Ticket |
 
 ## runtime_stream_api
 
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
 | GET | `/v1/files/{file_id}/vision/events/stream` | files | flutter | stable | Stream File Vision Events |
-| GET | `/v1/realtime-voice-stream` | voice | flutter | stable | Realtime Voice Stream |
+| GET | `/v1/realtime-voice-stream` | voice | flutter | deprecated | Realtime Voice Stream Use POST to keep synthesized text out of URLs. |
+| POST | `/v1/realtime-voice-stream` | voice | flutter | stable | Private Realtime Voice Stream |
 
 ## internal_service_api
 
@@ -158,3 +158,6 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | PATCH | `/v1/plans/tasks/{task_id}/state` | plans | legacy-flutter | deprecated | Update Task State Use /v1/schedule for personal schedule entries. |
 | DELETE | `/v1/plans/{plan_id}` | plans | legacy-flutter | deprecated | Delete Plan Use /v1/schedule for personal schedule entries. |
 | GET | `/v1/plans/{plan_id}` | plans | legacy-flutter | deprecated | Get Plan Use /v1/schedule for personal schedule entries. |
+| GET | `/v1/support/tickets` | support | legacy-flutter | deprecated | List Support Tickets Retained for released clients; the chat-first App has no support-ticket API dependency. |
+| POST | `/v1/support/tickets` | support | legacy-flutter | deprecated | Create Support Ticket Retained for released clients; the chat-first App has no support-ticket API dependency. |
+| GET | `/v1/support/tickets/{ticket_id}` | support | legacy-flutter | deprecated | Get Support Ticket Retained for released clients; the chat-first App has no support-ticket API dependency. |
