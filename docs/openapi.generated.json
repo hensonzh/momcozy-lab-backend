@@ -140,7 +140,8 @@
           "purpose": {
             "enum": [
               "model_image",
-              "model_file"
+              "model_file",
+              "model_audio"
             ],
             "title": "Purpose",
             "type": "string"
@@ -10567,7 +10568,8 @@
             "schema": {
               "enum": [
                 "model_image",
-                "model_file"
+                "model_file",
+                "model_audio"
               ],
               "title": "Purpose",
               "type": "string"
@@ -11610,6 +11612,12 @@
                   "type": "string"
                 }
               },
+              "audio/wav": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "image/gif": {
                 "schema": {
                   "format": "binary",
@@ -11635,7 +11643,7 @@
                 }
               }
             },
-            "description": "Authorized model asset bytes. Content-Type matches the validated image or PDF."
+            "description": "Authorized model asset bytes. Content-Type matches the validated image, PDF, or WAV."
           },
           "404": {
             "description": "Capability is unknown, expired, revoked, or no longer matches authoritative file state."
