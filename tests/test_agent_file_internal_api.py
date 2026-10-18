@@ -406,6 +406,12 @@ def test_audio_file_access_only_authorizes_owned_active_wav() -> None:
         owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio",
     ))
     assert result.content_type == "audio/wav"
+    file_object.size_bytes = 1_000_001
+    with pytest.raises(ApiError):
+        asyncio.run(service.resolve(
+            owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio",
+        ))
+    file_object.size_bytes = 32_044
     for invalid_type in ("audio/mpeg", "application/pdf", "image/png"):
         file_object.content_type = invalid_type
         with pytest.raises(ApiError) as error:

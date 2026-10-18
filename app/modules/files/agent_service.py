@@ -72,6 +72,10 @@ class AgentFileAccessService:
             file_object=file_object,
             purpose=purpose,
         )
+        if purpose == "model_audio" and (
+            file_object.size_bytes <= 0 or file_object.size_bytes > MAX_MODEL_AUDIO_BYTES
+        ):
+            raise _invalid_attachment()
         capability = AgentAssetCapability(
             owner_user_id=owner_user_id,
             file_id=file_id,
