@@ -79,9 +79,9 @@ def test_capability_token_is_random_bearer_data_not_a_deterministic_file_identif
     assert issued.token not in store.token_key_for(issued.token)
 
 
-def test_invalidate_revokes_image_and_file_capabilities_for_the_object_version() -> None:
+def test_invalidate_revokes_image_file_and_audio_capabilities_for_the_object_version() -> None:
     redis = FakeRedis()
-    tokens = iter(("d" * 43, "e" * 43))
+    tokens = iter(("d" * 43, "e" * 43, "f" * 43))
     store = AgentAssetCapabilityStore(
         redis_client=redis,
         inactivity_ttl_seconds=1800,
@@ -96,8 +96,16 @@ def test_invalidate_revokes_image_and_file_capabilities_for_the_object_version()
         purpose="model_file",
         content_type="application/pdf",
     )
+    audio_capability = AgentAssetCapability(
+        owner_user_id=image_capability.owner_user_id,
+        file_id=image_capability.file_id,
+        object_key=image_capability.object_key,
+        purpose="model_audio",
+        content_type="audio/wav",
+    )
     image = asyncio.run(store.issue_or_refresh(image_capability))
     document = asyncio.run(store.issue_or_refresh(file_capability))
+    audio = asyncio.run(store.issue_or_refresh(audio_capability))
 
     asyncio.run(
         store.invalidate(
@@ -109,6 +117,7 @@ def test_invalidate_revokes_image_and_file_capabilities_for_the_object_version()
 
     assert asyncio.run(store.get(image.token)) is None
     assert asyncio.run(store.get(document.token)) is None
+    assert asyncio.run(store.get(audio.token)) is None
     assert redis.values == {}
 
 
