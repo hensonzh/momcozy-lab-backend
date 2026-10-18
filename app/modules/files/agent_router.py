@@ -83,7 +83,7 @@ async def get_model_asset_bytes(
     _service_client: ServiceClient = Depends(require_agent_runtime_client),
     service: AgentModelBytesService = Depends(get_agent_model_bytes_service),
 ) -> Response:
-    if request.app.state.settings.app_env not in {"local", "staging"}:
+    if request.app.state.settings.app_env not in {"local", "staging"} and purpose != "model_audio":
         raise ApiError(code="not_found", message="Not found.", status=404)
     asset = await service.fetch(
         owner_user_id=actor_user_id, file_id=file_id, purpose=purpose,

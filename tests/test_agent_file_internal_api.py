@@ -437,3 +437,28 @@ def test_audio_model_bytes_revalidate_owner_and_size_before_read() -> None:
     file_object.size_bytes = 1_000_001
     with pytest.raises(ApiError):
         asyncio.run(service.fetch(owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio"))
+
+
+def test_production_audio_model_bytes_requires_service_identity_and_owner() -> None:
+    from app.modules.files.agent_router import get_agent_model_bytes_service
+
+    file_object = _file_object(content_type="audio/wav")
+    service = AgentModelBytesService(
+        repository=OwnerScopedFakeFileRepository(file_object),
+        object_storage=FakeObjectStorage(), max_bytes=10 * 1024 * 1024,
+    )
+    app = _app()
+    app.state.settings = Settings(app_env="production", agent_runtime_service_api_key=SERVICE_KEY)
+    app.dependency_overrides[get_agent_model_bytes_service] = lambda: service
+    client = TestClient(app)
+    path = f"/v1/internal/agent/files/{file_object.id}/model-asset"
+    params = {"actor_user_id": str(file_object.owner_user_id), "purpose": "model_audio"}
+    assert client.get(path, params=params).status_code == 401
+    assert client.get(path, params={**params, "actor_user_id": str(uuid4())}, headers={"X-Service-Key": SERVICE_KEY}).status_code == 422
+    assert service.object_storage.keys == []
+    result = client.get(path, params=params, headers={"X-Service-Key": SERVICE_KEY})
+    assert result.status_code == 200
+    assert result.headers["content-type"] == "audio/wav"
+    assert result.headers["cache-control"] == "private, no-store"
+    assert service.object_storage.keys == [file_object.object_key]
+    assert client.get(path, params={**params, "purpose": "model_image"}, headers={"X-Service-Key": SERVICE_KEY}).status_code == 404
