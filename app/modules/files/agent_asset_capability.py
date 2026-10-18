@@ -218,7 +218,7 @@ class AgentAssetCapabilityStore:
         redis_client = self.redis_client
         if redis_client is None:
             return
-        for purpose in ("model_image", "model_file"):
+        for purpose in ("model_image", "model_file", "model_audio"):
             capability = AgentAssetCapability(
                 owner_user_id=owner_user_id,
                 file_id=file_id,
@@ -343,7 +343,7 @@ def _decode_capability(
         return None
     if (
         capability.purpose
-        not in {"model_image", "model_file"}
+        not in {"model_image", "model_file", "model_audio"}
         or not capability.object_key
         or not capability.content_type
         or payload.get("asset_version")

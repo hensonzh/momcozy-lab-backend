@@ -58,6 +58,7 @@ def test_model_asset_openapi_declares_binary_media_and_opaque_failure_contract()
         "image/png",
         "image/webp",
         "application/pdf",
+        "audio/wav",
     }
     assert set(operation["responses"]) >= {
         "200",
@@ -226,3 +227,24 @@ def _app(**overrides: object) -> FastAPI:
             **overrides,
         )
     )
+
+
+def test_audio_model_asset_capability_revalidates_size_before_storage_read() -> None:
+    capability = AgentAssetCapability(
+        owner_user_id=uuid4(), file_id=uuid4(), object_key="users/audio.wav",
+        purpose="model_audio", content_type="audio/wav",
+    )
+    file_object = SimpleNamespace(
+        id=capability.file_id, owner_user_id=capability.owner_user_id,
+        object_key=capability.object_key, content_type="audio/wav",
+        status="active", deleted_at=None, size_bytes=1_000_001,
+    )
+    storage = FakeObjectStorage()
+    service = AgentModelAssetService(
+        repository=FakeFileRepository(file_object), object_storage=storage,
+        capability_store=FakeCapabilityLookup(capability),
+    )
+    with pytest.raises(ApiError) as error:
+        asyncio.run(service.fetch(token=TOKEN))
+    assert error.value.status == 404
+    assert storage.keys == []

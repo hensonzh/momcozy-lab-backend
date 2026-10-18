@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
-AgentFilePurpose = Literal["model_image", "model_file"]
+AgentFilePurpose = Literal["model_image", "model_file", "model_audio"]
 
 
 class AgentFileResolveRequest(BaseModel):

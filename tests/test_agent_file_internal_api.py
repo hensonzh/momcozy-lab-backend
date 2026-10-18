@@ -393,3 +393,41 @@ class FakeObjectStorage:
     async def get_bytes(self, *, key: str) -> bytes:
         self.keys.append(key)
         return self.body
+
+
+def test_audio_file_access_only_authorizes_owned_active_wav() -> None:
+    file_object = _file_object(content_type="audio/wav")
+    service = AgentFileAccessService(
+        repository=FakeFileRepository(file_object),
+        capability_store=FakeCapabilityStore(),
+        public_base_url="https://api.example.test",
+    )
+    result = asyncio.run(service.resolve(
+        owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio",
+    ))
+    assert result.content_type == "audio/wav"
+    for invalid_type in ("audio/mpeg", "application/pdf", "image/png"):
+        file_object.content_type = invalid_type
+        with pytest.raises(ApiError) as error:
+            asyncio.run(service.resolve(
+                owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio",
+            ))
+        assert error.value.code == "invalid_agent_attachment"
+
+
+def test_audio_model_bytes_revalidate_owner_and_size_before_read() -> None:
+    file_object = _file_object(content_type="audio/wav")
+    file_object.size_bytes = 32_044
+    storage = FakeObjectStorage()
+    service = AgentModelBytesService(
+        repository=OwnerScopedFakeFileRepository(file_object), object_storage=storage, max_bytes=10 * 1024 * 1024,
+    )
+    result = asyncio.run(service.fetch(
+        owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio",
+    ))
+    assert result.content_type == "audio/wav"
+    with pytest.raises(ApiError):
+        asyncio.run(service.fetch(owner_user_id=uuid4(), file_id=file_object.id, purpose="model_audio"))
+    file_object.size_bytes = 1_000_001
+    with pytest.raises(ApiError):
+        asyncio.run(service.fetch(owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio"))

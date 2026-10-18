@@ -55,7 +55,7 @@ def get_agent_model_asset_service(
         200: {
             "description": (
                 "Authorized model asset bytes. Content-Type matches "
-                "the validated image or PDF."
+                "the validated image, PDF, or WAV."
             ),
             "content": {
                 content_type: {
@@ -70,6 +70,7 @@ def get_agent_model_asset_service(
                     "image/png",
                     "image/webp",
                     "application/pdf",
+                    "audio/wav",
                 )
             },
         },

@@ -24,6 +24,8 @@ MODEL_IMAGE_CONTENT_TYPES = frozenset(
     }
 )
 MODEL_FILE_CONTENT_TYPES = frozenset({"application/pdf"})
+MODEL_AUDIO_CONTENT_TYPES = frozenset({"audio/wav"})
+MAX_MODEL_AUDIO_BYTES = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -117,10 +119,11 @@ class AgentModelBytesService:
         )
         if file_object.id != file_id or file_object.owner_user_id != owner_user_id:
             raise _invalid_attachment()
-        if file_object.size_bytes > self.max_bytes or file_object.size_bytes <= 0:
+        limit = min(self.max_bytes, MAX_MODEL_AUDIO_BYTES) if purpose == "model_audio" else self.max_bytes
+        if file_object.size_bytes > limit or file_object.size_bytes <= 0:
             raise _invalid_attachment()
         body = await self.object_storage.get_bytes(key=file_object.object_key)
-        if not body or len(body) > self.max_bytes:
+        if not body or len(body) > limit:
             raise _invalid_attachment()
         return AgentModelAsset(body=bytes(body), content_type=content_type)
 
@@ -154,7 +157,10 @@ class AgentModelAssetService:
         if not _capability_matches_file(
             capability=capability,
             file_object=file_object,
-        ):
+        ) or (capability.purpose == "model_audio" and (
+            getattr(file_object, "size_bytes", 0) <= 0
+            or file_object.size_bytes > MAX_MODEL_AUDIO_BYTES
+        )):
             raise _capability_not_found()
         try:
             body = await self.object_storage.get_bytes(
@@ -162,6 +168,8 @@ class AgentModelAssetService:
             )
         except Exception as exc:
             raise _capability_unavailable() from exc
+        if capability.purpose == "model_audio" and (not body or len(body) > MAX_MODEL_AUDIO_BYTES):
+            raise _capability_not_found()
         return AgentModelAsset(
             body=bytes(body),
             content_type=capability.content_type,
@@ -181,7 +189,7 @@ def _authorized_content_type(
     allowed_types = (
         MODEL_IMAGE_CONTENT_TYPES
         if purpose == "model_image"
-        else MODEL_FILE_CONTENT_TYPES
+        else MODEL_AUDIO_CONTENT_TYPES if purpose == "model_audio" else MODEL_FILE_CONTENT_TYPES
     )
     if content_type not in allowed_types:
         raise _invalid_attachment()
