@@ -87,6 +87,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | PUT | `/v1/profile/me-experience/order` | profiles | flutter | stable | Put Order |
 | PATCH | `/v1/profile/me-experience/profile` | profiles | flutter | stable | Update Profile |
 | PUT | `/v1/profile/me-experience/records/{record_id}` | profiles | flutter | stable | Put Record |
+| GET | `/v1/realtime-voice-capability` | voice | flutter | stable | Realtime Voice Capability |
 | GET | `/v1/records/feeding` | records | flutter | stable | List Feedings |
 | POST | `/v1/records/feeding` | records | flutter | stable | Create Feeding |
 | DELETE | `/v1/records/feeding/{record_id}` | records | flutter | stable | Delete Feeding |

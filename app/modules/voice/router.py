@@ -71,6 +71,19 @@ async def realtime_voice_stream(
     )
 
 
+@router.get("/realtime-voice-capability")
+async def realtime_voice_capability(
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+) -> dict[str, bool]:
+    settings = request.app.state.settings
+    configured = settings.voice_provider in {"doubao", "volcengine"} and bool(
+        settings.voice_api_key.strip() or
+        (settings.voice_app_id.strip() and settings.voice_access_key.strip())
+    )
+    return {"available": configured}
+
+
 @router.post(
     "/realtime-voice-stream",
     response_class=StreamingResponse,

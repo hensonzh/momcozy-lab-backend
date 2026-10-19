@@ -95,6 +95,18 @@ def test_realtime_voice_stream_prefetches_before_sending_pcm_headers() -> None:
     assert response.json()["error"]["code"] == "doubao_realtime_voice_failed"
 
 
+def test_voice_capability_is_authenticated_and_disabled_without_a_real_provider() -> None:
+    app = create_app(Settings(app_env="test", voice_provider="disabled"))
+    assert TestClient(app).get("/v1/realtime-voice-capability").status_code == 401
+    _override_current_user(app, uuid4())
+    response = TestClient(app).get("/v1/realtime-voice-capability")
+    assert response.status_code == 200
+    assert response.json() == {"available": False}
+    app = create_app(Settings(app_env="test", voice_provider="doubao", voice_api_key="test-key"))
+    _override_current_user(app, uuid4())
+    assert TestClient(app).get("/v1/realtime-voice-capability").json() == {"available": True}
+
+
 def test_private_voice_stream_requires_current_user() -> None:
     response = TestClient(create_app(Settings(app_env="test"))).post(
         "/v1/realtime-voice-stream",
