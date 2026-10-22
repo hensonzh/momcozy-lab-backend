@@ -23,6 +23,7 @@ services:
   stool-photo-review-worker:
     image: momcozy-lab-backend:ci
     environment:
+      AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64:?Set AUTH_JWT_PRIVATE_KEY_B64}
       APP_ENV: test
       STOOL_PHOTO_REVIEW_PROVIDER: disabled
       STOOL_PHOTO_THIRD_PARTY_APPROVED: "false"
