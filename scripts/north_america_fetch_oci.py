@@ -83,7 +83,7 @@ def fetch_layout(args: argparse.Namespace) -> None:
             headers={"Authorization": "Bearer " + bearer, "Accept": ACCEPT},
         )
         with urllib.request.urlopen(req, timeout=90) as response:
-            content = response.read()
+            content: bytes = response.read()
         if "sha256:" + hashlib.sha256(content).hexdigest() != digest:
             raise ValueError("registry content digest mismatch")
         return content

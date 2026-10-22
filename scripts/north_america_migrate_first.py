@@ -98,9 +98,9 @@ def check_databases_unmigrated() -> None:
             'test "$(psql -X -U "$POSTGRES_USER" -d "$db" -Atqc '
             "\"SELECT to_regclass('public.alembic_version')\")\" = \"\""
         )
-        result = subprocess.run(["docker", "exec", ids[0], "sh", "-ec", query, "sh", var],
-                                capture_output=True, check=False)
-        if result.returncode:
+        probe = subprocess.run(["docker", "exec", ids[0], "sh", "-ec", query, "sh", var],
+                               capture_output=True, check=False)
+        if probe.returncode:
             raise ValueError("North America database is already migrated or unavailable")
 
 

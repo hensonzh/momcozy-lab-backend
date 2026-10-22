@@ -31,15 +31,16 @@ def test_image_and_source_pairs_are_proven_before_remote_apply() -> None:
     text = WORKFLOW.read_text()
     assert "refs/heads/main" in text
     assert "north-america-validation.yml" in text
+    assert 'core_workflow="$service-ci.yml"' in text
+    assert 'No successful $service core CI for approved commit' in text
     assert "for service in backend agent" in text
     assert "north-america-main-" in text
     assert "gh run download" in text
     assert "ci_digest" in text and '[[ "$digest" == "$ci_digest" ]]' in text
-    for workflow in (ROOT / '.github/workflows/backend-north-america-validation.yml',
-                     ROOT.parent / 'agent/.github/workflows/agent-north-america-validation.yml'):
-        published = workflow.read_text()
-        assert 'actions/upload-artifact@v4' in published
-        assert 'north-america-image-digest.txt' in published
+    # CI checks out this repository alone; Agent verifies its own workflow.
+    published = (ROOT / '.github/workflows/backend-north-america-validation.yml').read_text()
+    assert 'actions/upload-artifact@v4' in published
+    assert 'north-america-image-digest.txt' in published
     assert "sha256:" in text
     assert "north-america-staging" in text
     assert "--backend-commit" in text and "--agent-commit" in text

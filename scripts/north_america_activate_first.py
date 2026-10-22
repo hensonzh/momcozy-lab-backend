@@ -38,8 +38,8 @@ PORTS = {"backend": 8001, "agent": 8002}
 COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
-def _run(command: list[str], **kwargs: object) -> str:
-    result = subprocess.run(command, capture_output=True, check=False, **kwargs)
+def _run(command: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
+    result = subprocess.run(command, capture_output=True, check=False, cwd=cwd, env=env)
     if result.returncode:
         raise ValueError("North America activation step failed; private output suppressed")
     return result.stdout.decode() if isinstance(result.stdout, bytes) else result.stdout

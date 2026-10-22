@@ -100,6 +100,10 @@ jobs:
           for service in backend agent; do
             commit="$BACKEND_COMMIT"; if [[ "$service" == agent ]]; then commit="$AGENT_COMMIT"; fi
             repo="hensonzh/momcozy-lab-$service"
+            core_workflow="$service-ci.yml"
+            core_run="$(gh api "repos/$repo/actions/workflows/$core_workflow/runs?head_sha=$commit&branch=main&event=push&status=success&per_page=100" \
+              --jq "[.workflow_runs[] | select(.head_sha == \"$commit\" and .head_branch == \"main\" and .event == \"push\" and .conclusion == \"success\") | .id] | first // empty")"
+            [[ "$core_run" =~ ^[0-9]+$ ]] || { echo "No successful $service core CI for approved commit" >&2; exit 1; }
             workflow="$service-north-america-validation.yml"
             # Require the exact commit's push CI; an old artifact expires closed.
             # Agent's main ancestry is checked against its actual remote, not Backend main.

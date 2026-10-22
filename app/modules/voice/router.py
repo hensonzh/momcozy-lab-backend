@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, File, Form, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -20,7 +21,7 @@ router = SurfaceAPIRouter(
     api_surface_metadata=api_surface("public_app_api", owner="voice", clients=["flutter"]),
 )
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
-PCM_STREAM_RESPONSES = {
+PCM_STREAM_RESPONSES: dict[int | str, dict[str, Any]] = {
     200: {
         "description": "PCM16 mono audio stream",
         "content": {"audio/pcm": {"schema": {"type": "string", "format": "binary"}}},
