@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _private_env(tmp_path: Path) -> Path:
     text = (ROOT / "env/us-east-uat.env.example").read_text()
+    text = text.replace("REPLACE_WITH_NORTH_AMERICA_ZOUNDREAM_ENDPOINT", "https://vendor.example.org/analyze")
+    text = text.replace("REPLACE_WITH_NORTH_AMERICA_ZOUNDREAM_API_KEY", "synthetic-cry-key")
     text = text.replace("REPLACE_WITH_US_EAST_UAT_", "synthetic-")
     path = tmp_path / "private.env"
     path.write_text(text)

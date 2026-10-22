@@ -611,6 +611,8 @@ def _validate_env_file(path: Path, expected_environment: str) -> None:
         "AUTH_INVITE_CODES",
         "SERVICE_API_KEY",
         "AGENT_RUNTIME_SERVICE_API_KEY",
+        "ZOUNDREAM_ENDPOINT",
+        "ZOUNDREAM_API_KEY",
     )
     missing = [name for name in required if not values.get(name, "").strip()]
     if missing:
@@ -632,6 +634,7 @@ def _validate_env_file(path: Path, expected_environment: str) -> None:
         "AUTH_INVITE_CODES",
         "SERVICE_API_KEY",
         "AGENT_RUNTIME_SERVICE_API_KEY",
+        "ZOUNDREAM_API_KEY",
     )
     unsafe = [
         name for name in secret_names if _is_known_placeholder(values[name])
@@ -676,6 +679,8 @@ def _validate_env_file(path: Path, expected_environment: str) -> None:
         ),
     )
     _require_distinct(values, ("SERVICE_API_KEY", "AGENT_RUNTIME_SERVICE_API_KEY"))
+    if not values["ZOUNDREAM_ENDPOINT"].startswith("https://") or _is_known_placeholder(values["ZOUNDREAM_ENDPOINT"]):
+        raise ValueError("Singapore cry endpoint must be public HTTPS")
 
 
 def _is_known_placeholder(value: str) -> bool:

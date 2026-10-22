@@ -17,6 +17,28 @@ Backend owns PostgreSQL, Redis, MinIO and the shared network; deploy Product
 before Agent. Validate `/v1/health/ready` and `/.well-known/jwks.json`, then
 Agent cross-service readiness and App smoke, before distributing the APK.
 
+## Cry analysis dependency
+
+The Product Backend owns `POST /v1/cry-analyses` (`202 Accepted`) and commits a
+bounded, owner-scoped `pending` result and idempotency reference before sending
+PCM to the independent Zoundream classifier over TLS (migration
+`20261022_0027`). The App saves its random operation key before uploading,
+polls `GET /v1/cry-analyses/by-key/{key}` or `GET /v1/cry-analyses/{id}` and
+shows `done`, `incomplete` or `failed` without ever persisting WAV bytes.
+The classification runs in a bounded in-process background task, outside the
+request DB transaction. A process restart can lose an in-flight recording;
+after five minutes the pending record becomes `failed` and the user can rerecord.
+This is not a durable audio queue; do not claim guaranteed completion across
+host restarts. Private regional Product envs require
+`ZOUNDREAM_ENDPOINT` and `ZOUNDREAM_API_KEY`. Agent Runtime has no vendor key
+and receives only a completed owner/thread-bound result through authenticated internal
+`POST /v1/internal/agent/cry-analyses/resolve`. Never attach WAV to the cry
+Agent Run or claim live inference from API tests. Roll out Product migration
+and private configuration before Agent/App; the North America same-schema
+update runner does not permit this migration without a separately reviewed
+schema-change procedure. Verify vendor reachability, endpoint semantics,
+retention/privacy approval and real device flows per region before distribution.
+
 ## North America staging
 
 `backend-north-america-validation.yml` validates and publishes an immutable

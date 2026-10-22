@@ -89,6 +89,8 @@ class Settings:
         DEFAULT_AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS
     )
     openai_api_key: str = ""
+    zoundream_endpoint: str = ""
+    zoundream_api_key: str = field(default="", repr=False)
     voice_provider: str = "disabled"
     voice_api_key: str = ""
     voice_app_id: str = ""
@@ -183,6 +185,8 @@ class Settings:
                 cls.agent_model_asset_inactivity_ttl_seconds,
             ),
             openai_api_key=_env("OPENAI_API_KEY", cls.openai_api_key),
+            zoundream_endpoint=_env("ZOUNDREAM_ENDPOINT", cls.zoundream_endpoint),
+            zoundream_api_key=_env("ZOUNDREAM_API_KEY", cls.zoundream_api_key),
             voice_provider=_env("VOICE_PROVIDER", cls.voice_provider).lower(),
             voice_api_key=_env("VOICE_API_KEY", cls.voice_api_key),
             voice_app_id=_env("VOICE_APP_ID", cls.voice_app_id),

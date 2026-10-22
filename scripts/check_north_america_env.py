@@ -42,7 +42,7 @@ REQUIRED_SECRETS = (
     "MOMCOZY_PRODUCT_MINIO_ACCESS_KEY", "MOMCOZY_PRODUCT_MINIO_SECRET_KEY",
     "MOMCOZY_AGENT_MINIO_ACCESS_KEY", "MOMCOZY_AGENT_MINIO_SECRET_KEY",
     "AUTH_JWT_PRIVATE_KEY_B64", "AUTH_EMAIL_TOKEN_KEY", "AUTH_SMTP_PASSWORD",
-    "SERVICE_API_KEY", "AGENT_RUNTIME_SERVICE_API_KEY",
+    "SERVICE_API_KEY", "AGENT_RUNTIME_SERVICE_API_KEY", "ZOUNDREAM_API_KEY",
 )
 
 
@@ -95,6 +95,8 @@ def validate(path: Path) -> None:
         value = values.get(key, "")
         if not value or "REPLACE_WITH" in value or "${" in value:
             raise ValueError(f"North America env {key} is missing or a placeholder")
+    if not values.get("ZOUNDREAM_ENDPOINT", "").startswith("https://"):
+        raise ValueError("North America cry endpoint must be public HTTPS")
     for key, value in values.items():
         if "REPLACE_WITH" in value or "example.invalid" in value:
             raise ValueError(f"North America env {key} still contains a placeholder")

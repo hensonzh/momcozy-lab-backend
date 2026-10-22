@@ -43,6 +43,9 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/babies/{baby_id}/records/{record_id}` | baby | flutter | stable | Delete |
 | PUT | `/v1/babies/{baby_id}/records/{record_id}` | baby | flutter | stable | Update |
 | POST | `/v1/babies/{baby_id}/records/{record_id}/restore` | baby | flutter | stable | Restore |
+| POST | `/v1/cry-analyses` | cry-analysis | flutter | stable | Create Cry Analysis |
+| GET | `/v1/cry-analyses/by-key/{key}` | cry-analysis | flutter | stable | Get Cry Analysis By Key |
+| GET | `/v1/cry-analyses/{analysis_id}` | cry-analysis | flutter | stable | Get Cry Analysis |
 | GET | `/v1/devices/pump-energy-target` | devices | flutter | stable | Get Pump Energy Target |
 | POST | `/v1/devices/pump-health` | devices | flutter | stable | Create Pump Health |
 | GET | `/v1/devices/pump-health/latest` | devices | flutter | stable | Get Latest Pump Health |
@@ -118,6 +121,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | Method | Path | Owner | Clients | Stability | Summary |
 |---|---|---|---|---|---|
 | GET | `/.well-known/jwks.json` | auth | agent-runtime | stable | Jwks |
+| POST | `/v1/internal/agent/cry-analyses/resolve` | cry-analysis | agent-runtime | stable | Get Cry Analysis For Agent |
 | POST | `/v1/internal/agent/files/resolve` | files | agent-runtime | stable | Resolve Agent File |
 | GET | `/v1/internal/agent/files/{file_id}/model-asset` | files | agent-runtime | stable | Get Model Asset Bytes |
 | GET | `/v1/internal/agent/files/{file_id}/model-image` | files | agent-runtime | stable | Get Local Model Image |

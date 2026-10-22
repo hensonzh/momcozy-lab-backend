@@ -131,6 +131,7 @@ def test_openapi_contains_runtime_to_product_internal_contracts_only() -> None:
     expected = {
         "/v1/internal/agent/files/resolve",
         "/v1/internal/agent/profile",
+        "/v1/internal/agent/cry-analyses/resolve",
     }
 
     assert expected <= set(paths)
@@ -204,6 +205,7 @@ def test_removed_diary_and_legacy_agent_business_routes_are_absent() -> None:
     assert not any("diary" in path or "/todos/" in path for path in paths)
     assert {path for path in paths if path.startswith("/v1/internal/agent/")} == {
         "/v1/internal/agent/profile",
+        "/v1/internal/agent/cry-analyses/resolve",
         "/v1/internal/agent/files/resolve",
         "/v1/internal/agent/files/{file_id}/model-asset",
         "/v1/internal/agent/files/{file_id}/model-image",
