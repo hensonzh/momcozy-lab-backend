@@ -43,6 +43,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/babies/{baby_id}/records/{record_id}` | baby | flutter | stable | Delete |
 | PUT | `/v1/babies/{baby_id}/records/{record_id}` | baby | flutter | stable | Update |
 | POST | `/v1/babies/{baby_id}/records/{record_id}/restore` | baby | flutter | stable | Restore |
+| GET | `/v1/cry-analyses` | cry-analysis | flutter | stable | List Cry Analyses |
 | POST | `/v1/cry-analyses` | cry-analysis | flutter | stable | Create Cry Analysis |
 | GET | `/v1/cry-analyses/by-key/{key}` | cry-analysis | flutter | stable | Get Cry Analysis By Key |
 | GET | `/v1/cry-analyses/{analysis_id}` | cry-analysis | flutter | stable | Get Cry Analysis |

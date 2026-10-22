@@ -71,20 +71,42 @@ async def analyze(wav: bytes, owner: UUID, *, endpoint: str, api_key: str) -> di
     try:
         async with asyncio.timeout(90):
             async with httpx.AsyncClient(timeout=12) as client:
+                loop = asyncio.get_running_loop()
+                previous_send: float | None = None
+                timestamp = 0
+                saw_no_cry = False
                 for offset in range(0, len(pcm), BLOCK_BYTES):
+                    # Recorded WAV arrives all at once, while this API accepts
+                    # one second of live audio per call. Preserve its cadence.
+                    if previous_send is not None:
+                        remaining = 1.0 - (loop.time() - previous_send)
+                        if remaining > 0:
+                            await asyncio.sleep(remaining)
+                    previous_send = loop.time()
                     block = pcm[offset:offset + BLOCK_BYTES].ljust(BLOCK_BYTES, b'\0')
                     response = None
                     for attempt in range(3):
                         response = await client.post(endpoint, content=block,
-                                                     headers={**headers, 'x-audio-timestamp': str(offset // BLOCK_BYTES * 1000)})
+                                                     headers={**headers, 'x-audio-timestamp': str(timestamp)})
                         if response.status_code not in {500, 503} or attempt == 2:
                             break
                         await asyncio.sleep(0.2 * (attempt + 1))
                     assert response is not None
                     response.raise_for_status()
-                    result = normalized_result(response.json())
-                    if result['status'] == 'done':
-                        return result
+                    payload = response.json()
+                    result = normalized_result(payload)
+                    if payload['phase'] == 'done':
+                        if result.get('answer') == 'no_cry':
+                            saw_no_cry = True
+                        elif result['status'] == 'done':
+                            return result
+                        # A closed activation cannot receive timestamp +1000.
+                        # Try the rest of the real recording as a new one.
+                        timestamp = 0
+                    else:
+                        timestamp += 1000
+                if saw_no_cry:
+                    return {'status': 'done', 'answer': 'no_cry'}
     except (httpx.HTTPError, ValueError, TypeError, TimeoutError) as exc:
         raise ApiError(code='cry_service_unavailable', message='Cry analysis is unavailable.', status=502) from exc
     return {'status': 'incomplete'}

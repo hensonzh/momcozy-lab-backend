@@ -21,10 +21,16 @@ Agent cross-service readiness and App smoke, before distributing the APK.
 
 The Product Backend owns `POST /v1/cry-analyses` (`202 Accepted`) and commits a
 bounded, owner-scoped `pending` result and idempotency reference before sending
-PCM to the independent Zoundream classifier over TLS (migration
-`20261022_0027`). The App saves its random operation key before uploading,
+PCM to the independent Zoundream classifier over TLS (table migration
+`20261022_0027`, status-check correction `20261022_0028`). The App saves its random operation key before uploading,
 polls `GET /v1/cry-analyses/by-key/{key}` or `GET /v1/cry-analyses/{id}` and
 shows `done`, `incomplete` or `failed` without ever persisting WAV bytes.
+For a committed Agent thread the App sends `thread_id` on upload; owner-scoped
+`GET /v1/cry-analyses?thread_id=...` restores the latest 100 result cards on
+another device. New jobs are limited to two per user and eight per regional
+database while pending; retries with the same idempotency key do not claim a
+new slot. The provider adapter sends one second of PCM at a time, pacing
+prerecorded audio and restarting a closed no-cry activation for later blocks.
 The classification runs in a bounded in-process background task, outside the
 request DB transaction. A process restart can lose an in-flight recording;
 after five minutes the pending record becomes `failed` and the user can rerecord.

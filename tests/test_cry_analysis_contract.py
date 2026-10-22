@@ -136,3 +136,64 @@ def test_cry_vendor_requires_private_key() -> None:
     with pytest.raises(ApiError) as error:
         asyncio.run(analyze(wav(), uuid4(), endpoint='https://vendor.example/analyze', api_key=''))
     assert error.value.status == 503
+
+
+def test_early_no_cry_does_not_hide_a_later_cry(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    import httpx
+    from app.modules.cry_analysis.service import analyze
+
+    timestamps: list[str] = []
+    pauses: list[float] = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, endpoint, content, headers):
+            timestamps.append(headers['x-audio-timestamp'])
+            result = ({'phase': 'done', 'answer': 'no_cry', 'reason': 'no_valid_cry_patterns'}
+                      if len(timestamps) == 1 else
+                      {'phase': 'done', 'answer': 'hungry', 'reason': 'cry_translated'})
+            return httpx.Response(200, json=result, request=httpx.Request('POST', endpoint))
+
+    async def pause(seconds):
+        pauses.append(seconds)
+
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: Client())
+    monkeypatch.setattr(asyncio, 'sleep', pause)
+    result = asyncio.run(analyze(wav(2), uuid4(), endpoint='https://vendor.example/analyze', api_key='test-secret'))
+    assert result == {'status': 'done', 'answer': 'hungry'}
+    assert timestamps == ['0', '0']
+    assert len(pauses) == 1 and 0.8 <= pauses[0] <= 1.0
+
+
+def test_only_no_cry_responses_end_as_no_cry_after_whole_clip(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    import httpx
+    from app.modules.cry_analysis.service import analyze
+
+    timestamps: list[str] = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, endpoint, content, headers):
+            timestamps.append(headers['x-audio-timestamp'])
+            return httpx.Response(200, json={'phase': 'done', 'answer': 'no_cry', 'reason': 'no_valid_cry_patterns'},
+                                  request=httpx.Request('POST', endpoint))
+
+    monkeypatch.setattr(httpx, 'AsyncClient', lambda **kwargs: Client())
+    # Avoid real-time pacing in this unit test without affecting production.
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(asyncio, 'sleep', AsyncMock())
+    result = asyncio.run(analyze(wav(2), uuid4(), endpoint='https://vendor.example/analyze', api_key='test-secret'))
+    assert result == {'status': 'done', 'answer': 'no_cry'}
+    assert timestamps == ['0', '0']

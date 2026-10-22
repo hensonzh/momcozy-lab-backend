@@ -14,6 +14,10 @@ class CryAnalysisRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CryAnalysisListRead(BaseModel):
+    items: list[CryAnalysisRead]
+
+
 class CryAnalysisResolveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
