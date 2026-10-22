@@ -35,7 +35,11 @@ def test_ready_rejects_public_listener(local: str, monkeypatch: pytest.MonkeyPat
 
 
 def test_recover_requires_exact_business_provenance(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    source = Path("/opt/momcozy-lab-us-east-uat/releases/backend/" + "a" * 40)
+    source = tmp_path / "releases/backend" / ("a" * 40)
+    source.mkdir(parents=True)
+    (source / "docker-compose.us-east-uat.yml").write_text(
+        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n  stool-photo-review-worker:\n"
+    )
     private = tmp_path / "backend.env"
     private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
     args = SimpleNamespace(service="backend", source=source, env_file=private,
@@ -60,11 +64,51 @@ def test_recover_requires_exact_business_provenance(monkeypatch: pytest.MonkeyPa
                                                   "com.docker.compose.config-hash": "d" * 64}}})
     monkeypatch.setattr(release, "_run", run)
     release.check_running_service_provenance(args)
-    assert set(seen) == {"api", "notification-worker", "auth-email-worker"}
+    assert set(seen) == {"api", "notification-worker", "auth-email-worker", "stool-photo-review-worker"}
     args.image_id = "sha256:" + "c" * 64
     seen.clear()
     with pytest.raises(ValueError, match="provenance differs"):
         release.check_running_service_provenance(args)
+
+
+def test_old_b_release_with_three_workers_remains_verifiable_during_roll_forward(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "releases/backend" / ("a" * 40)
+    source.mkdir(parents=True)
+    (source / "docker-compose.us-east-uat.yml").write_text(
+        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n"
+    )
+    private = tmp_path / "backend.env"
+    private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
+    args = SimpleNamespace(service="backend", source=source, env_file=private,
+                           image_id="sha256:" + "b" * 64, local_image="backend:old")
+    seen = []
+    unexpected_review_worker = False
+    def run(command, **kwargs):
+        if command[0] == "docker" and command[1] == "compose":
+            service = command[-1]
+            return f"{service} " + "d" * 64 + "\n"
+        if command[1] == "ps":
+            name = next(part.rsplit("=", 1)[1] for part in command
+                        if part.startswith("label=com.docker.compose.service="))
+            if name == "stool-photo-review-worker":
+                return "abc123\n" if unexpected_review_worker else ""
+            seen.append(name)
+            return "abc123\n"
+        service = seen[-1]
+        return json.dumps({"Image": args.image_id, "State": {"Status": "running", "Health": {"Status": "healthy"}},
+                           "Config": {"Labels": {"com.docker.compose.project": "momcozy-lab-backend-us-east-uat",
+                                                  "com.docker.compose.service": service,
+                                                  "com.docker.compose.project.working_dir": str(source),
+                                                  "com.docker.compose.project.config_files": str(source / "docker-compose.us-east-uat.yml"),
+                                                  "com.docker.compose.project.environment_file": str(private),
+                                                  "com.docker.compose.config-hash": "d" * 64}}})
+    monkeypatch.setattr(release, "_run", run)
+    release.check_running_service_provenance(args)
+    assert set(seen) == {"api", "notification-worker", "auth-email-worker"}
+    unexpected_review_worker = True
+    with pytest.raises(ValueError, match="unexpected.*worker"):
+        release.check_running_service_provenance(args)
+
 
 
 def test_recover_never_restarts_business_containers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

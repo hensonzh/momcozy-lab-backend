@@ -16,13 +16,18 @@ def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(release, "_run", lambda command, **kwargs: calls.append(command) or "")
     private = tmp_path / "b.env"
     private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
-    args = SimpleNamespace(service="backend", source=Path("/b"), env_file=private,
+    source = tmp_path / "release"
+    source.mkdir()
+    (source / "docker-compose.us-east-uat.yml").write_text(
+        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n  stool-photo-review-worker:\n"
+    )
+    args = SimpleNamespace(service="backend", source=source, env_file=private,
                            local_image="b:verified", commit="a" * 40)
     release.start_services(args)
     assert calls
     command = calls[0]
     assert "--no-deps" in command and "--pull" in command and "never" in command
-    assert command[-3:] == ["api", "notification-worker", "auth-email-worker"]
+    assert command[-4:] == ["api", "notification-worker", "auth-email-worker", "stool-photo-review-worker"]
     assert not any(name in command for name in ("postgres", "redis", "minio", "down", "-v"))
 
 

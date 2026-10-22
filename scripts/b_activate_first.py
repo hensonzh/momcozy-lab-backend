@@ -61,9 +61,34 @@ def check_fresh_pointer(service: str, source: Path) -> None:
             raise ValueError("B Agent release requires verified Product release")
 
 
+def business_services(service: str, source: Path | None = None) -> tuple[str, ...]:
+    if service == "agent":
+        return ("api", "worker")
+    if service != "backend":
+        raise ValueError("Unknown B service")
+    base = ("api", "notification-worker", "auth-email-worker")
+    if source is None:
+        return (*base, "stool-photo-review-worker")  # First release of this source.
+    compose = (source / "docker-compose.us-east-uat.yml").read_text()
+    if any(f"\n  {name}:\n" not in compose for name in base):
+        raise ValueError("B release source omits a required Product service")
+    return (*base, "stool-photo-review-worker") if "\n  stool-photo-review-worker:\n" in compose else base
+
+
+def stop_removed_review_worker(service: str, running: argparse.Namespace, desired: argparse.Namespace) -> None:
+    """Stop only a verified B Product worker omitted by the desired source."""
+    if service != "backend":
+        return
+    current = business_services(service, running.source)
+    next_services = business_services(service, desired.source)
+    if "stool-photo-review-worker" in current and "stool-photo-review-worker" not in next_services:
+        _run(_compose(running, ["stop", "stool-photo-review-worker"]),
+             cwd=running.source, env=_environment(running))
+
+
 def check_service_containers_absent(service: str) -> None:
     project = f"momcozy-lab-{service}-us-east-uat"
-    services = ("api", "notification-worker", "auth-email-worker") if service == "backend" else ("api", "worker")
+    services = business_services(service)
     for name in services:
         result = _run(["docker", "ps", "-a", "--filter", f"label=com.docker.compose.project={project}",
                        "--filter", f"label=com.docker.compose.service={name}", "--format", "{{.ID}}"])
@@ -74,7 +99,7 @@ def check_service_containers_absent(service: str) -> None:
 def check_running_service_provenance(args: argparse.Namespace) -> None:
     """Recover only the exact B containers created by this source and image."""
     project = f"momcozy-lab-{args.service}-us-east-uat"
-    expected = {"api", "notification-worker", "auth-email-worker"} if args.service == "backend" else {"api", "worker"}
+    expected = set(business_services(args.service, args.source))
     for service in expected:
         configured_hash = _run(_compose(args, ["config", "--hash", service]),
                                cwd=args.source, env=_environment(args)).strip().split()
@@ -96,6 +121,14 @@ def check_running_service_provenance(args: argparse.Namespace) -> None:
             raise ValueError("B running container provenance differs; refuse first-release promotion")
         if service == "api" and container["State"].get("Health", {}).get("Status") != "healthy":
             raise ValueError("B API container is not healthy")
+    if args.service == "backend" and "stool-photo-review-worker" not in expected:
+        # A rollback to an older manifest must not leave the newer photo worker
+        # running as an untracked orphan under the same B project.
+        ids = _run(["docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
+                    "--filter", "label=com.docker.compose.service=stool-photo-review-worker",
+                    "--format", "{{.ID}}"])
+        if ids.strip():
+            raise ValueError("B unexpected stool-photo worker is still running")
 
 
 def _compose(args: argparse.Namespace, command: list[str]) -> list[str]:
@@ -108,12 +141,12 @@ def _environment(args: argparse.Namespace) -> dict[str, str]:
 
 
 def start_services(args: argparse.Namespace) -> None:
-    services = ["api", "notification-worker", "auth-email-worker"] if args.service == "backend" else ["api", "worker"]
+    services = business_services(args.service, args.source)
     _run(_compose(args, ["up", "-d", "--no-deps", "--pull", "never", *services]),
          cwd=args.source, env=_environment(args))
 
 
-def check_ready(service: str) -> None:
+def check_ready(service: str, *, source: Path | None = None) -> None:
     port = PORTS[service]
     for _ in range(30):
         try:
@@ -126,7 +159,7 @@ def check_ready(service: str) -> None:
     else:
         raise ValueError("B loopback ready check failed")
     project = f"momcozy-lab-{service}-us-east-uat"
-    expected = {"api", "notification-worker", "auth-email-worker"} if service == "backend" else {"api", "worker"}
+    expected = set(business_services(service, source))
     for name in expected:
         lines = _run(["docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
                       "--filter", f"label=com.docker.compose.service={name}", "--format", "{{.ID}}"])

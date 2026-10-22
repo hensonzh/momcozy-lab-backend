@@ -10,6 +10,7 @@ from ...core.settings import Settings
 
 LOGGER = logging.getLogger("production_backend.db.session")
 AFTER_COMMIT_CALLBACKS_KEY = "after_commit_callbacks"
+AFTER_ROLLBACK_CALLBACKS_KEY = "after_rollback_callbacks"
 AfterCommitCallback = Callable[[], Awaitable[None]]
 
 
@@ -27,9 +28,11 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
         try:
             yield session
             await session.commit()
+            session.info.pop(AFTER_ROLLBACK_CALLBACKS_KEY, None)
             await run_after_commit_callbacks(session)
-        except Exception:
+        except BaseException:
             await session.rollback()
+            await run_after_rollback_callbacks(session)
             raise
 
 
@@ -45,3 +48,17 @@ async def run_after_commit_callbacks(session: AsyncSession) -> None:
             await callback()
         except Exception:
             LOGGER.warning("Post-commit callback failed.", exc_info=True)
+
+
+def add_after_rollback_callback(session: AsyncSession, callback: AfterCommitCallback) -> None:
+    callbacks = session.info.setdefault(AFTER_ROLLBACK_CALLBACKS_KEY, [])
+    callbacks.append(callback)
+
+
+async def run_after_rollback_callbacks(session: AsyncSession) -> None:
+    callbacks = list(session.info.pop(AFTER_ROLLBACK_CALLBACKS_KEY, []))
+    for callback in callbacks:
+        try:
+            await callback()
+        except Exception:
+            LOGGER.warning("Post-rollback cleanup failed; manual orphan reconciliation required.")

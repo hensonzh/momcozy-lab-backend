@@ -83,6 +83,7 @@ def test_failed_update_restores_old_without_pointer_change(tmp_path: Path, monke
     monkeypatch.setattr(release, "fresh_recovery", lambda: None)
     monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
     monkeypatch.setattr(release, "verify_running", lambda *args: None)
+    monkeypatch.setattr(release, "stop_removed_review_worker", lambda *args: None)
     calls: list[str] = []
     def checked(value: argparse.Namespace) -> None:
         calls.append("old" if value is old_args else "new")
@@ -191,9 +192,11 @@ def test_agent_recovery_refuses_dirty_backend_source_before_backup(tmp_path: Pat
 
 def test_start_checked_waits_for_docker_health_before_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
-    runtime = argparse.Namespace(service="backend")
+    source = Path("/tmp/approved-backend-source")
+    runtime = argparse.Namespace(service="backend", source=source)
     monkeypatch.setattr(release, "start_services", lambda args: calls.append("started"))
-    monkeypatch.setattr(release, "check_ready", lambda service: calls.append("ready"))
+    monkeypatch.setattr(release, "check_ready", lambda service, *, source=None: (calls.append("ready"),
+        source == runtime.source or pytest.fail("readiness must use target source")))
     monkeypatch.setattr(release, "wait_api_healthy", lambda args: calls.append("healthy"))
     monkeypatch.setattr(release, "check_running_service_provenance", lambda args: calls.append("provenance"))
     monkeypatch.setattr(release, "check_public_ready", lambda service: calls.append("public"))
@@ -255,3 +258,89 @@ def test_image_head_requires_one_offline_revision(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(release.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "a (head)\nb (head)\n", ""))
     with pytest.raises(ValueError, match="single Alembic head"):
         release.image_head("b:verified")
+
+
+def test_worker_topology_switch_stops_only_removed_review_worker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import b_activate_first as activate
+    old, new = (tmp_path / kind for kind in ("old", "new"))
+    for source in (old, new):
+        source.mkdir()
+        (source / "docker-compose.us-east-uat.yml").write_text(
+            "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n" +
+            ("  stool-photo-review-worker:\n" if source == old else "")
+        )
+    private = tmp_path / "backend.env"
+    private.write_text("MOMCOZY_B_ENV_MARKER=us-east-uat\n")
+    running = argparse.Namespace(service="backend", source=old, env_file=private,
+                                 local_image="backend:old", commit="a" * 40)
+    desired = argparse.Namespace(service="backend", source=new, env_file=private,
+                                 local_image="backend:new", commit="b" * 40)
+    commands = []
+    monkeypatch.setattr(activate, "_run", lambda command, **kwargs: commands.append((command, kwargs)) or "")
+    activate.stop_removed_review_worker("backend", running, desired)
+    assert len(commands) == 1
+    assert commands[0][0][-2:] == ["stop", "stool-photo-review-worker"]
+    assert commands[0][1]["cwd"] == old
+    commands.clear()
+    activate.stop_removed_review_worker("backend", desired, running)
+    assert not commands
+
+
+def test_failed_worker_addition_stops_new_worker_before_restoring_prior_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+    old = _source(tmp_path, "backend", "a" * 40)
+    new = tmp_path / "releases/backend" / ("d" * 40)
+    new.mkdir(parents=True)
+    (tmp_path / "current").mkdir()
+    (tmp_path / "previous").mkdir()
+    (tmp_path / "current/backend").symlink_to(old)
+    args = argparse.Namespace(service="backend", operation="update", source=new, commit=new.name)
+    previous = argparse.Namespace(service="backend", source=old, image_id="sha256:" + "c" * 64)
+    desired = argparse.Namespace(service="backend", source=new)
+    monkeypatch.setattr(release, "prepare", lambda args: (previous, desired, "rev"))
+    monkeypatch.setattr(release, "fresh_recovery", lambda: None)
+    monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
+    monkeypatch.setattr(release, "verify_running", lambda *args: None)
+    calls = []
+    monkeypatch.setattr(release, "stop_removed_review_worker", lambda service, running, target:
+        calls.append("stop-new" if running is desired else "stop-old"))
+    def checked(value):
+        calls.append("start-old" if value is previous else "start-new")
+        if value is desired:
+            raise ValueError("candidate unhealthy")
+    monkeypatch.setattr(release, "start_checked", checked)
+    with pytest.raises(ValueError, match="prior service restored"):
+        release.perform(args)
+    assert calls == ["stop-old", "start-new", "stop-new", "start-old"]
+    assert (tmp_path / "current/backend").resolve() == old
+
+
+def test_failed_candidate_with_unstoppable_new_worker_requires_manual_inspection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+    old = _source(tmp_path, "backend", "a" * 40)
+    new = tmp_path / "releases/backend" / ("d" * 40)
+    new.mkdir(parents=True)
+    (tmp_path / "current").mkdir()
+    (tmp_path / "previous").mkdir()
+    (tmp_path / "current/backend").symlink_to(old)
+    args = argparse.Namespace(service="backend", operation="update", source=new, commit=new.name)
+    previous = argparse.Namespace(service="backend", source=old, image_id="sha256:" + "c" * 64)
+    desired = argparse.Namespace(service="backend", source=new)
+    monkeypatch.setattr(release, "prepare", lambda args: (previous, desired, "rev"))
+    monkeypatch.setattr(release, "fresh_recovery", lambda: None)
+    monkeypatch.setattr(release, "read_live_revision", lambda service: "rev")
+    monkeypatch.setattr(release, "verify_running", lambda *args: None)
+    def stop(service, running, target):
+        if running is desired:
+            raise ValueError("stop failed")
+    monkeypatch.setattr(release, "stop_removed_review_worker", stop)
+    calls = []
+    def checked(value):
+        calls.append(value)
+        if value is desired:
+            raise ValueError("candidate unhealthy")
+    monkeypatch.setattr(release, "start_checked", checked)
+    with pytest.raises(ValueError, match="optional worker may still be running"):
+        release.perform(args)
+    assert calls == [desired, previous]
+    assert (tmp_path / "current/backend").resolve() == old

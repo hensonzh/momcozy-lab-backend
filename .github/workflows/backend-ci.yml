@@ -29,8 +29,14 @@ jobs:
       - name: Lint backend
         run: python -m ruff check app tests scripts
 
+      - name: Lint independent specialty
+        run: python -m ruff check services
+
       - name: Type-check backend
         run: python -m mypy app scripts
+
+      - name: Type-check independent specialty and dispatch
+        run: python -m mypy services app/modules/stool_analyses app/infrastructure/stool_specialty_auth.py
 
       - name: Run backend tests
         run: python -m pytest tests
@@ -40,6 +46,11 @@ jobs:
 
       - name: Check empty database migration SQL
         run: python -m alembic -c alembic.ini upgrade head --sql > /tmp/upgrade-head.sql
+
+      - name: Check independent specialty OpenAPI snapshot
+        run: |
+          python scripts/export_stool_specialty_openapi.py --output /tmp/stool-specialty.openapi.synthetic.json
+          diff -u docs/contracts/stool-specialty.openapi.synthetic.json /tmp/stool-specialty.openapi.synthetic.json
 
       - name: Check backup restore hook manifest
         run: python scripts/check_backup_restore_hooks.py
@@ -135,6 +146,21 @@ jobs:
       - name: Verify non-root runtime user
         run: test "$(docker image inspect --format '{{.Config.User}}' momcozy-lab-backend:ci)" = "app"
 
+      - name: Build independent synthetic specialty image (not published or deployed)
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          file: services/stool_specialty/Dockerfile
+          load: true
+          push: false
+          tags: momcozy-stool-specialty:ci
+
+      - name: Verify specialty image is isolated and non-root
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' momcozy-stool-specialty:ci)" = "specialty"
+          docker run --rm --entrypoint python momcozy-stool-specialty:ci \
+            -c "import importlib.util; import services.stool_specialty.app; assert importlib.util.find_spec('app') is None"
+
       - name: Verify release contracts inside the image
         run: |
           docker run --rm momcozy-lab-backend:ci \
@@ -167,13 +193,32 @@ jobs:
             --detach \
             --wait \
             --wait-timeout 90 \
-            api
+            api stool-photo-review-worker
           docker compose \
             -f docker-compose.local.yml \
             -f docker-compose.ci.yml \
             exec --no-TTY api \
             python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health/ready', timeout=5)" \
             >/dev/null
+          test "$(docker compose -f docker-compose.local.yml -f docker-compose.ci.yml ps --status running -q stool-photo-review-worker | wc -l | tr -d ' ')" = "1"
+          docker compose -f docker-compose.local.yml -f docker-compose.ci.yml exec --no-TTY stool-photo-review-worker \
+            python -c "from app.workers.stool_photo_reviews import run; print(run.__name__)" >/dev/null
+
+      - name: Install isolated stool photo integration dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install backend test dependencies for isolated integration
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Verify isolated PostgreSQL and MinIO review lifecycle
+        env:
+          MOMCOZY_TEST_DATABASE_URL: postgresql+asyncpg://momcozy:momcozy@localhost:5432/momcozy
+          MOMCOZY_TEST_OBJECT_STORAGE_ENDPOINT_URL: http://localhost:9000
+          MOMCOZY_TEST_OBJECT_STORAGE_ACCESS_KEY_ID: minioadmin
+          MOMCOZY_TEST_OBJECT_STORAGE_SECRET_ACCESS_KEY: minioadmin
+        run: python -m pytest -q tests/test_stool_photo_postgres_integration.py tests/test_stool_analysis_events_postgres.py tests/test_stool_analysis_submission_postgres.py tests/test_stool_specialty_product_integration_postgres.py tests/test_stool_product_queue_migration_postgres.py
 
       - name: Show Compose logs on failure
         if: failure()
@@ -272,6 +317,10 @@ jobs:
                   "plans",
                   "feeding_records",
                   "maternal_current_delivery_infants",
+                  "stool_photos",
+                  "stool_analyses",
+                  "stool_analysis_photos",
+                  "stool_analysis_events",
               }
               missing = required - tables
               if missing:

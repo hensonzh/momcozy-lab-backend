@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..users.models import AuthIdentity, User
+from ..stool_photos.models import StoolPhoto
+from ..stool_analyses.models import StoolAnalysis
 from .models import AuthEmailDelivery, AccountDeletionRequest, DeviceSession, EmailChallenge, RefreshToken
 
 
@@ -77,6 +79,21 @@ class AuthAccountRepository:
         await self.session.execute(update(EmailChallenge).where(EmailChallenge.user_id == user_id).values(consumed_at=now))
 
     async def anonymize_user(self, *, user: User, marker: str, now: datetime) -> None:
+        # Revoke specialist follow-up and scrub its stored result with the user tombstone.
+        await self.session.execute(
+            update(StoolAnalysis).where(StoolAnalysis.owner_user_id == user.id)
+            .values(
+                revoked_at=now, final_result=None, result_validated_at=None,
+                baby_context_snapshot_id=None, market=None, language=None,
+                baby_profile_version=None, baby_birth_date=None,
+                baby_feeding_mode=None, context_captured_at=None,
+            )
+        )
+        await self.session.execute(
+            update(StoolPhoto).where(StoolPhoto.owner_user_id == user.id, StoolPhoto.purged_at.is_(None))
+            .values(deleted_at=now, review_status="failed", review_sha256=None,
+                    review_expires_at=None, reason_codes=["account_deleted"])
+        )
         await self.session.execute(update(AuthEmailDelivery).where(AuthEmailDelivery.user_id == user.id, AuthEmailDelivery.status == "pending").values(status="cancelled", encrypted_message=None))
         user.status, user.email, user.deleted_at = "deleted", None, now
         user.email_verified_at, user.last_login_at = None, None

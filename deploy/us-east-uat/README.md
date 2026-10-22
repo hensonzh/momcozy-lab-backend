@@ -1,6 +1,6 @@
 # Product Backend — US-East UAT (B) single-host strategy
 
-Decision: 2026-09-30. Updated 2026-10-02. B has a guarded first-release
+Decision: 2026-09-30. Code/manifest note updated 2026-10-22; dated host observations below remain historical. B has a guarded first-release
 orchestrator but has not been exercised on the target host; subsequent
 update/rollback remain separate unfinished work. Retired Kubernetes workloads
 and migration Job templates were removed. A's root Dockerfile, Compose
@@ -13,8 +13,8 @@ call A's `staging` release entrypoint.
   PostgreSQL, one Redis and one MinIO service and their **B-only named volumes**.
   The B-only PostgreSQL init revokes PUBLIC CONNECT on each application DB;
   this init runs only on a new volume, not on existing data.
-  Product API, notification worker, auth-email worker and a one-shot migration
-  container use the same immutable Backend image digest.
+  Product API, notification worker, auth-email worker, a fail-closed stool-photo
+  cleanup/review worker and a one-shot migration container use the same immutable Backend image digest.
 - PostgreSQL contains `momcozy_lab_backend_uat` and
   `momcozy_lab_agent_uat` as separate databases/roles. The Agent Compose
   project joins the B network; it does **not** start another stateful stack.
@@ -169,7 +169,10 @@ call A's `staging` release entrypoint.
   action; the future runner must recheck under the B release lock immediately
   before switching services. On the *first empty* B deployment, migrate both
   databases with separate DDL roles, prove the fresh recovery of both databases
-  and shared stores, then start and check Product API and both workers. Activate
+  and shared stores, then start and check Product API and all three workers. The stool-photo
+  worker has image understanding forcibly disabled in B Compose; it can process
+  explicit deletion tombstones but cannot approve or send a child image to a
+  third party before privacy/policy sign-off. Activate
   Agent **after** Product is publicly healthy.
   Keep B-specific rollback and schema-compatibility gates; do not downgrade
   databases automatically. Verify `/v1/health/ready` and real UAT mail flow.

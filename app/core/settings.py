@@ -106,6 +106,9 @@ class Settings:
     voice_request_timeout_seconds: int = 30
     vision_provider: str = "disabled"
     vision_openai_model: str = "gpt-5.4-mini"
+    stool_specialty_market: str = ""  # Explicit deployment region, not inferred from App or S3.
+    stool_photo_review_provider: str = "disabled"
+    stool_photo_third_party_approved: bool = False
     vision_request_timeout_seconds: float = 20.0
     log_level: str = "INFO"
 
@@ -205,6 +208,9 @@ class Settings:
                 cls.voice_request_timeout_seconds,
             ),
             vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
+            stool_specialty_market=_env("STOOL_SPECIALTY_MARKET", cls.stool_specialty_market).upper(),
+            stool_photo_review_provider=_env("STOOL_PHOTO_REVIEW_PROVIDER", cls.stool_photo_review_provider).lower(),
+            stool_photo_third_party_approved=_env_bool("STOOL_PHOTO_THIRD_PARTY_APPROVED", cls.stool_photo_third_party_approved),
             vision_openai_model=_env("VISION_OPENAI_MODEL", cls.vision_openai_model),
             vision_request_timeout_seconds=_env_float(
                 "VISION_REQUEST_TIMEOUT_SECONDS",
@@ -354,6 +360,12 @@ class Settings:
             errors.append("VOICE_TTS_FIRST_CHUNK_TIMEOUT_SECONDS must be positive")
         if self.voice_request_timeout_seconds < 1:
             errors.append("VOICE_REQUEST_TIMEOUT_SECONDS must be positive")
+        if self.stool_specialty_market not in {"", "CN", "US"}:
+            errors.append("STOOL_SPECIALTY_MARKET must be empty, CN or US")
+        if self.stool_photo_review_provider not in {"disabled", "decisions"}:
+            errors.append("STOOL_PHOTO_REVIEW_PROVIDER must be disabled or decisions")
+        if self.stool_photo_review_provider == "decisions" and (not self.stool_photo_third_party_approved or not self.openai_api_key):
+            errors.append("STOOL_PHOTO_REVIEW_PROVIDER=decisions requires third-party approval and OPENAI_API_KEY")
         if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
             errors.append(f"VISION_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}")
         if self.vision_provider == "openai" and not self.openai_api_key:
