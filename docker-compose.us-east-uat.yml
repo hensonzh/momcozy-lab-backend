@@ -11,6 +11,8 @@ x-backend-image: &backend-image
     APP_ENV: ${APP_ENV:?Set APP_ENV}
     SSL_CERT_FILE: /run/momcozy/trust-bundle.pem
     AUTH_REQUIRE_ACTIVE_SESSION: "true"
+    STOOL_PHOTO_REVIEW_PROVIDER: "disabled"
+    STOOL_PHOTO_THIRD_PARTY_APPROVED: "false"
     DATABASE_URL: postgresql+asyncpg://${MOMCOZY_PRODUCT_POSTGRES_USER:?Set MOMCOZY_PRODUCT_POSTGRES_USER}:${MOMCOZY_PRODUCT_POSTGRES_PASSWORD:?Set MOMCOZY_PRODUCT_POSTGRES_PASSWORD}@postgres:5432/${MOMCOZY_PRODUCT_POSTGRES_DB:?Set MOMCOZY_PRODUCT_POSTGRES_DB}
     REDIS_URL: redis://product-backend:${MOMCOZY_PRODUCT_REDIS_PASSWORD:?Set MOMCOZY_PRODUCT_REDIS_PASSWORD}@redis:6379/0
     OBJECT_STORAGE_BUCKET: ${MOMCOZY_PRODUCT_MINIO_BUCKET:?Set MOMCOZY_PRODUCT_MINIO_BUCKET}
@@ -99,6 +101,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+  stool-photo-review-worker:
+    <<: *backend-image
+    command: python -m app.workers.stool_photo_reviews
+    restart: unless-stopped
+    init: true
+    cpus: 0.25
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
   postgres:
     image: postgres:16@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
     restart: unless-stopped

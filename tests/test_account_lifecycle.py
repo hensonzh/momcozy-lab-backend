@@ -20,6 +20,9 @@ from app.modules.auth.repository import AuthAccountRepository, AuthSessionReposi
 from app.modules.auth.router import get_account_lifecycle_service
 from app.modules.auth.service import AuthSessionService
 from app.modules.users.models import AuthIdentity, User
+from app.modules.stool_photos.models import StoolPhoto
+from app.modules.stool_analyses.models import StoolAnalysis, StoolAnalysisPhoto
+from app.modules.baby.profile_models import BabyProfile
 from tests.auth_key_material import auth_settings
 
 PASSWORD = 'correct-password-123'
@@ -49,7 +52,7 @@ async def account_case(database_url=None):
     else:
         engine = create_async_engine('sqlite+aiosqlite:///:memory:')
     async with engine.begin() as connection:
-        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__, AuthIdentity.__table__, DeviceSession.__table__, RefreshToken.__table__, EmailChallenge.__table__, AccountDeletionRequest.__table__, AuthEmailDelivery.__table__]))
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[User.__table__, AuthIdentity.__table__, DeviceSession.__table__, RefreshToken.__table__, EmailChallenge.__table__, AccountDeletionRequest.__table__, AuthEmailDelivery.__table__, StoolPhoto.__table__, BabyProfile.__table__, StoolAnalysis.__table__, StoolAnalysisPhoto.__table__]))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     clock = [datetime.now(timezone.utc)]
     mail = Mailbox()
@@ -301,4 +304,71 @@ def test_registration_precheck_expires_without_issuing_a_session():
                 user = await AuthAccountRepository(session).get_user_by_email(email='mia@example.com')
                 assert user is not None and user.status == 'email_unverified'
                 assert await session.scalar(select(func.count()).select_from(DeviceSession)) == 0
+    asyncio.run(run())
+
+
+def test_account_deletion_revokes_private_stool_photo_reviews_in_same_transaction():
+    from app.workers.stool_photo_reviews import process_next, purge_deleted
+    from tests.test_stool_photo_service import Storage, Provider
+    from app.modules.stool_photos.review import require_approved_photos
+
+    async def run():
+        async with account_case() as (sessions, lifecycle, _mail, clock, _settings):
+            # The account fixture includes the private photo table.
+            owner, other = uuid4(), uuid4()
+            photo_id, other_id = uuid4(), uuid4()
+            baby_id, other_baby_id = uuid4(), uuid4()
+            analysis_id, other_analysis_id = uuid4(), uuid4()
+            store = Storage()
+            async with sessions.begin() as session:
+                session.add_all([User(id=owner), User(id=other)])
+                session.add_all([BabyProfile(id=baby_id, owner_user_id=owner, name='Synthetic'),
+                                 BabyProfile(id=other_baby_id, owner_user_id=other, name='Other synthetic')])
+                session.add_all([StoolAnalysis(id=analysis_id, owner_user_id=owner, baby_id=baby_id,
+                    thread_id=uuid4(), status='completed', result_schema_version='stool.result.v1',
+                    final_result={'color': 'synthetic'}, result_validated_at=clock[0], completed_at=clock[0],
+                    context_expires_at=clock[0] + timedelta(hours=1),
+                    baby_context_snapshot_id=uuid4(), market='US', language='en',
+                    baby_profile_version=1, baby_birth_date=clock[0].date(),
+                    baby_feeding_mode='unknown', context_captured_at=clock[0]),
+                    StoolAnalysis(id=other_analysis_id, owner_user_id=other, baby_id=other_baby_id,
+                    thread_id=uuid4(), status='completed', result_schema_version='stool.result.v1',
+                    final_result={'color': 'other synthetic'}, result_validated_at=clock[0], completed_at=clock[0],
+                    context_expires_at=clock[0] + timedelta(hours=1),
+                    baby_context_snapshot_id=uuid4(), market='CN', language='zh',
+                    baby_profile_version=1, baby_birth_date=clock[0].date(),
+                    baby_feeding_mode='unknown', context_captured_at=clock[0])])
+                session.add_all([
+                    StoolPhoto(id=photo_id, owner_user_id=owner, object_key=f'users/{owner}/stool/original',
+                               sha256='a'*64, content_type='image/png', size_bytes=1,
+                               width=720, height=720, review_status='passed', review_sha256='a'*64,
+                               review_attempt=1, reason_codes=[], policy_version='test-v1'),
+                    StoolPhoto(id=other_id, owner_user_id=other, object_key=f'users/{other}/stool/original',
+                               sha256='b'*64, content_type='image/png', size_bytes=1,
+                               width=720, height=720, review_status='passed', review_sha256='b'*64,
+                               review_attempt=1, reason_codes=[], policy_version='test-v1'),
+                ])
+            store.values[f'users/{owner}/stool/original'] = b'a'
+            store.values[f'users/{other}/stool/original'] = b'b'
+            async with sessions.begin() as session:
+                user = await AuthAccountRepository(session).get_user(user_id=owner)
+                await lifecycle(session).delete_account(user=user)
+                own = await session.get(StoolPhoto, photo_id)
+                untouched = await session.get(StoolPhoto, other_id)
+                assert own.deleted_at is not None and own.review_status == 'failed'
+                assert own.review_sha256 is None and own.review_expires_at is None
+                assert untouched.deleted_at is None and untouched.review_status == 'passed'
+                own_analysis = await session.get(StoolAnalysis, analysis_id)
+                other_analysis = await session.get(StoolAnalysis, other_analysis_id)
+                assert own_analysis.revoked_at is not None and own_analysis.final_result is None
+                assert own_analysis.baby_context_snapshot_id is None and own_analysis.baby_birth_date is None
+                assert own_analysis.baby_feeding_mode is None and own_analysis.market is None
+                assert other_analysis.baby_context_snapshot_id is not None
+                assert other_analysis.revoked_at is None and other_analysis.final_result == {'color': 'other synthetic'}
+                with pytest.raises(ApiError):
+                    require_approved_photos([own], owner)
+            assert await purge_deleted(sessions, store)
+            assert f'users/{owner}/stool/original' not in store.values
+            assert f'users/{other}/stool/original' in store.values
+            assert not await process_next(sessions, store, Provider('passed'))
     asyncio.run(run())

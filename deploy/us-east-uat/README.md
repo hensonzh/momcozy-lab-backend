@@ -29,7 +29,7 @@ must not be run on existing state. For existing services, use
 `scripts/north_america_update_release.py --operation update` or `rollback`
 without `--apply` to inspect admission first. Schema-changing releases and
 unproven restore have no automatic path. A failed release requires inspection,
-not blind rerun. Product must be healthy before Agent activation. Complete only
+not blind rerun. Product must be healthy before Agent activation. The optional stool-photo-review-worker runs with image understanding disabled and may process explicit deletion tombstones only; require privacy/policy approval before enabling third-party image review. Complete only
 after public HTTPS readiness, worker checks and client-facing smoke pass.
 
 This handoff describes repository contracts. It does not assert what is

@@ -108,6 +108,16 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | DELETE | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Delete Personal |
 | PATCH | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Update Personal |
 | POST | `/v1/speech/transcribe-chunk` | voice | flutter | stable | Transcribe Speech Chunk |
+| GET | `/v1/stool-analyses` | stool-analyses | flutter | stable | List Stool Analyses |
+| POST | `/v1/stool-analyses` | stool-analyses | flutter | stable | Submit Stool Analysis |
+| DELETE | `/v1/stool-analyses/{analysis_id}` | stool-analyses | flutter | stable | Delete Stool Analysis |
+| GET | `/v1/stool-analyses/{analysis_id}` | stool-analyses | flutter | stable | Get Stool Analysis |
+| GET | `/v1/stool-analyses/{analysis_id}/photos` | stool-analyses | flutter | stable | List Stool Analysis Photos |
+| GET | `/v1/stool-analyses/{analysis_id}/photos/{photo_id}/thumbnail` | stool-analyses | flutter | stable | Get Stool Analysis Thumbnail |
+| POST | `/v1/stool-photos` | stool-photos | flutter | stable | Upload Stool Photo |
+| GET | `/v1/stool-photos/capability` | stool-photos | flutter | stable | Stool Photo Capability |
+| DELETE | `/v1/stool-photos/{photo_id}` | stool-photos | flutter | stable | Delete Stool Photo |
+| GET | `/v1/stool-photos/{photo_id}/review` | stool-photos | flutter | stable | Get Stool Photo Review |
 
 ## runtime_stream_api
 
@@ -116,6 +126,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/files/{file_id}/vision/events/stream` | files | flutter | stable | Stream File Vision Events |
 | GET | `/v1/realtime-voice-stream` | voice | flutter | deprecated | Realtime Voice Stream Use POST to keep synthesized text out of URLs. |
 | POST | `/v1/realtime-voice-stream` | voice | flutter | stable | Private Realtime Voice Stream |
+| GET | `/v1/stool-analyses/{analysis_id}/events/stream` | stool-analyses | flutter | stable | Stream Stool Analysis Events |
 
 ## internal_service_api
 
@@ -132,6 +143,7 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | POST | `/v1/internal/agent/records/batch` | profiles | agent-runtime | stable | Write Agent Records |
 | GET | `/v1/internal/agent/schedule` | profiles | agent-runtime | stable | Read Agent Schedule |
 | POST | `/v1/internal/agent/schedule/batch` | profiles | agent-runtime | stable | Write Agent Schedule |
+| POST | `/v1/internal/agent/stool-analyses/context/resolve` | stool-analyses | agent-runtime | stable | Resolve Stool Context |
 
 ## admin_ops_api
 

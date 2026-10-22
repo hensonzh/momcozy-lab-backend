@@ -1,0 +1,272 @@
+{
+  "components": {
+    "schemas": {
+      "AnalysisInput": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_id": {
+            "format": "uuid",
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "baby_context": {
+            "$ref": "#/components/schemas/BabyContext"
+          },
+          "language": {
+            "enum": [
+              "zh",
+              "en"
+            ],
+            "title": "Language",
+            "type": "string"
+          },
+          "market": {
+            "enum": [
+              "CN",
+              "US"
+            ],
+            "title": "Market",
+            "type": "string"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/PhotoInput"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Photos",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": "stool.analyze.synthetic.v1",
+            "title": "Schema Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "analysis_id",
+          "market",
+          "language",
+          "baby_context",
+          "photos"
+        ],
+        "title": "AnalysisInput",
+        "type": "object"
+      },
+      "BabyContext": {
+        "additionalProperties": false,
+        "properties": {
+          "baby_context_snapshot_id": {
+            "format": "uuid",
+            "title": "Baby Context Snapshot Id",
+            "type": "string"
+          },
+          "birth_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Birth Date"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "feeding_mode": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Feeding Mode",
+            "type": "string"
+          },
+          "profile_version": {
+            "minimum": 1.0,
+            "title": "Profile Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "baby_context_snapshot_id",
+          "profile_version",
+          "birth_date",
+          "feeding_mode",
+          "captured_at"
+        ],
+        "title": "BabyContext",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "PhotoInput": {
+        "additionalProperties": false,
+        "properties": {
+          "jpeg_b64": {
+            "maxLength": 3000000,
+            "title": "Jpeg B64",
+            "type": "string"
+          },
+          "original_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Original Sha256",
+            "type": "string"
+          },
+          "photo_id": {
+            "format": "uuid",
+            "title": "Photo Id",
+            "type": "string"
+          },
+          "position": {
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "photo_id",
+          "position",
+          "original_sha256",
+          "jpeg_b64"
+        ],
+        "title": "PhotoInput",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Stool Specialty Service",
+    "version": "0.2.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "health_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Healthz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
+    "/v1/analyze/stream": {
+      "post": {
+        "operationId": "analyze_stream_v1_analyze_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Analysis unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Analyze Stream"
+      }
+    }
+  }
+}
