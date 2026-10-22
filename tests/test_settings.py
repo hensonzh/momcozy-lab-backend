@@ -679,3 +679,11 @@ def test_production_rejects_local_stub_vision_provider() -> None:
 
     with pytest.raises(ValueError, match="VISION_PROVIDER=local_stub"):
         settings.validate_for_startup()
+
+
+def test_specialty_market_is_explicit_and_restricted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STOOL_SPECIALTY_MARKET", "us")
+    assert Settings.from_env().stool_specialty_market == "US"
+    assert Settings().stool_specialty_market == ""
+    with pytest.raises(ValueError, match="STOOL_SPECIALTY_MARKET"):
+        Settings(stool_specialty_market="EU").validate_for_startup()

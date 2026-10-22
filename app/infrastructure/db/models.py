@@ -5,6 +5,8 @@ from ...modules.auth import models as auth_models
 from ...modules.devices import models as devices_models
 from ...modules.files import models as files_models
 from ...modules.cry_analysis import models as cry_analysis_models
+from ...modules.stool_photos import models as stool_photos_models
+from ...modules.stool_analyses import models as stool_analyses_models
 from ...modules.invites import models as invites_models
 from ...modules.notifications import models as notifications_models
 from ...modules.onboarding import models as onboarding_models
@@ -25,6 +27,8 @@ __all__ = [
     "devices_models",
     "files_models",
     "cry_analysis_models",
+    "stool_photos_models",
+    "stool_analyses_models",
     "invites_models",
     "notifications_models",
     "onboarding_models",

@@ -14,3 +14,5 @@ pwdlib[argon2]==0.3.0
 email-validator==2.3.0
 httpx==0.28.1
 google-auth[requests]==2.57.1
+Pillow==12.3.0
+pillow-heif==1.8.1

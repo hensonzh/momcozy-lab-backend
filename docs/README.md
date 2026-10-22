@@ -18,6 +18,13 @@ workers, and evals belong to the independently deployed Agent Runtime repository
 - `flutter-smoke-flows.json`: Product Backend API mobile smoke scenarios.
 - `vision-provider-integration.md`: owner-scoped schedule screenshot preview
   contract.
+- `stool-specialty-delivery-plan.md`: sequenced implementation, owner boundaries, evidence-based gates, and current blockers.
+- `stool-specialty-transport.md`: synthetic-only Product-to-specialty derived-JPEG input and nonmedical stream schema; no medical result.
+- `stool-specialty-network-contract.md`: standalone stateless synthetic stream, one Product-owned task ledger, scoped service identity, and remaining release gates. The new service is not published or deployed.
+- `stool-photo-service-contract.md`: staged stool review / specialty analysis
+  contract and release gates.
+- `stool-photo-review-operations.md`: implemented photo-review slice, worker
+  operation and fail-closed limitations (not production-ready).
 
 ## Operations
 

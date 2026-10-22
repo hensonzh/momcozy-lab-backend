@@ -14,6 +14,9 @@ from ...modules.auth.router import router as auth_router
 from ...modules.devices.router import router as devices_router
 from ...modules.files.router import router as files_router
 from ...modules.cry_analysis.router import router as cry_analysis_router, internal_router as agent_cry_analysis_router
+from ...modules.stool_photos.router import router as stool_photos_router
+from ...modules.stool_analyses.router import router as stool_analyses_agent_router
+from ...modules.stool_analyses.public_router import router as stool_analyses_public_router
 from ...modules.files.agent_router import router as agent_files_router
 from ...modules.files.model_asset_router import router as model_assets_router
 from ...modules.invites.router import router as invites_router
@@ -42,6 +45,9 @@ router.include_router(model_assets_router)
 router.include_router(files_router)
 router.include_router(cry_analysis_router)
 router.include_router(agent_cry_analysis_router)
+router.include_router(stool_photos_router)
+router.include_router(stool_analyses_public_router)
+router.include_router(stool_analyses_agent_router)
 router.include_router(agent_files_router)
 router.include_router(invites_router)
 router.include_router(notifications_router)

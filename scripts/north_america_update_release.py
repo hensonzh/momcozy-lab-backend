@@ -24,6 +24,7 @@ if str(SOURCE_ROOT) not in sys.path:
 
 from scripts.north_america_activate_first import (  # noqa: E402
     check_public_ready, check_ready, check_running_service_provenance, start_services,
+    stop_removed_review_worker,
 )
 from scripts.north_america_docker_context import require_local_docker  # noqa: E402
 from scripts.north_america_first_release import (  # noqa: E402
@@ -115,7 +116,7 @@ def verify_running(args: argparse.Namespace, manifest: dict[str, Any], source: P
     runtime = _runtime(args, source, manifest)
     verify_image(runtime.local_image, runtime.commit, args.service, runtime.image_id)
     check_running_service_provenance(runtime)
-    check_ready(args.service)
+    check_ready(args.service, source=source)
     check_public_ready(args.service)
 
 
@@ -222,7 +223,7 @@ def wait_api_healthy(runtime: argparse.Namespace) -> None:
 
 def start_checked(runtime: argparse.Namespace) -> None:
     start_services(runtime)
-    check_ready(runtime.service)
+    check_ready(runtime.service, source=runtime.source)
     wait_api_healthy(runtime)
     check_running_service_provenance(runtime)
     check_public_ready(runtime.service)
@@ -266,6 +267,7 @@ def perform(args: argparse.Namespace) -> None:
         raise ValueError("North America schema changed during backup; service switch refused")
     verify_running(args, current_manifest, current_source)
     try:
+        stop_removed_review_worker(args.service, old, desired)
         start_checked(desired)
         if args.operation == "update":
             payload = {"deployment_target": "north-america-staging", "service": args.service,
@@ -277,10 +279,17 @@ def perform(args: argparse.Namespace) -> None:
                 json.dump(payload, stream, sort_keys=True)
         switch_links(args.service, old.source, desired.source)
     except Exception as error:
+        stop_error = None
+        try:
+            stop_removed_review_worker(args.service, desired, old)
+        except Exception as exc:
+            stop_error = exc
         try:
             start_checked(old)
         except Exception as restore_error:
             raise ValueError("North America switch failed and prior service could not be restored; inspect before retry") from restore_error
+        if stop_error is not None:
+            raise ValueError("North America switch failed; optional worker may still be running; inspect before retry") from stop_error
         raise ValueError("North America switch failed; prior service restored, pointers left unchanged") from error
 
 
