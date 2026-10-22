@@ -49,7 +49,7 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
     second_infant = BabyProfile(
         id=second_infant_id,
         owner_user_id=owner_user_id,
-        name="Baby B",
+        name="Baby North America",
         sex="male",
         birth_date=date(2026, 5, 10),
     )
@@ -152,7 +152,7 @@ def test_lactation_context_supports_multiple_babies_and_derives_shared_age() -> 
             },
             {
                 "infant_id": str(second_infant_id),
-                "name": "Baby B",
+                "name": "Baby North America",
                 "is_current_delivery": True,
                 "birth_order": 2,
                 "sex": "male",
@@ -960,7 +960,7 @@ def test_profile_snapshot_applies_local_date_independently_to_two_babies() -> No
     owner, first, second = uuid4(), uuid4(), uuid4()
     maternal = MaternalProfile(id=uuid4(), owner_user_id=owner, latest_delivery_date=date(2026, 8, 1))
     babies = [BabyProfile(id=first, owner_user_id=owner, name="A"),
-              BabyProfile(id=second, owner_user_id=owner, name="B")]
+              BabyProfile(id=second, owner_user_id=owner, name="North America")]
     links = [(MaternalCurrentDeliveryInfant(maternal_profile_id=maternal.id,
               infant_id=baby.id, birth_order=index), baby)
              for index, baby in enumerate(babies, start=1)]
@@ -1003,7 +1003,7 @@ def test_current_run_profile_prefers_latest_app_growth_without_cross_baby_merge(
     maternal = MaternalProfile(id=uuid4(), owner_user_id=owner, latest_delivery_date=date(2026, 8, 1))
     babies = [
         BabyProfile(id=first, owner_user_id=owner, name="A", birth_date=date(2026, 8, 1)),
-        BabyProfile(id=second, owner_user_id=owner, name="B", birth_date=date(2026, 8, 1)),
+        BabyProfile(id=second, owner_user_id=owner, name="North America", birth_date=date(2026, 8, 1)),
     ]
     links = [
         (MaternalCurrentDeliveryInfant(maternal_profile_id=maternal.id, infant_id=baby.id, birth_order=index), baby)

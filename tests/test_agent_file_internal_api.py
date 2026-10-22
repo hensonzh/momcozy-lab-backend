@@ -367,17 +367,6 @@ def test_legacy_local_image_endpoint_remains_compatible_but_not_available_in_sta
     assert client.get(path, params=params, headers={"X-Service-Key": SERVICE_KEY}).status_code == 404
 
 
-def test_model_asset_bytes_endpoint_is_unavailable_in_production() -> None:
-    from app.modules.files.agent_router import get_agent_model_bytes_service
-    file_object = _file_object(content_type="image/png")
-    app = _app()
-    app.state.settings = Settings(app_env="production", agent_runtime_service_api_key=SERVICE_KEY)
-    app.dependency_overrides[get_agent_model_bytes_service] = lambda: None
-    response = TestClient(app).get(f"/v1/internal/agent/files/{file_object.id}/model-asset",
-        params={"actor_user_id": str(file_object.owner_user_id), "purpose": "model_image"}, headers={"X-Service-Key": SERVICE_KEY})
-    assert response.status_code == 404
-
-
 class OwnerScopedFakeFileRepository(FakeFileRepository):
     async def get_for_owner(self, *, file_id: UUID, owner_user_id: UUID) -> object | None:
         if self.file_object is None or self.file_object.id != file_id or self.file_object.owner_user_id != owner_user_id:
@@ -439,7 +428,7 @@ def test_audio_model_bytes_revalidate_owner_and_size_before_read() -> None:
         asyncio.run(service.fetch(owner_user_id=file_object.owner_user_id, file_id=file_object.id, purpose="model_audio"))
 
 
-def test_production_audio_model_bytes_requires_service_identity_and_owner() -> None:
+def test_staging_audio_model_bytes_requires_service_identity_and_owner() -> None:
     from app.modules.files.agent_router import get_agent_model_bytes_service
 
     file_object = _file_object(content_type="audio/wav")
@@ -448,7 +437,7 @@ def test_production_audio_model_bytes_requires_service_identity_and_owner() -> N
         object_storage=FakeObjectStorage(), max_bytes=10 * 1024 * 1024,
     )
     app = _app()
-    app.state.settings = Settings(app_env="production", agent_runtime_service_api_key=SERVICE_KEY)
+    app.state.settings = Settings(app_env="staging", agent_runtime_service_api_key=SERVICE_KEY)
     app.dependency_overrides[get_agent_model_bytes_service] = lambda: service
     client = TestClient(app)
     path = f"/v1/internal/agent/files/{file_object.id}/model-asset"
@@ -461,4 +450,4 @@ def test_production_audio_model_bytes_requires_service_identity_and_owner() -> N
     assert result.headers["content-type"] == "audio/wav"
     assert result.headers["cache-control"] == "private, no-store"
     assert service.object_storage.keys == [file_object.object_key]
-    assert client.get(path, params={**params, "purpose": "model_image"}, headers={"X-Service-Key": SERVICE_KEY}).status_code == 404
+    assert client.get(path, params={**params, "purpose": "model_image"}, headers={"X-Service-Key": SERVICE_KEY}).status_code == 422

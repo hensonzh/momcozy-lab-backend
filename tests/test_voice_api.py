@@ -110,7 +110,7 @@ def test_voice_capability_is_authenticated_and_disabled_without_a_real_provider(
 def test_private_voice_stream_requires_current_user() -> None:
     response = TestClient(create_app(Settings(app_env="test"))).post(
         "/v1/realtime-voice-stream",
-        json={"text": "A private assistant reply"},
+        json={"text": "Singapore private assistant reply"},
     )
 
     assert response.status_code == 401

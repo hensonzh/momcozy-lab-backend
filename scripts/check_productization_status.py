@@ -59,7 +59,7 @@ def _check_required_files(root: Path) -> list[CheckResult]:
         "docker-compose.deploy.yml",
         "deploy/shared/init-postgres.sh",
         "scripts/release.py",
-        ".github/workflows/backend-delivery.yml",
+        ".github/workflows/backend-singapore-delivery.yml",
         "scripts/check_database_profile.py",
         "scripts/check_redis_profile.py",
         "scripts/check_object_storage_profile.py",
@@ -89,13 +89,6 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
             "OBJECT_STORAGE_PROVIDER=minio",
             "AUTH_JWT_ISSUER=momcozy-staging",
             "OBJECT_STORAGE_ENDPOINT_URL=http://minio:9000",
-        ],
-        "env/production.env.example": [
-            "APP_ENV=production",
-            "MOMCOZY_NETWORK_NAME=momcozy-lab-production",
-            "MOMCOZY_PRODUCT_POSTGRES_DB=momcozy_production",
-            "OBJECT_STORAGE_PROVIDER=minio",
-            "AUTH_JWT_ISSUER=momcozy-production",
         ],
     }
     common = [
@@ -194,7 +187,6 @@ def _check_makefile(root: Path) -> list[CheckResult]:
         "backend-smoke:",
         "backend-deploy-validate:",
         "backend-staging-config:",
-        "backend-production-config:",
         "scripts/check_redis_profile.py",
         "scripts/check_product_asset_storage.py",
     ]

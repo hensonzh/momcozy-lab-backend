@@ -27,7 +27,7 @@ def test_verified_login_issues_standard_user_permissions() -> None:
     assert principal.user_id == user.id
 
 
-def test_b_invite_login_rejects_even_managed_codes_without_issuing_tokens() -> None:
+def test_north_america_invite_login_rejects_even_managed_codes_without_issuing_tokens() -> None:
     account_repository = FakeAccountRepository()
     session_service = FakeSessionService()
     invite_repository = FakeInviteCodeRepository(invite_code=InviteCode(code="MCZ-ABCD-2345", status="active"))
@@ -47,7 +47,7 @@ def test_b_invite_login_rejects_even_managed_codes_without_issuing_tokens() -> N
     assert account_repository.created_identity is None
     assert session_service.created_user_id is None
 
-def test_b_email_login_still_works_without_invite_login() -> None:
+def test_north_america_email_login_still_works_without_invite_login() -> None:
     user = User(id=uuid4(), status="active")
     identity = AuthIdentity(user_id=user.id, user=user, provider="email", subject="test@example.com", password_hash=hash_password("secret123"))
     service = AuthAccountService(

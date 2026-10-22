@@ -236,7 +236,7 @@ def test_repeat_delivery_tracks_prior_history_separately_from_current_birth():
         async with database() as (sessions, _booking, _clock, _provider, owners, _episodes):
             data = OnboardingProfileInput.model_validate(payload(
                 delivery_count=2, has_cesarean_history=False, infant_count=2,
-                infants=[{"nickname": "A", "sex": "female"}, {"nickname": "B", "sex": "male"}],
+                infants=[{"nickname": "A", "sex": "female"}, {"nickname": "North America", "sex": "male"}],
             ))
             async with sessions.begin() as session:
                 result = await OnboardingService(session).confirm(owners[0], data, "repeat")
@@ -246,7 +246,7 @@ def test_repeat_delivery_tracks_prior_history_separately_from_current_birth():
                 assert mother is not None and mother.delivery_count == 2
                 assert mother.latest_delivery_method == "cesarean" and mother.has_cesarean_history is False
                 babies = list((await session.scalars(select(BabyProfile).where(BabyProfile.owner_user_id == owners[0]).order_by(BabyProfile.name))).all())
-                assert [baby.name for baby in babies] == ["A", "B"]
+                assert [baby.name for baby in babies] == ["A", "North America"]
                 assert [baby.birth_date for baby in babies] == [data.delivery_date, data.delivery_date]
     asyncio.run(run())
 

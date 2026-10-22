@@ -15,7 +15,7 @@
 | --- | --- |
 | Flutter App | `app/lib/core/auth/momcozy_auth_api.dart`、`app/lib/features/auth/presentation/auth_page.dart` 有注册、验码、登录、重置流程；App **不**直接调用 Resend，也不能内置 API key。 |
 | Product Backend | `app/modules/auth/router.py`、`account_lifecycle.py` 管理挑战和会话；`app/modules/auth/email.py` 加密入队、通过 SMTP STARTTLS 发出；`scripts/deliver_auth_emails.py` 为 worker。以上 Backend 路径相对 `backend/`。 |
-| 部署拓扑 | `backend/docker-compose.deploy.yml` 有 `api` 与 `auth-email-worker`；两者从目标环境同一私有服务 env 读取配置。`env/staging.env.example` / `env/production.env.example` 只有占位值。 |
+| 部署拓扑 | `backend/docker-compose.deploy.yml` 有 `api` 与 `auth-email-worker`；两者从目标环境同一私有服务 env 读取配置。新加坡 `env/staging.env.example` 与北美 `env/us-east-uat.env.example` 只有占位值。 |
 | Resend 适配 | 现有 SMTP 实现适合 `smtp.resend.com:587`、用户名 `resend`、密码为 Sending access API key；**不支持直接把隐式 TLS 端口 465 填入当前 STARTTLS 实现**。`backend/tests/test_auth_email_smtp.py` 是伪 SMTP 测试，不发真实邮件。 |
 | 本地测试 | 2026-09-27：Backend 邮箱相关测试 **86 通过、2 跳过**；App 定向认证测试 **42 通过**。均未证明真实 Resend 投递、实际 iOS 安装包或当前 staging 云端闭环。 |
 | 工作区 | 2026-09-27 检查时 Backend 与 App 都有**其他未提交变更**，含认证契约改动；本清单配套文档和 SMTP 测试是在交接过程中准备的，接手时应确认它们在所用分支中可见。不要覆盖/清理，也不要将未提交改动当作可发布源码。 |

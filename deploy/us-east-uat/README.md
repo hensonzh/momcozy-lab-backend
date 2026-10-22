@@ -1,374 +1,82 @@
-# Product Backend — US-East UAT (B) single-host strategy
+# North America staging — Product Backend host handoff
 
-Decision: 2026-09-30. Updated 2026-10-02. B has a guarded first-release
-orchestrator but has not been exercised on the target host; subsequent
-update/rollback remain separate unfinished work. Retired Kubernetes workloads
-and migration Job templates were removed. A's root Dockerfile, Compose
-files, private env and GitHub delivery workflow remain unchanged; B must not
-call A's `staging` release entrypoint.
+Updated: 2026-10-20. This is a regional deployment target, not another
+runtime environment: `APP_ENV=staging` and `deployment_target` is
+`north-america-staging`. The release source is a clean, verified `main` commit
+with an immutable image digest. `deploy/us-east-uat/release-source.json` is the
+machine-readable source declaration. A successful
+`backend-north-america-validation.yml` image build is **not** host deployment.
 
-## Ownership and isolation
+The host layout remains `/opt/momcozy-lab-us-east-uat`; this is a physical path,
+not a branch or an additional environment. Product owns its isolated
+PostgreSQL, Redis, MinIO buckets, network, TLS ingress and release lock.
+Agent joins that network with its own database/credentials. Use
+`docker-compose.us-east-uat.yml`, a mode-`0600` private Product env generated
+from `env/us-east-uat.env.example`, and a separate private target declaration
+based on `config/release-targets/north-america-staging.json.example`. Do not
+reuse Singapore env, secrets, certificates, Compose project or volumes.
 
-- The B Product Backend Compose project on the approved US-East host owns one
-  PostgreSQL, one Redis and one MinIO service and their **B-only named volumes**.
-  The B-only PostgreSQL init revokes PUBLIC CONNECT on each application DB;
-  this init runs only on a new volume, not on existing data.
-  Product API, notification worker, auth-email worker and a one-shot migration
-  container use the same immutable Backend image digest.
-- PostgreSQL contains `momcozy_lab_backend_uat` and
-  `momcozy_lab_agent_uat` as separate databases/roles. The Agent Compose
-  project joins the B network; it does **not** start another stateful stack.
-  This is a new local PostgreSQL instance. **On 2026-10-01 the operator
-  confirmed that no historical RDS, Redis or S3 data needs migration.** Do
-  not connect to or copy those managed resources. First bootstrap must use
-  fresh B-only volumes, databases, Redis state and MinIO buckets.
-- Redis is one B service: Product and Agent both use DB 0 with existing
-  disjoint key prefixes. B-only ACL denies cross-service keys and DB-switching
-  commands; Redis ACL does not provide database-level tenant isolation. Test
-  Lua/Stream/lock behavior against a running B container before release. MinIO is one B service with two
-  private buckets and separately scoped credentials. No external RDS,
-  ElastiCache or managed S3 endpoint belongs in B's private env.
-- Use distinct B Compose project names, network, port binds, release root,
-  lock and 0600 private env files; do not mount or modify A's data volumes.
-  Expose only the two API loopback ports to a B-specific TLS reverse proxy.
-  The B HTTPS origins are
-  `https://backend-us-dev.lute-momcozylab.luteos.cloud` and
-  `https://agent-us-dev.lute-momcozylab.luteos.cloud`; both DNS A records
-  resolved to `32.199.186.149` on 2026-10-01. DNS alone is not an ingress or
-  certificate check: HTTPS :443 timed out from the operator Mac and target.
-  On 2026-10-01 a fresh read-only EC2 inspection of the **attached**
-  `launch-wizard-25` security group found no inbound TCP 80 or 443 rules.
-  Independent short-lived listeners on both ports on the B host still timed
-  out from the operator Mac; UFW was inactive and the host INPUT policy was
-  ACCEPT. Coordinate an approved 80/443 ingress change and re-test before
-  attempting HTTP-01 issuance or enabling the HTTPS reverse proxy.
-  The B containers mount the host's system CA bundle for outbound HTTPS;
-  this does not install an ingress TLS certificate or prove public trust.
-  The versioned, **not installed** B ingress template is
-  `deploy/us-east-uat/nginx-backend.conf`: it listens on :443 with this
-  hostname and proxies only to `127.0.0.1:8001`. Agent uses `127.0.0.1:8002`.
-  These are host-loopback Docker port publishes, not public port exposures.
-  It names a future public
-  certificate under `/etc/letsencrypt/live/`; the file is not present yet.
-  Install the trusted B-only HTTPS site *before* the first-release runner:
-  Nginx may return 502 until the upstream is activated, which is **not**
-  readiness. The runner checks the public certificate before touching B state
-  and checks real HTTP readiness after each activation. This avoids requiring
-  a running API as a prerequisite for installing its own reverse proxy. Do
-  not enable a fake/self-signed public endpoint to bypass TLS verification.
-  PostgreSQL, Redis and MinIO must not expose public host ports. Build the
-  pinned MinIO source image for this B tag before first bootstrap:
-  `docker build --platform linux/amd64 -f deploy/us-east-uat/Minio.Dockerfile -t momcozy-us-east-uat-minio:9e49d5e7a648f00e deploy/shared`.
-  Do not substitute a mutable public image tag.
-- Before the **first** stateful bootstrap, run the read-only
-  `python scripts/check_b_fresh_bootstrap.py` on the target with Docker access.
-  It refuses any named or Compose-labeled B volumes, network or containers,
-  including stopped ones. On 2026-10-01 an equivalent target-host check found
-  none. This check does not inspect arbitrary unlabelled disk paths, cannot
-  justify deleting a conflicting resource, and is not suitable for later
-  releases after B's stateful stack exists.
+Static admission: `python scripts/check_north_america_env.py --env-file
+<private-backend-env>` and `python scripts/north_america_release.py --help`.
+These checks must not print secrets or mutate the host. Verify exact source
+commit, image digest/labels, Product–Agent contracts, host identity, schema,
+backups, isolated restore, ingress/TLS and public readiness independently.
 
-## Release handoff
+On a **verified empty** host only, the guarded
+`scripts/north_america_first_release.py --preflight` can assess first-release
+prerequisites; its `--apply` path needs a separate explicit authorization and
+must not be run on existing state. For existing services, use
+`scripts/north_america_update_release.py --operation update` or `rollback`
+without `--apply` to inspect admission first. Schema-changing releases and
+unproven restore have no automatic path. A failed release requires inspection,
+not blind rerun. Product must be healthy before Agent activation. Complete only
+after public HTTPS readiness, worker checks and client-facing smoke pass.
 
-- B source: GitHub `dev`, declared in `release-source.json`. Build
-  from repo root with `docker build -f deploy/Dockerfile .`, pin the published
-  image digest and use a separate approved US-East host and release root.
-  `deploy/config_us-east-uat` is **non-secret defaults only**. B Compose and
-  private env templates now exist. The B-only GitHub `dev`
-  `backend-b-validation.yml` runs on GitHub `dev`; it checks contracts,
-  synthetic PostgreSQL/Redis isolation, two-database synthetic dump/restore,
-  Redis RDB and MinIO two-bucket synthetic backup/isolated restores, and
-  locally builds the B Dockerfile. After those gates pass on a GitHub `dev`
-  push, the separate `b-image` job publishes only the B Dockerfile image to
-  private GHCR as `b-dev-<full SHA>`, then inspects and runs offline checks
-  against the exact published digest before recording it. Verify the exact
-  commit's successful job and digest before release. It does not run migrations
-  against UAT or deploy; release integration and live validation remain.
-  B Compose requires `MOMCOZY_B_ENV_MARKER` so A env
-  cannot pass static rendering by accident; the read-only `scripts/check_b_env.py`
-  also verifies B identity, loopback ports, DB 0, private file mode and no
-  placeholders. The marker alone does not prove isolation. `scripts/release.py`
-  still refuses B deployment. New `scripts/b_release.py` is a B-only,
-  read-only admission check; it validates a clean `dev` source commit, immutable
-  image digest, private target declaration and private Backend env, then renders
-  B Compose without printing its contents. Its subprocess uses a B-only
-  allowlisted environment; mutating B host scripts explicitly bind Docker to
-  the local Unix socket and reject inherited remote context/host overrides.
-  Do not bypass them by running Compose from an interactive shell where A's
-  variables may override `--env-file`. The
-  admission validates Product/Agent shared credentials and B identities
-  before startup; it does not deploy and does not
-  prove the source-to-image label, CI provenance or target host state.
-- **First release only**: `scripts/b_first_release.py --preflight` is read-only;
-  it checks target identity, fresh Docker state, trusted TLS, local image
-  identities and the B backup bind mount without starting services. Once
-  independently reviewed, `scripts/b_first_release.py --apply` requires both
-  immutable image digest/commit pairs, the matching imported local OCI image
-  IDs, clean checked-out `dev` release directories, private B env/target files
-  and a pre-existing trusted public TLS ingress. It refuses any existing B
-  Compose state, then runs B-only infrastructure bootstrap, two Alembic
-  migrations, *fresh* PostgreSQL/Redis/MinIO isolated restores, Product
-  activation/public HTTPS readiness, and Agent activation/public readiness.
-  A private, dedicated first-release lock covers the whole sequence, while
-  the existing B stage lock remains unchanged. Any failed stage stops without
-  an automatic downgrade or deletion. Do not
-  rerun after partial state without an explicit recovery review. This entry
-  does not install Nginx/certificates or fetch/import images; use the approved
-  GHCR digest-to-OCI procedure first. Existing deployment and schema changes
-  still require a separate reviewed update/rollback runner. SMTP/model
-  provider E2E and 10-run load are independent acceptance checks, not gates
-  on creating App CI artifacts.
-- B self-hosted PostgreSQL and Redis Compose images and their isolated restore
-  drills use the same fixed Docker Hub digest. B's separate
-  `deploy/us-east-uat/Minio.Dockerfile` pins its Go/Alpine bases; A continues
-  using `deploy/shared/Minio.Dockerfile` unchanged. The local B MinIO tag is
-  accepted only after checking its upstream revision; record the actual B
-  image ID during target-host preflight and do not substitute a public tag.
-  The Go/Alpine bases are digest-pinned, but APK package resolution and the
-  MinIO build itself are not byte-for-byte reproducible; verify the target
-  image identity before stateful bootstrap.
-- The private Backend env must provide B-only credentials, service names and
-  URLs (Product `DATABASE_URL`, `REDIS_URL` ending `/0`, MinIO bucket and
-  scoped keys, JWT/service keys, Resend SMTP key). Use the same B identity
-  contract as Agent, not A's `env/staging.env`. Never commit a populated env,
-  credentials or generated Compose rendering to Git.
-- Run `python scripts/check_b_env.py --env-file /absolute/path/to/private-backend.env`
-  then the B-only read-only `scripts/b_release.py` admission, which renders
-  Compose with a restricted subprocess environment. Do not run raw `docker compose`
-  from an interactive shell: shell variables can override the private env.
-  Static checks do not verify provider connectivity, capacity or actual TLS.
-- Before starting application containers: initialize two DBs/roles, Redis
-  ACLs and two buckets; validate an isolated backup and restore plan. The
-  synthetic `scripts/check_b_infra_contract.sh` uses ephemeral local containers
-  and is **not** a persistent-data backup/restore rehearsal. A manifest of
-  checksums or an operator-entered restore claim is not evidence of a
-  successful isolated restore. `scripts/b_postgres_recovery.py --apply` is
-  prepared for the approved B host: it dumps the two B databases and
-  restores each on an isolated disposable PostgreSQL server to verify the
-  Alembic revision and writes mode-0600 checksummed evidence only after both
-  restores succeed. A local two-database synthetic drill passed and B CI
-  exercises the same drill on `dev`. It does not cover
-  MinIO, Redis live data, off-host retention or point-in-time restore.
-  `scripts/b_redis_recovery.py --apply` similarly acquires the B release lock,
-  checks the dedicated `/data` backup bind mount, captures a fresh RDB from the
-  B-owned Redis container without putting its ACL password in host arguments,
-  and verifies key count after restoring in a disposable no-network/no-volume
-  container. A Redis ACL/stream/lock synthetic contract test also runs; the
-  RDB drill has a separate CI synthetic test with Product/Agent keys. **Neither
-  synthetic drill proves a target-host backup or lossless recovery of live
-  changing data**; Redis AOF history is not preserved by the RDB copy.
-  Verified on-host PostgreSQL, Redis and MinIO backups with isolated
-  recovery remain release gates. Off-host retention is deferred and does not
-  block B release; do not mistake on-host backups for independent disaster
-  recovery. The first-release runner executes these gates only after target
-  preflight; it has not run on the host. The `scripts/check_b_rollback.py` is
-  read-only: it checks B-only release
-  symlinks/manifests, equal schema revisions and queries the B-owned
-  PostgreSQL container for the live Alembic revision. It does not check
-  client compatibility beyond the operator flag. This is **not** a rollback
-  action; the future runner must recheck under the B release lock immediately
-  before switching services. On the *first empty* B deployment, migrate both
-  databases with separate DDL roles, prove the fresh recovery of both databases
-  and shared stores, then start and check Product API and both workers. Activate
-  Agent **after** Product is publicly healthy.
-  Keep B-specific rollback and schema-compatibility gates; do not downgrade
-  databases automatically. Verify `/v1/health/ready` and real UAT mail flow.
-- This file does not authorize cloud or server changes. Host capacity was
-  measured but 10-run load is untested; HTTPS/TLS ingress, SMTP and provider authentication,
-  final bucket names, real secrets, stateful recovery,
-  and actual delivery behavior must still be verified before enabling B. Basic
-  TCP connections to `smtp.resend.com:587`, `api.openai.com:443` and
-  `ghcr.io:443` succeeded from the host; this does not verify provider
-  authentication or real email/model delivery.
+This handoff describes repository contracts. It does not assert what is
+currently deployed on a remote host; inspect that host before any release.
 
-Cross-repository plan: `app/docs/deployment/b-us-east-single-host-uat.md`.
+## Manual unified host delivery (repository gate; not a deployed state claim)
 
-## US-East B host preparation (observed 2026-10-01; not deployed)
+`backend-north-america-delivery.yml` is **workflow_dispatch on main only**;
+`backend-north-america-validation.yml` and
+`agent-north-america-validation.yml` publish images/CI digest artifacts only and
+never contact the host. The workflow defaults to admission (`apply=false`),
+serializes runs, and uses the `north-america-staging` GitHub Environment. Before
+using it, a repository administrator must independently configure protected
+`main` branch restrictions and required reviewers for that Environment (with
+self-approval disabled), and verify these protections are actually enforced.
+The Environment needs `NORTH_AMERICA_APPROVERS` (comma-separated GitHub logins),
+`NORTH_AMERICA_GH_READ_TOKEN` (read Actions/Packages for **both** repositories),
+`NORTH_AMERICA_GHCR_PULL_TOKEN` (read-only GHCR package pull), and the
+`NORTH_AMERICA_SSH_HOST`, `_PORT`, `_USER`, `_PRIVATE_KEY`, `_KNOWN_HOSTS`
+secrets. The pinned known-hosts key must be independently verified, not
+obtained by `ssh-keyscan` during release. Never commit these credentials.
 
-- JumpServer asset `32.199.186.149` was verified as
-  `ubuntu@ip-172-31-29-24` (Ubuntu 24.04.4, amd64, 16 vCPU, 61 GiB RAM).
-  `/` has 96 GiB and `/data` is a distinct 200 GiB XFS mount (about 197 GiB
-  free before B images). `sudo -n` worked. No A host or A volumes were touched.
-- Docker Engine 29.8.2 and Compose 5.5.1 were installed from Docker's signed
-  Ubuntu `noble` apt repository after checking its signing-key fingerprint.
-  `/etc/docker/daemon.json` sets `data-root` to
-  `/data/momcozy-lab-us-east-uat/docker`; containerd's separate image store
-  root is `/data/momcozy-lab-us-east-uat/containerd`. Both systemd units
-  require `/data` to be mounted. A disposable `hello-world` check passed.
-- The mode-0700 B root `/opt/momcozy-lab-us-east-uat` contains separate
-  `releases/backend`, `releases/agent`, `shared/backend`, `shared/agent`,
-  `current` and `previous` directories. The B release lock and both private
-  env and target JSON files are mode 0600. The approved B domains have been
-  entered in both private env and target declarations. On 2026-10-01, the
-  isolated host generated its own PostgreSQL, Redis, MinIO, JWT, email-token
-  and internal service credentials in the two mode-0600 env files. A rerun
-  did not rotate them. Later that day, Resend SMTP and the A-chain OpenAI key
-  were installed in B's private env without committing or printing their
-  values. SMTP/STARTTLS login and OpenAI `/v1/models` authentication passed
-  **from the B host**; no mail or model inference was sent. B now uses
-  regular email registration/login: `AUTH_INVITE_LOGIN_ENABLED=false`
-  and an empty `AUTH_INVITE_CODES`. After commit
-  `a9842f9c2bd591ece61c94308751c6dfc3cf7a64` passed B CI, the existing
-  private Backend env was updated in place without rotating credentials.
-  Backend and Agent static env checks, the cross-service pair check and B
-  Backend Compose quiet rendering passed. Both B HTTPS origins still time out;
-  no public certificate is on the host. Nginx and Certbot packages were
-  installed, but the package-default Nginx site was immediately stopped and
-  disabled; no B site was enabled. No services or B release pointers have
-  been started.
-- A dedicated systemd bind mount maps
-  `/data/momcozy-lab-us-east-uat/backups` to
-  `/opt/momcozy-lab-us-east-uat/backups`. Its covered mountpoint is mode 000
-  when not mounted. Before backup, verify `findmnt --mountpoint
-  /opt/momcozy-lab-us-east-uat/backups` and that `df -hT` resolves to `/data`;
-  `scripts/b_postgres_recovery.py` also fails closed if the bind mount/source
-  is unavailable. **This backup is on the same `/data` device as Docker and
-  stateful volumes, not an independent/off-host copy.** Off-host retention
-  is not required for B release as of 2026-10-01; providing it later still
-  requires a separate approved destination and recovery drill. A host or
-  shared-disk failure can lose both live data and these backups.
-- Clean GitHub `dev` snapshots were staged under each service's
-  `releases/<service>/<commit>`. The latest staged and locally built snapshots
-  after the B validation CI passed were Backend
-  `62ea6c0d29620d0ed07483c79abf80f3be58847a` and Agent
-  `a689e662a21e91bcb95d4180e671cd5869c94154`. An additional clean Backend
-  snapshot `b8339eb79f88bd590f360e61f9c38e5d5ef736b5` passed GitHub B
-  contract and B-image CI and was verified on the host for the one-time
-  credential script; it was **not deployed**. Earlier snapshots remain
-  untouched. Both B images carry their source revision label; the pinned MinIO
-  source image was also built. The B PostgreSQL/Redis synthetic isolation
-  check passed on this host with no persistent volumes or exposed ports.
-  **These locally tagged images are not GHCR digest references and do not
-  pass the B release admission.** The CI-published B images must be verified
-  separately by exact commit and digest before any use on the host. No
-  `current` pointer, business container,
-  database, bucket or public API has been started.
+The operator supplies the exact Product and Agent `main` commit IDs. The
+workflow confirms main ancestry, matching successful push CI contract/image
+jobs, and compares each GHCR image digest with the digest artifact produced by
+that exact CI run; missing/expired artifacts fail closed. The host must already
+have both source trees under `/opt/momcozy-lab-us-east-uat/releases/{backend,agent}/<commit>`
+as clean checked-out `main` commits (a current release may have only its
+validated generated manifest), a private env/target pair for each service,
+local Docker, pinned stateful images, verified backup storage and the documented
+regional layout. It must **not** stage checkouts, infer first-release from
+existing containers, initialize secrets, migrate schema during updates, or
+repair incomplete first releases automatically. An operator must independently
+inspect the host and choose `first-release` **only for a truly empty target**;
+otherwise use `update` or a client-compatible `rollback`. Product and Agent
+first-release is one operation; updates/rollbacks select a single service.
 
-## Private host handoff (placeholders created; not production configuration)
-
-- `scripts/prepare_b_host.py` remains an opt-in scaffold (`--apply`) for a
-  fresh host: it creates only B-only mode-0700 directories and mode-0600
-  placeholder files and refuses preexisting files. On this host the equivalent
-  layout and checksum-verified GitHub `dev` env placeholders were created
-  manually; **do not run the scaffold over them or treat them as configured**.
-
-- B-only layout template: `/opt/momcozy-lab-us-east-uat`; B lock at
-  `shared/north-america-staging-release.lock`, backend env at
-  `shared/backend/north-america-staging.env`, Agent env at
-  `shared/agent/north-america-staging.env`. Copy only the corresponding
-  `env/us-east-uat.env.example` into each B private file with mode 0600;
-  replace every placeholder on the US-East host. Do not put credentials
-  in GitHub, Codeup, logs, command arguments or chat. Compose and application
-  secrets originate only from private host files; a real delivery must avoid
-  printing `docker compose config` or unmasked process environment.
-- **One-time B-owned credential provisioning:** as the owning `ubuntu` user on
-  the approved US-East host, run
-  `python3 scripts/provision_b_private_credentials.py --apply` from a verified
-  clean GitHub `dev` Backend snapshot. It takes the B release lock, checks
-  private owners/modes and B identity, creates distinct PostgreSQL, Redis,
-  MinIO, JWT, email-token and internal service credentials in the two
-  existing mode-0600 files, and checks cross-service shared values. A rerun
-  never rotates; partial provisioning fails closed for manual recovery.
-  It does not read A credentials, create Docker volumes, start services or
-  configure external providers. Resend `AUTH_SMTP_PASSWORD` and the Agent model
-  API key were subsequently installed as separate, approved provider handoffs.
-  B's consumer login is email-only; no universal invite code is generated.
-  Never print the private files or capture the generated values in CI/logs.
-
-- B normal-user auth is email registration, verification, login and password
-  reset. B's private Backend env must contain `AUTH_INVITE_LOGIN_ENABLED=false`
-  and `AUTH_INVITE_CODES=` (an explicitly empty value). Runtime rejects an
-  invite-login attempt when disabled, and B release admission requires both
-  values; the legacy A lane keeps its existing invite-only behavior. Do not reuse A's fixed invite code
-  and do not generate a token merely to satisfy an old env placeholder.
-- A separate private target JSON for each service contains its own approved
-  HTTPS origin. The checked-in `.example` now documents those non-secret
-  origins; the private declarations remain mode 0600. A valid static target
-  check is **not** evidence of a public certificate or running service.
-- The host architecture, Docker/Compose and on-host backup mount are
-  verified. Host UFW is inactive; external security-group exposure was not
-  audited. HTTPS/TLS, real email delivery, 10-run load evidence, live
-  PostgreSQL/MinIO/Redis backup and isolated recovery,
-  digest verification on host and a reviewed B-only update/rollback
-  runner remain gates. The guarded first-release orchestrator is code-complete
-  but has not yet passed its host exercise. Off-host retention is deferred, not a release gate.
-  The fresh-only Docker guard passed using `sudo -n`; unprivileged `ubuntu` Docker access failed, so the future
-  runner must explicitly resolve its privilege model. The synthetic test is
-  not a live backup rehearsal.
-
-## 2026-10-01 port 8001/8002 and ingress preflight
-
-- The B-only `dev` Backend/Agent sources and target private env now both use
-  `127.0.0.1:8001` / `127.0.0.1:8002`. Only those four non-secret bind lines
-  changed in the mode-0600 private files under the B release lock. Both
-  static env checks, cross-service pair check, quiet Compose renders and
-  read-only B release admissions passed for the CI-published commit/digest
-  pairs. **These checks did not deploy images, databases, workers or Nginx.**
-- Verified attached EC2 group `launch-wizard-25` has exactly one inbound
-  rule: TCP 22. There is no inbound 80 or 443 rule. Temporary host listeners
-  on 0.0.0.0:80 and :443 still timed out from the operator Mac; probes were
-  removed. UFW is inactive and iptables INPUT policy is ACCEPT. Request an
-  approved SG change for 80 (certificate issuance/renewal) and 443 (HTTPS),
-  then confirm external reachability before public issuance. NACL read-only
-  inspection was denied by IAM; don't claim it has been cleared.
-- Ubuntu `nginx` and `certbot` are installed on the B host. The package's
-  default Nginx site started automatically; it was stopped and disabled
-  immediately. Certbot's timer is installed, but there are no B certificates
-  and no enabled B HTTPS server blocks. Do not run a production ACME request
-  before external port 80 is demonstrably reachable. Do not substitute a
-  self-signed certificate. The checked-in B Nginx templates require the real
-  certificates and reviewed unknown-host policy before installation; a 502
-  until business containers start is not public readiness.
-- The GHCR images were published by B CI as immutable digests, but the host
-  currently gets `denied` when it tries to inspect those private digests.
-  Configure an approved read-only GHCR pull identity on the B host without
-  writing a token to command arguments, logs or Git. The `b_release.py`
-  entrypoints perform static admission only. `b_first_release.py` sequences
-  first bootstrap, real on-host isolated restores and activation but has not
-  been run on this host. Updates and rollback need a separate reviewed runner.
-
-## 2026-10-02 live observation and ongoing-release path
-
-A read-only JumpServer inspection found B PostgreSQL/Redis/MinIO and both business
-Compose projects running; the current Backend and Agent pointers were
-`0d25ec43a8663cf56610a5fd7002e83444e1a12b` and
-`0f8f1eceea91d6ac95265173cd1d45673ee6239a`. Both public HTTPS ready
-endpoints returned `status=ok` with trusted TLS. This supersedes the earlier
-2026-10-01 **not deployed** observation above; it does **not** prove the newer
-GitHub `dev` commits have been deployed, nor prove 10-run or provider E2E.
-
-`b_first_release.py` must **not** be used on this existing environment. For
-subsequent **same-schema** changes, `scripts/b_update_release.py --operation
-update` provides a read-only preflight; add `--apply` only after reviewing the
-approved commit, digest and local OCI image ID. It checks the running B release,
-private pair, new image's Alembic head, and trusted ingress, creates fresh
-PostgreSQL/Redis/MinIO on-host backup/isolated-restore evidence, verifies no
-schema drift, then replaces only that service's business containers. It updates
-`previous` and `current` pointers only after running-container provenance and
-loopback/public readiness pass. If replacement fails, it attempts to restore
-the prior service and leaves the pointers unchanged; a failed restore requires
-manual inspection. `--operation rollback --confirm-client-compatible` performs
-the same-schema reverse switch after the live DB/pointer gate and fresh
-recovery. No automatic migration/downgrade or data-volume recreation is
-supported; schema-changing releases need a separately reviewed migration plan.
-This runner is code plus local tests, **not yet exercised on the B target**.
-Off-host retention remains deferred and is not independent disaster recovery.
-
-## 2026-10-02 GHCR registry transport correction
-
-`b_fetch_oci.py` now supports either a classic PAT in a private tmpfs file
-(`--token-file`, exchanged through `ghcr.io/token` for a package-scoped pull
-bearer) or a preissued package-scoped bearer in the same private tmpfs location
-(`--registry-token-file`). The latter avoids transferring a long-lived GitHub
-PAT to the host. The token file must reside directly under
-`/dev/shm/momcozy-b-ghcr-transfer/` in a mode-0700 directory, owned by the
-invoking account, and itself be a mode-0600 regular single-link file. Never
-print or put either token in Git, a command argument or Docker login config.
-The fetcher validates the requested index digest, exactly one linux/amd64
-child, manifest sizes, all blob digests/sizes, and refuses to overwrite an
-existing OCI archive. A real package-scoped exchange, digest fetch and Docker
-OCI import passed on the operator Mac; **that is not a target-host import or
-service update**. Backend B CI passed for this change (`4903f185076ef2b99deb3f27a4f05e6dbf5220f3`). JumpServer MFA did not
-complete on the next target-host attempts; no remote token, OCI archive, new
-container or release pointer was changed in those attempts. The running
-Backend/Agent pointers must be inspected again before any further apply.
+For update and rollback the entrypoint is the currently active Product source;
+only an empty first-release runs from the candidate Product source.
+The host entrypoint `scripts/north_america_manual_delivery.py` serializes
+another regional manual lock, checks local Docker and the source commit, pulls
+exact immutable digests with ephemeral tmpfs Docker credentials, verifies
+platform, digest, image ID and labels, then calls the existing first-release or
+same-schema update/rollback runner. `apply=true` performs admission again before
+applying; rollback also requires `confirm_client_compatible=true`. Preflight
+may cache images and create a local lock but does not start application services.
+A failed preflight or apply must be inspected manually—never auto-retry or
+claim success from successful CI alone. The server-side private configuration,
+Environment approval, SSH access, Docker behavior and live readiness remain
+**unverified** until a separately authorized host acceptance exercise.

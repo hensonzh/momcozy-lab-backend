@@ -14,7 +14,7 @@ def test_backend_calls_public_agent_over_verified_https() -> None:
     assert "- ${MOMCOZY_BACKEND_TRUST_BUNDLE_FILE" in compose.split("  notification-worker:", 1)[1]
 
 
-def test_b_uses_system_ca_without_reusing_a_internal_ca() -> None:
+def test_north_america_uses_system_ca_without_reusing_a_internal_ca() -> None:
     compose = (ROOT / "docker-compose.us-east-uat.yml").read_text()
     template = (ROOT / "env/us-east-uat.env.example").read_text()
     assert "MOMCOZY_BACKEND_TRUST_BUNDLE_FILE=/etc/ssl/certs/ca-certificates.crt" in template

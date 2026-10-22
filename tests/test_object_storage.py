@@ -115,7 +115,7 @@ def test_lifespan_registers_object_storage(tmp_path) -> None:
 def test_lifespan_starts_with_production_s3_compatible_storage() -> None:
     app = create_app(
         Settings(
-            app_env="production",
+            app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 

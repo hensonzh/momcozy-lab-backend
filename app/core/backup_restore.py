@@ -53,22 +53,22 @@ class BackupRestoreManifest:
 
 def build_backup_restore_manifest(settings: Settings) -> BackupRestoreManifest:
     provider = settings.object_storage_provider.lower()
-    production_required = settings.is_production
-    object_storage_required = settings.is_production and provider != "local"
+    deployed_required = settings.is_deployed
+    object_storage_required = settings.is_deployed and provider != "local"
 
     hooks = (
         _hook(
             env_var="POSTGRES_BACKUP_HOOK",
             purpose="postgres_backup",
             reference=settings.postgres_backup_hook,
-            required=production_required,
+            required=deployed_required,
             reason="Postgres is the authority for business data, audit, and agent runtime state.",
         ),
         _hook(
             env_var="POSTGRES_RESTORE_HOOK",
             purpose="postgres_restore_drill",
             reference=settings.postgres_restore_hook,
-            required=production_required,
+            required=deployed_required,
             reason="Backups are not production-ready until restore has been exercised.",
         ),
         _hook(

@@ -33,7 +33,7 @@ AUTH_SMTP_PASSWORD=<RESEND_SENDING_ACCESS_API_KEY_FOR_THIS_ENVIRONMENT>
 
 `auth.example.invalid` 只是**不可发送的占位域名**；换成经过公司批准、在 Resend 已验证的发件子域名后才能使用。不要把 Resend key 写进 `AUTH_EMAIL_TOKEN_KEY`（它是既有邮件挑战加密/HMAC 密钥），也不要把 SMTP 密钥放进 Flutter `dart-define`、App IPA、GitHub 公开日志或 TestFlight 审核备注。
 
-服务器 env 是由受保护的 `backend-delivery` 工作流读取的共享私有文件；真实部署必须遵守 `deployment-runbook.md` 和 `app/docs/deployment/environment-workflow.md`，不要直接在服务器手动 `docker compose up/down`。仅改私有 env 并不会自动替换正在运行的容器环境，需要经授权的部署/安全重建 API 与 `auth-email-worker`；先确认当前 staging 源码与用户未提交工作，不要从脏工作树发布。
+服务器 env 是由受保护的 `backend-singapore-delivery` 工作流读取的共享私有文件；真实部署必须遵守 `deployment-runbook.md` 和 `app/docs/deployment/environment-workflow.md`，不要直接在服务器手动 `docker compose up/down`。仅改私有 env 并不会自动替换正在运行的容器环境，需要经授权的部署/安全重建 API 与 `auth-email-worker`；先确认当前 staging 源码与用户未提交工作，不要从脏工作树发布。
 
 ## 操作门禁与验收
 

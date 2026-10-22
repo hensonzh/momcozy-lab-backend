@@ -20,15 +20,13 @@ from typing import IO, Any, Sequence, cast
 
 SERVICE_NAME = "product-backend"
 IMAGE_REPOSITORY = "ghcr.io/hensonzh/momcozy-lab-backend"
-DEPLOY_ENVIRONMENTS = frozenset({"staging", "production"})
+DEPLOY_ENVIRONMENTS = frozenset({"staging"})
 DEPLOYMENT_TARGET_ENVIRONMENTS = {
-    "legacy-staging": "staging",
+    "singapore-staging": "staging",
     "north-america-staging": "staging",
-    "production": "production",
 }
 RELEASE_ROOTS = {
-    "staging": Path("/opt/momcozy-lab-staging"),  # Fresh isolated root; legacy test releases remain untouched.
-    "production": Path("/opt/momcozy-lab-production"),
+    "staging": Path("/opt/momcozy-lab-staging"),
 }
 OPENAPI_PATH = Path("docs/openapi.generated.json")
 COMPOSE_PATH = Path("docker-compose.deploy.yml")
@@ -98,13 +96,13 @@ class CommandRunner:
 def validate_environment(value: str) -> str:
     normalized = value.strip().lower()
     if normalized not in DEPLOY_ENVIRONMENTS:
-        raise ValueError("environment must be staging or production")
+        raise ValueError("environment must be staging")
     return normalized
 
 
 def validate_deployment_target(value: str | None, environment: str) -> str:
     runtime_environment = validate_environment(environment)
-    target = value or ("legacy-staging" if runtime_environment == "staging" else "production")
+    target = value or "singapore-staging"
     if DEPLOYMENT_TARGET_ENVIRONMENTS.get(target) != runtime_environment:
         raise ValueError("deployment target does not match the runtime environment")
     return target
@@ -1331,7 +1329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         target = validate_deployment_target(args.deployment_target, args.environment)
         if target == "north-america-staging":
-            raise ValueError("B deployment is not enabled: isolated US-East single-host Compose, private env and separate release root/lock are not implemented")
+            raise ValueError("North America deployment requires its region-specific release entrypoint")
         if args.command == "stage-snapshot":
             stage_release_snapshot(
                 archive=args.archive,

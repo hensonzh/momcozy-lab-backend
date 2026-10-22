@@ -34,7 +34,7 @@ SELECT format('CREATE DATABASE %I OWNER %I', :'agent_db', :'agent_user')
 WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'agent_db')
 \gexec
 -- PostgreSQL defaults grant CONNECT on every database to PUBLIC. Restrict both
--- B databases to the owning service role so separate DBs are a real boundary.
+-- North America databases to the owning service role so separate DBs are a real boundary.
 SELECT format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', :'product_db')
 \gexec
 SELECT format('GRANT CONNECT, TEMPORARY ON DATABASE %I TO %I', :'product_db', :'product_user')

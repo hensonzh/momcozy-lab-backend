@@ -29,10 +29,10 @@ build/
 !deploy/shared/start-redis.sh
 data/
 
-# B deployment target declaration (non-secret, operator-reviewed)
+# North America deployment target declaration (non-secret, operator-reviewed)
 /config/release-targets/north-america-staging.json
 
 !deploy/us-east-uat/start-redis.sh
 !deploy/us-east-uat/init-postgres.sh
-!scripts/check_b_infra_contract.sh
-!scripts/check_b_minio_recovery_contract.sh
+!scripts/check_north_america_infra_contract.sh
+!scripts/check_north_america_minio_recovery_contract.sh

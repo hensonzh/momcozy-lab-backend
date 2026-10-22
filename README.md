@@ -80,11 +80,11 @@ for the model request. The bytes/data URL are never written to the transcript or
 context ledger. This avoids requiring the model provider to fetch files over the
 staging endpoint's internal CA (or a local developer tunnel).
 
-Production retains the HTTPS capability URL flow. Product Backend revalidates
+The HTTPS capability URL flow remains available for provider-reachable staging configurations. Product Backend revalidates
 owner/status/type on every authorized resolve, slides the Redis capability TTL
 by 30 minutes, and revalidates the file before an unauthenticated model fetch.
 Configure `AGENT_MODEL_ASSET_PUBLIC_BASE_URL` to a provider-reachable public
-HTTPS Product Backend origin for production.
+HTTPS Product Backend origin when using this flow.
 
 ## Local Development
 
@@ -118,33 +118,21 @@ runs the migration job, starts the real API container, and requires
 `/v1/health/ready` to pass before cleaning up the stack. No CI private key is
 committed or reused.
 
-## Deployable Environments
+## Regional staging targets
 
-`staging` and `production` share one environment-neutral deployment implementation:
+`local` is developer-only; Singapore and North America are separate staging
+targets using `APP_ENV=staging`. Only a validated `main` commit can publish a
+release image. Singapore uses `env/staging.env.example`,
+`docker-compose.deploy.yml`, `scripts/release.py`, and
+`backend-singapore-delivery.yml`. North America uses
+`env/us-east-uat.env.example`, `docker-compose.us-east-uat.yml`, and the
+region-specific image validation/admission scripts. The two targets must never
+share private credentials, network or state. `test` is ephemeral CI only.
 
-```text
-env/staging.env.example
-env/production.env.example
-docker-compose.deploy.yml
-scripts/release.py
-.github/workflows/backend-delivery.yml
-```
-
-Product Backend owns the shared PostgreSQL, Redis, MinIO, and Docker network for
-each environment. Agent Runtime joins that network as an external consumer and
-uses separate database, Redis ACL/DB, and bucket identities. The actual staging
-DNS names still contain `-test`; this is a transitional hostname only.
-
-A successful `backend-ci` run publishes the exact tested image under the full
-commit SHA and records its digest. An operator then runs `backend-delivery`,
-selects `staging` or `production`, and chooses `bootstrap`, `deploy`, or
-`rollback`. Deployment pulls only the CI-proven digest, validates the private
-environment file, serializes with the shared release lock, backs up before schema
-changes, verifies loopback and public readiness, and writes the release manifest
-under `${RELEASE_ROOT}/current/backend/release-manifest.json`.
-
-Direct server mutation is intentionally absent from the Makefile. Use
-`make backend-staging-config` or `make backend-production-config` only to render
-and validate the committed Compose contract. See
+Product Backend owns regional PostgreSQL, Redis and MinIO; Agent joins with
+separate credentials/database/bucket. Image publication is not host deployment.
+Verify host identity, immutable digest, TLS, migration compatibility, backups,
+restore and public readiness before any authorized release or rollback. The
+Makefile offers static Compose checks, not server mutation. See
 [`docs/environment-profiles.md`](docs/environment-profiles.md) and
 [`docs/deployment-runbook.md`](docs/deployment-runbook.md).

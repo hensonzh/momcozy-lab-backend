@@ -8,8 +8,7 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
     text = (DOCS / "deployment-runbook.md").read_text()
     for phrase in [
         "staging",
-        "production",
-        "backend-delivery.yml",
+        "backend-singapore-delivery.yml",
         "scripts/release.py",
         "RELEASE_LOCK_PATH",
         "immutable",
@@ -18,7 +17,7 @@ def test_deployment_runbook_covers_release_recovery_and_security() -> None:
         "/.well-known/jwks.json",
         "Rollback",
         "never downgrades",
-        "Backend first",
+        "deploy Product",
     ]:
         assert phrase in text
     for retired in [

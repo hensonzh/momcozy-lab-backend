@@ -4,12 +4,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_ENV = ROOT / "env" / "local.env.example"
 STAGING_ENV = ROOT / "env" / "staging.env.example"
-PRODUCTION_ENV = ROOT / "env" / "production.env.example"
 LOCAL_COMPOSE = ROOT / "docker-compose.local.yml"
 DEPLOY_COMPOSE = ROOT / "docker-compose.deploy.yml"
 CI_COMPOSE = ROOT / "docker-compose.ci.yml"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "backend-ci.yml"
-DELIVERY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-delivery.yml"
+DELIVERY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-singapore-delivery.yml"
 POSTGRES_INIT = ROOT / "deploy" / "shared" / "init-postgres.sh"
 REDIS_START = ROOT / "deploy" / "shared" / "start-redis.sh"
 PRODUCT_MINIO_POLICY = ROOT / "deploy" / "shared" / "minio-product-policy.json"
@@ -96,19 +95,14 @@ def test_minio_policies_are_environment_parameterized() -> None:
 def test_environment_templates_are_complete_and_non_secret() -> None:
     local = LOCAL_ENV.read_text()
     staging = STAGING_ENV.read_text()
-    production = PRODUCTION_ENV.read_text()
 
     assert "APP_ENV=local" in local
     assert "APP_ENV=staging" in staging
-    assert "APP_ENV=production" in production
     assert "MOMCOZY_NETWORK_NAME=momcozy-lab-staging" in staging
-    assert "MOMCOZY_NETWORK_NAME=momcozy-lab-production" in production
     assert "MOMCOZY_PRODUCT_POSTGRES_DB=momcozy_staging" in staging
-    assert "MOMCOZY_PRODUCT_POSTGRES_DB=momcozy_production" in production
     assert "backend-test.lute-momcozylab.luteos.cloud" in staging
-    assert "product-api.example.com" in production
-    assert "MOMCOZY_TEST_" not in staging + production
-    assert "sk-" not in staging + production
+    assert "MOMCOZY_TEST_" not in staging
+    assert "sk-" not in staging
 
 
 def test_ci_and_delivery_use_canonical_entrypoints() -> None:
@@ -122,8 +116,8 @@ def test_ci_and_delivery_use_canonical_entrypoints() -> None:
     assert "gh api --paginate" in delivery
     assert "--status success" in delivery
     assert "scripts/test_release.py" not in ci + delivery
-    assert "name: ${{ inputs.environment }}" in delivery
-    assert "options:\n          - staging\n          - production" in delivery
+    assert "name: singapore-staging" in delivery
+    assert "options:\n          - staging" in delivery
     assert "--environment '${DEPLOY_ENVIRONMENT}'" in delivery
     assert "secrets.SSH_KNOWN_HOSTS" in delivery
 
@@ -134,7 +128,7 @@ def test_makefile_exposes_validation_but_not_direct_deploy_mutation() -> None:
     assert "LOCAL_ENV_FILE ?= env/local.env" in makefile
     assert "DEPLOY_ENV_FILE ?= env/$(DEPLOY_ENVIRONMENT).env" in makefile
     assert "backend-staging-config" in makefile
-    assert "backend-production-config" in makefile
+    assert "backend-production-config" not in makefile
     assert "backend-deploy-validate" in makefile
     assert "$(DEPLOY_COMPOSE) up" not in makefile
     assert "$(DEPLOY_COMPOSE) down" not in makefile
@@ -184,7 +178,7 @@ def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
     source = json.loads((root / "deploy/us-east-uat/release-source.json").read_text())
     assert source == {
         "deployment_target": "north-america-staging",
-        "source_branch": "dev",
+        "source_branch": "main",
         "build_context": ".",
         "dockerfile": "deploy/Dockerfile",
         "non_secret_config": "deploy/config_us-east-uat",
@@ -195,12 +189,12 @@ def test_us_east_uat_codeup_deploy_files_match_runtime_contract() -> None:
     assert not (root / "deploy/us-east-uat/workloads.yaml").exists()
     assert not (root / "deploy/us-east-uat/migration-job.yaml").exists()
     handoff = (root / "deploy/us-east-uat/README.md").read_text()
-    assert "scripts/b_first_release.py --apply" in handoff
-    assert "has not been exercised on the target host" in handoff
-    assert "update/rollback remain separate unfinished work" in handoff
+    assert "scripts/north_america_first_release.py --preflight" in handoff
+    assert "inspect that host before any release" in handoff
+    assert "Schema-changing releases and" in handoff
 
 
-def test_us_east_uat_compose_isolated_from_a_and_owns_stateful_services() -> None:
+def test_us_east_uat_compose_isolated_from_singapore_and_owns_stateful_services() -> None:
     compose = (ROOT / "docker-compose.us-east-uat.yml").read_text()
     env = (ROOT / "env/us-east-uat.env.example").read_text()
     assert "name: momcozy-lab-backend-us-east-uat" in compose
@@ -210,12 +204,12 @@ def test_us_east_uat_compose_isolated_from_a_and_owns_stateful_services() -> Non
     assert "minio-init:" in compose
     assert "./deploy/us-east-uat/start-redis.sh:" in compose
     assert "./deploy/us-east-uat/init-postgres.sh:" in compose
-    b_postgres = (ROOT / "deploy/us-east-uat/init-postgres.sh").read_text()
-    assert b_postgres.count("REVOKE CONNECT, TEMPORARY") == 2
-    assert b_postgres.count("GRANT CONNECT, TEMPORARY") == 2
-    b_redis = (ROOT / "deploy/us-east-uat/start-redis.sh").read_text()
-    assert "-select -move -swapdb -flushdb -flushall" in b_redis
-    assert "~rate-limit:*" in b_redis and "~agent-runtime:*" in b_redis
+    north_america_postgres = (ROOT / "deploy/us-east-uat/init-postgres.sh").read_text()
+    assert north_america_postgres.count("REVOKE CONNECT, TEMPORARY") == 2
+    assert north_america_postgres.count("GRANT CONNECT, TEMPORARY") == 2
+    north_america_redis = (ROOT / "deploy/us-east-uat/start-redis.sh").read_text()
+    assert "-select -move -swapdb -flushdb -flushall" in north_america_redis
+    assert "~rate-limit:*" in north_america_redis and "~agent-runtime:*" in north_america_redis
     for service in ("postgres", "redis", "minio"):
         section = compose.split(f"  {service}:\n", 1)[1].split("\n  ", 1)[0]
         assert "    ports:" not in section

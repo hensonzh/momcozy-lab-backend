@@ -27,9 +27,8 @@ DEFAULT_DOUBAO_TTS_SAMPLE_RATE = 24000
 DEFAULT_DOUBAO_TTS_SPEED_RATIO = 1.1
 DEFAULT_DOUBAO_TTS_FIRST_CHUNK_TIMEOUT_SECONDS = 20
 SUPPORTED_OBJECT_STORAGE_PROVIDERS = {"local", "s3", "oss", "cos", "minio"}
-VALID_APP_ENVS = {"local", "test", "staging", "production"}
-PRODUCTION_ENVS = {"production"}
-DEPLOYED_ENVS = {"staging", "production"}
+VALID_APP_ENVS = {"local", "test", "staging"}
+DEPLOYED_ENVS = {"staging"}
 SUPPORTED_VOICE_PROVIDERS = {"disabled", "local_stub", "doubao", "volcengine"}
 SUPPORTED_VISION_PROVIDERS = {"disabled", "local_stub", "openai"}
 
@@ -215,10 +214,6 @@ class Settings:
         )
 
     @property
-    def is_production(self) -> bool:
-        return self.app_env.lower() in PRODUCTION_ENVS
-
-    @property
     def is_deployed(self) -> bool:
         return self.app_env.lower() in DEPLOYED_ENVS
 
@@ -226,7 +221,7 @@ class Settings:
         errors: list[str] = []
         normalized_app_env = self.app_env.strip().lower()
         if normalized_app_env not in VALID_APP_ENVS:
-            errors.append("APP_ENV must be one of: local, test, staging, production")
+            errors.append("APP_ENV must be one of: local, test, staging")
         if self.push_provider not in {"disabled", "fcm"}:
             errors.append("PUSH_PROVIDER must be disabled or fcm")
         if self.push_provider == "fcm":

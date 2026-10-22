@@ -17,7 +17,7 @@ from tests.auth_key_material import TEST_RSA_PRIVATE_KEY_B64, auth_settings
 
 def test_production_settings_require_jwt_private_key() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         object_storage_provider="oss",
         object_storage_bucket="bucket",
         object_storage_access_key_id="access",

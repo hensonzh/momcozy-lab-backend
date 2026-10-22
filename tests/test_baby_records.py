@@ -44,7 +44,7 @@ def service(session, now):
 
 async def babies(sessions, owners):
     async with sessions.begin() as session:
-        values = [BabyProfile(owner_user_id=owners[0], name='Test baby A'), BabyProfile(owner_user_id=owners[0], name='Test baby B'), BabyProfile(owner_user_id=owners[1], name='Other baby')]
+        values = [BabyProfile(owner_user_id=owners[0], name='Test baby A'), BabyProfile(owner_user_id=owners[0], name='Test baby North America'), BabyProfile(owner_user_id=owners[1], name='Other baby')]
         session.add_all(values)
         await session.flush()
         return [value.id for value in values]

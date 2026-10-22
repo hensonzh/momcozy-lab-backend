@@ -1,4 +1,4 @@
-"""Check B/UAT Resend SMTP connectivity; send only with explicit opt-in.
+"""Check North America/UAT Resend SMTP connectivity; send only with explicit opt-in.
 
 The optional send path reads AUTH_SMTP_PASSWORD from the process environment.
 Do not pass a key on the command line or store it in the repository.

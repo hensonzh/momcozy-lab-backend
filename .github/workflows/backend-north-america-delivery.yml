@@ -1,0 +1,167 @@
+name: backend-north-america-delivery
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: First release, same-schema update, or compatible rollback
+        required: true
+        type: choice
+        options: [first-release, update, rollback]
+      service:
+        description: Service for update/rollback (first release always deploys both)
+        required: true
+        type: choice
+        options: [backend, agent]
+      backend_commit:
+        description: Verified Backend main commit (40 lowercase hex)
+        required: true
+        type: string
+      agent_commit:
+        description: Verified Agent main commit (40 lowercase hex)
+        required: true
+        type: string
+      confirm_client_compatible:
+        description: Explicitly confirm App/client compatibility for rollback
+        required: true
+        type: boolean
+        default: false
+      apply:
+        description: Apply host changes after preflight (false = admission only)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: north-america-staging-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: north-america-staging
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+    env:
+      GH_TOKEN: ${{ secrets.NORTH_AMERICA_GH_READ_TOKEN }}
+      GHCR_PULL_TOKEN: ${{ secrets.NORTH_AMERICA_GHCR_PULL_TOKEN }}
+      NORTH_AMERICA_APPROVERS: ${{ vars.NORTH_AMERICA_APPROVERS }}
+      BACKEND_COMMIT: ${{ inputs.backend_commit }}
+      AGENT_COMMIT: ${{ inputs.agent_commit }}
+      OPERATION: ${{ inputs.operation }}
+      SERVICE: ${{ inputs.service }}
+      APPLY: ${{ inputs.apply }}
+      COMPATIBLE: ${{ inputs.confirm_client_compatible }}
+      NORTH_AMERICA_SSH_KNOWN_HOSTS: ${{ secrets.NORTH_AMERICA_SSH_KNOWN_HOSTS }}
+      SSH_HOST: ${{ secrets.NORTH_AMERICA_SSH_HOST }}
+      SSH_PORT: ${{ secrets.NORTH_AMERICA_SSH_PORT }}
+      SSH_USER: ${{ secrets.NORTH_AMERICA_SSH_USER }}
+      SSH_KEY: ${{ secrets.NORTH_AMERICA_SSH_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Authorize approved operator and re-run actor, fail closed on missing configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in GH_TOKEN GHCR_PULL_TOKEN NORTH_AMERICA_APPROVERS NORTH_AMERICA_SSH_KNOWN_HOSTS SSH_HOST SSH_PORT SSH_USER SSH_KEY; do
+            test -n "${!name}" || { echo "Missing $name" >&2; exit 1; }
+          done
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9.-]+$ && "$SSH_PORT" =~ ^[0-9]{1,5}$ && "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$BACKEND_COMMIT" =~ ^[0-9a-f]{40}$ && "$AGENT_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OPERATION" != rollback || "$COMPATIBLE" == true ]]
+          normalized=",$(echo "$NORTH_AMERICA_APPROVERS" | tr '[:upper:]' '[:lower:]' | tr -d ' '),"
+          [[ "$normalized" =~ ^,([a-z0-9-]+,)+$ ]]
+          for actor in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
+            actor="$(echo "$actor" | tr '[:upper:]' '[:lower:]')"
+            [[ "$normalized" == *",$actor,"* ]] || { echo 'Unauthorized release actor' >&2; exit 1; }
+          done
+
+      - name: Prove both immutable main images and successful contract/image CI jobs
+        env:
+          GH_REPO: hensonzh/momcozy-lab-backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git ls-remote --exit-code origin refs/heads/main >/dev/null
+          git cat-file -e "${BACKEND_COMMIT}^{commit}"
+          git merge-base --is-ancestor "$BACKEND_COMMIT" origin/main
+          for service in backend agent; do
+            commit="$BACKEND_COMMIT"; if [[ "$service" == agent ]]; then commit="$AGENT_COMMIT"; fi
+            repo="hensonzh/momcozy-lab-$service"
+            workflow="$service-north-america-validation.yml"
+            # Require the exact commit's push CI; an old artifact expires closed.
+            # Agent's main ancestry is checked against its actual remote, not Backend main.
+            if [[ "$service" == agent ]]; then
+              gh api "repos/$repo/compare/$commit...main" --jq '.status' | grep -qxE 'ahead|identical'
+            fi
+            run_id="$(gh api "repos/$repo/actions/workflows/$workflow/runs?head_sha=$commit&branch=main&event=push&status=success&per_page=100" \
+              --jq "[.workflow_runs[] | select(.head_sha == \"$commit\" and .head_branch == \"main\" and .event == \"push\" and .conclusion == \"success\") | .id] | first // empty")"
+            [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "No successful $service main CI" >&2; exit 1; }
+            jobs="$(gh api --paginate "repos/$repo/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "success") | .name')"
+            grep -qx 'north-america-contract' <<< "$jobs"
+            grep -qx 'north-america-image' <<< "$jobs"
+            [[ "$(gh api "repos/$repo/actions/runs/$run_id" --jq '.head_sha')" == "$commit" ]]
+            artifact_dir="$RUNNER_TEMP/north-america-$service-$run_id"
+            mkdir -p "$artifact_dir"
+            gh run download "$run_id" --repo "$repo" --name north-america-image-digest --dir "$artifact_dir"
+            ci_digest="$(cat "$artifact_dir/north-america-image-digest.txt")"
+            [[ "$ci_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "Invalid CI digest" >&2; exit 1; }
+            digest="$(gh api --paginate "users/hensonzh/packages/container/momcozy-lab-$service/versions?per_page=100" \
+              --jq ".[] | select(.metadata.container.tags[]? == \"north-america-main-$commit\") | .name" | head -n 1)"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No immutable $service digest" >&2; exit 1; }
+            [[ "$digest" == "$ci_digest" ]] || { echo "Package tag differs from proven CI output" >&2; exit 1; }
+            echo "${service^^}_DIGEST=$ci_digest" >> "$GITHUB_ENV"
+          done
+
+      - name: Pin SSH host identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$NORTH_AMERICA_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          echo 'StrictHostKeyChecking=yes' >> "$HOME/.ssh/config"
+          chmod 600 "$HOME/.ssh/config"
+
+      - name: Host admission and explicit apply under regional lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--operation "$OPERATION" --service "$SERVICE" --backend-commit "$BACKEND_COMMIT" \
+                --agent-commit "$AGENT_COMMIT" --backend-digest "$BACKEND_DIGEST" --agent-digest "$AGENT_DIGEST")
+          if [[ "$COMPATIBLE" == true ]]; then args+=(--confirm-client-compatible); fi
+          if [[ "$APPLY" == true ]]; then args+=(--apply); fi
+          # The host driver invokes --preflight before --apply.
+          # Only host-prepared, clean main checkouts are accepted. No CI job
+          # creates a release checkout or alters private target/env declarations.
+          host_tool="/opt/momcozy-lab-us-east-uat/current/backend/scripts/north_america_manual_delivery.py"
+          if [[ "$OPERATION" == first-release ]]; then
+            host_tool="/opt/momcozy-lab-us-east-uat/releases/backend/$BACKEND_COMMIT/scripts/north_america_manual_delivery.py"
+          fi
+          ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+          if [[ "$OPERATION" == rollback ]]; then
+            ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
+              python3 "$host_tool" "${args[@]}" </dev/null
+          else
+            # Scoped package read token is supplied on stdin, not command line.
+            printf '%s\n' "$GHCR_PULL_TOKEN" | ssh "${ssh_opts[@]}" "$SSH_USER@$SSH_HOST" \
+              python3 "$host_tool" "${args[@]}"
+          fi
+
+      - name: Remove transient SSH material
+        if: always()
+        run: rm -f "$HOME/.ssh/id_ed25519"

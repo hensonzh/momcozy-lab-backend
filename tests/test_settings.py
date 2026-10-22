@@ -22,7 +22,7 @@ def test_settings_from_env_reads_asymmetric_jwt_configuration(monkeypatch: pytes
     assert settings.auth_jwt_runtime_audience == "runtime-api"
 
 
-def test_b_invite_login_flag_reads_false_and_empty_codes_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_north_america_invite_login_flag_reads_false_and_empty_codes_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AUTH_INVITE_LOGIN_ENABLED", "false")
     monkeypatch.setenv("AUTH_INVITE_CODES", "")
 
@@ -424,7 +424,7 @@ def test_settings_require_openai_vision_credentials_model_and_finite_positive_ti
 
 
 def test_production_settings_reject_local_object_storage() -> None:
-    settings = Settings(app_env="production",
+    settings = Settings(app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
  object_storage_provider="local")
@@ -435,7 +435,7 @@ def test_production_settings_reject_local_object_storage() -> None:
 
 def test_production_settings_reject_wildcard_cors_origin() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -459,7 +459,7 @@ def test_production_settings_reject_wildcard_cors_origin() -> None:
 
 def test_production_settings_require_trusted_hosts() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -481,7 +481,7 @@ def test_production_settings_require_trusted_hosts() -> None:
 
 def test_production_settings_require_service_key_for_operational_endpoints() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -505,7 +505,7 @@ def test_production_settings_require_service_key_for_operational_endpoints() -> 
 
 def test_production_settings_require_agent_runtime_service_key() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -529,7 +529,7 @@ def test_production_settings_require_agent_runtime_service_key() -> None:
 
 def test_production_settings_reject_wildcard_trusted_hosts() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -551,7 +551,7 @@ def test_production_settings_reject_wildcard_trusted_hosts() -> None:
 
 
 def test_production_managed_object_storage_requires_bucket_and_credentials() -> None:
-    settings = Settings(app_env="production",
+    settings = Settings(app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
  object_storage_provider="oss")
@@ -562,7 +562,7 @@ def test_production_managed_object_storage_requires_bucket_and_credentials() -> 
 
 def test_production_rejects_implicit_local_database_and_redis_urls() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -582,7 +582,7 @@ def test_production_rejects_implicit_local_database_and_redis_urls() -> None:
 
 def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -607,7 +607,7 @@ def test_production_accepts_explicit_managed_infrastructure_urls() -> None:
 
 def test_production_accepts_configured_openai_vision_provider() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -635,7 +635,7 @@ def test_production_accepts_configured_openai_vision_provider() -> None:
 
 def test_production_rejects_local_stub_voice_provider() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 
@@ -659,7 +659,7 @@ def test_production_rejects_local_stub_voice_provider() -> None:
 
 def test_production_rejects_local_stub_vision_provider() -> None:
     settings = Settings(
-        app_env="production",
+        app_env="staging",
         auth_email_token_key="test-only-auth-mail-key-32-characters",
         auth_email_from="accounts@example.test", auth_smtp_host="smtp.example.test",
 

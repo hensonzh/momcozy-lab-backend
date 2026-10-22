@@ -39,7 +39,7 @@ def test_duplicate_daily_status_migration_deletes_old_rows_without_losing_curren
             async with sessions.begin() as session:
                 session.add_all([
                     BabyProfile(id=baby, owner_user_id=owners[0], name='Baby A'),
-                    BabyProfile(id=other, owner_user_id=owners[0], name='Baby B'),
+                    BabyProfile(id=other, owner_user_id=owners[0], name='Baby North America'),
                 ])
                 await session.flush()
                 session.add_all([

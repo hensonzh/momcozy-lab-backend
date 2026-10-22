@@ -15,7 +15,7 @@ from app.core.settings import Settings
 from tests.auth_key_material import TEST_RSA_PRIVATE_KEY_B64
 
 
-def test_non_production_backup_restore_hooks_are_documented_but_not_required() -> None:
+def test_local_backup_restore_hooks_are_documented_but_not_required() -> None:
     manifest = build_backup_restore_manifest(Settings(app_env="local"))
 
     assert manifest.missing_required == ()
@@ -28,8 +28,8 @@ def test_non_production_backup_restore_hooks_are_documented_but_not_required() -
     }
 
 
-def test_production_managed_infrastructure_requires_backup_and_restore_hooks() -> None:
-    settings = _production_managed_settings()
+def test_staging_managed_infrastructure_requires_backup_and_restore_hooks() -> None:
+    settings = _staging_managed_settings()
 
     manifest = build_backup_restore_manifest(settings)
 
@@ -43,8 +43,8 @@ def test_production_managed_infrastructure_requires_backup_and_restore_hooks() -
         validate_backup_restore_hooks(settings)
 
 
-def test_production_managed_infrastructure_accepts_configured_hooks() -> None:
-    settings = _production_managed_settings(
+def test_staging_managed_infrastructure_accepts_configured_hooks() -> None:
+    settings = _staging_managed_settings(
         postgres_backup_hook="pg-backup-job",
         postgres_restore_hook="pg-restore-job",
         object_storage_backup_hook="objects-backup-job",
@@ -57,7 +57,7 @@ def test_production_managed_infrastructure_accepts_configured_hooks() -> None:
     validate_backup_restore_hooks(settings)
 
 
-def test_backup_restore_hook_script_strict_mode_fails_for_missing_production_hooks() -> None:
+def test_backup_restore_hook_script_strict_mode_fails_for_missing_staging_hooks() -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -77,9 +77,9 @@ def test_backup_restore_hook_script_strict_mode_fails_for_missing_production_hoo
     assert "OBJECT_STORAGE_RESTORE_HOOK" in payload["missing_required"]
 
 
-def _production_managed_settings(**overrides: str) -> Settings:
+def _staging_managed_settings(**overrides: str) -> Settings:
     values = {
-        "app_env": "production",
+        "app_env": "staging",
         "database_url": "postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         "redis_url": "redis://redis.internal:6379/0",
         "object_storage_provider": "s3",
@@ -99,7 +99,7 @@ def _script_env() -> dict[str, str]:
     return {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONPATH": str(_repo_root()),
-        "APP_ENV": "production",
+        "APP_ENV": "staging",
         "DATABASE_URL": "postgresql+asyncpg://app:secret@postgres.internal:5432/momcozy",
         "REDIS_URL": "redis://redis.internal:6379/0",
         "OBJECT_STORAGE_PROVIDER": "s3",

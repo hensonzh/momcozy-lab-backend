@@ -11,7 +11,7 @@ DEPLOY_COMPOSE = MOMCOZY_BACKEND_IMAGE=$(DEPLOY_IMAGE) MOMCOZY_BACKEND_ENV_FILE=
 .PHONY: \
 	backend-local-build backend-build backend-local-up backend-up backend-down \
 	backend-local-migrate backend-migrate backend-local-minio backend-local-account \
-	backend-deploy-validate backend-staging-config backend-production-config \
+	backend-deploy-validate backend-staging-config \
 	backend-deploy-ps backend-deploy-logs backend-export-contracts \
 	backend-check-infra backend-productization-status backend-smoke backend-env-print
 
@@ -52,9 +52,6 @@ backend-deploy-validate:
 
 backend-staging-config:
 	$(MAKE) backend-deploy-validate DEPLOY_ENVIRONMENT=staging DEPLOY_ENV_FILE=env/staging.env.example
-
-backend-production-config:
-	$(MAKE) backend-deploy-validate DEPLOY_ENVIRONMENT=production DEPLOY_ENV_FILE=env/production.env.example
 
 backend-deploy-ps:
 	$(DEPLOY_COMPOSE) ps

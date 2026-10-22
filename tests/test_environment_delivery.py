@@ -26,7 +26,7 @@ from scripts.release import (
 
 ROOT = Path(__file__).resolve().parents[1]
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "backend-ci.yml"
-DELIVERY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-delivery.yml"
+DELIVERY_WORKFLOW = ROOT / ".github" / "workflows" / "backend-singapore-delivery.yml"
 DEPLOY_COMPOSE = ROOT / "docker-compose.deploy.yml"
 DIGEST = "sha256:" + "a" * 64
 COMMIT_SHA = "b" * 40
@@ -101,12 +101,12 @@ def test_ci_publishes_one_sha_tagged_image_without_quota_bound_artifacts() -> No
 def test_delivery_is_environment_scoped_serial_and_host_key_checked() -> None:
     workflow = DELIVERY_WORKFLOW.read_text()
     assert "workflow_dispatch:" in workflow
-    assert "options:\n          - staging\n          - production" in workflow
-    assert "name: ${{ inputs.environment }}" in workflow
-    assert "group: momcozy-lab-backend-${{ inputs.environment }}" in workflow
+    assert "options:\n          - staging" in workflow
+    assert "name: singapore-staging" in workflow
+    assert "group: momcozy-lab-backend-singapore-staging" in workflow
     assert "RELEASE_APPROVERS" in workflow
-    assert "vars.STAGING_APPROVERS" in workflow
-    assert "inputs.environment == 'staging' && secrets.STAGING_SSH_PRIVATE_KEY" in workflow
+    assert "vars.SINGAPORE_APPROVERS" in workflow
+    assert "inputs.environment == 'staging' && secrets.SINGAPORE_SSH_PRIVATE_KEY" in workflow
     assert "secrets.SSH_KNOWN_HOSTS" in workflow
     assert "StrictHostKeyChecking=no" not in workflow
     assert "scripts/release.py" in workflow
@@ -125,12 +125,11 @@ def test_release_identifiers_and_environment_are_strict() -> None:
     assert validate_commit_sha(COMMIT_SHA) == COMMIT_SHA
     assert validate_image_ref(IMAGE_REF) == IMAGE_REF
     assert validate_environment("staging") == "staging"
-    assert validate_environment("production") == "production"
+    with pytest.raises(ValueError):
+        validate_environment("production")
     assert validate_release_root(Path("/opt/momcozy-lab-staging"), "staging") == Path("/opt/momcozy-lab-staging")
-    assert validate_release_root(Path("/opt/momcozy-lab-production"), "production") == Path("/opt/momcozy-lab-production")
     for environment, wrong_root in (
         ("staging", Path("/opt/momcozy-lab")),
-        ("production", Path("/opt/momcozy-lab")),
         ("staging", Path("/opt/momcozy-lab-production")),
     ):
         with pytest.raises(ValueError, match="release root"):
@@ -195,9 +194,9 @@ def test_release_manifest_contains_environment_and_traceability() -> None:
         openapi_sha256="c" * 64,
         public_url="https://backend.example.test:8443/",
         released_at="2026-09-24T00:00:00Z",
-        environment="production",
+        environment="staging",
     )
-    assert manifest["environment"] == "production"
+    assert manifest["environment"] == "staging"
     assert manifest["image_digest"] == DIGEST
     assert manifest["public_url"] == "https://backend.example.test:8443"
     assert not any("password" in key or "secret" in key for key in manifest)
@@ -215,7 +214,7 @@ def test_release_snapshot_retry_reuses_only_the_same_archive(
         bundle.add(source / "release.txt", arcname="release.txt")
     archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
 
-    with pytest.raises(ValueError, match="production release root"):
+    with pytest.raises(ValueError, match="environment must be staging"):
         stage_release_snapshot(
             archive=archive,
             archive_sha256=archive_sha,

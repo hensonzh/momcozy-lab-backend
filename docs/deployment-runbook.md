@@ -1,154 +1,46 @@
-# Product Backend Deployment Runbook
+# Product Backend regional staging release runbook
 
-Updated: 2026-09-24. This runbook covers both `staging` and `production`.
+Updated: 2026-10-21. `local` is not published. `singapore-staging` and
+`north-america-staging` are the only deployment targets; both have
+`APP_ENV=staging`. Only a verified `main` commit and its immutable digest can
+be admitted. No production deployment target exists.
 
-## Preconditions
+## Singapore staging
 
-1. The target commit is merged into `main`.
-2. `backend-ci` completed successfully and published its immutable image
-   manifest.
-3. The GitHub Environment named `staging` or `production` has required reviewers.
-4. The host has a private mode-`0600` Backend env based on the matching template.
-5. Product Backend and Agent Runtime use the same network/topology values and
-   different database, Redis, MinIO, and service credentials.
-6. The public TLS route and CA file are installed before application deployment.
+`backend-singapore-delivery.yml` is the protected manual workflow. It must
+check the exact `main` commit, successful CI image identity and Product OpenAPI
+compatibility before using `scripts/release.py`. Its private GitHub Environment
+must have reviewers, SSH host-key verification and a region-scoped
+`RELEASE_LOCK_PATH`. The host's service env must be mode-`0600`, isolated from
+North America, and contain no release-owned image or ID variables. Product
+Backend owns PostgreSQL, Redis, MinIO and the shared network; deploy Product
+before Agent. Validate `/v1/health/ready` and `/.well-known/jwks.json`, then
+Agent cross-service readiness and App smoke, before distributing the APK.
 
-The currently deployed staging DNS still contains `backend-test`; it is a
-transitional hostname, while the environment identity is `staging`.
+## North America staging
 
-## GitHub Environment configuration
+`backend-north-america-validation.yml` validates and publishes an immutable
+North America image on a successful `main` push; publication does not deploy.
+`backend-north-america-delivery.yml` is the separate, protected manual host
+workflow. It requires exact successful Product/Agent push-CI digest artifacts,
+verified main commits, approved operator/Environment and explicit apply;
+`apply=false` only runs admission. The host must already have prepared clean
+release source trees and private configuration. See `deploy/us-east-uat/README.md`
+for required GitHub protection, private secrets and host handoff.
+The separate `docker-compose.us-east-uat.yml`, private env and
+`config/release-targets/north-america-staging.json.example` describe the
+regional host. `scripts/check_north_america_env.py` and
+`scripts/north_america_release.py` are read-only admissions. The first-release
+and update/rollback runners require separate host identity, backups, isolated
+restore, schema and public HTTPS gates before an explicit apply. Do not run a
+first-release bootstrap on a non-empty host or point Singapore's workflow at
+North America.
 
-Variables:
+## Rollback and evidence
 
-```text
-staging:
-  RELEASE_ROOT=/opt/momcozy-lab-staging
-  SERVICE_ENV_FILE=/opt/momcozy-lab-staging/shared/backend/staging.env
-  RELEASE_LOCK_PATH=/opt/momcozy-lab-staging/shared/staging-release.lock
-production:
-  RELEASE_ROOT=/opt/momcozy-lab-production
-  SERVICE_ENV_FILE=/opt/momcozy-lab-production/shared/backend/production.env
-  RELEASE_LOCK_PATH=/opt/momcozy-lab-production/shared/production-release.lock
-both (environment-specific values):
-  CA_FILE=/path/to/reviewed/ca.pem
-  PUBLIC_URL=https://<backend-host>:8443
-```
-
-Copy only the values, not the labels. The Backend and Agent GitHub Environments
-for the same target must use the same release root and lock path.
-
-Secrets:
-
-```text
-SSH_HOST
-SSH_PORT
-SSH_USER
-SSH_PRIVATE_KEY
-SSH_KNOWN_HOSTS
-```
-
-`RELEASE_APPROVERS` is a repository variable containing a comma-separated
-allowlist; staging can reuse the existing `STAGING_APPROVERS` variable and
-`STAGING_SSH_*` repository secrets when environment-scoped values are absent. Do not disable GitHub Environment required reviewers for production.
-
-## A staging HTTPS trust bundle
-
-Both public API origins use the App staging CA. The Backend-to-Agent URL must
-be the reviewed HTTPS origin; mount the system-root plus staging-CA bundle via
-`MOMCOZY_BACKEND_TRUST_BUNDLE_FILE`. Compose sets `SSL_CERT_FILE` for the API
-and workers without disabling verification or changing the public URL.
-
-## Shared object-storage image prerequisite
-
-Public MinIO server/client tags used by the old stack are no longer reliably
-pullable. Before the first staging bootstrap, build the checked-in
-`deploy/shared/Minio.Dockerfile` on the deployment host as
-`momcozy-staging-minio:9e49d5e7a648f00e`. It verifies the official MinIO
-source commit and the official mc release checksum; CI builds and smoke-tests
-the same image. Do not retag the stopped legacy image or bypass the MinIO
-integration jobs. Record the resulting local image ID. Only the Backend Compose
-owns this stateful service and its new volumes; the Agent deploy joins it.
-
-## Bootstrap
-
-Run `.github/workflows/backend-delivery.yml` with:
-
-```text
-environment = staging | production
-operation   = bootstrap
-commit_sha  = <full main SHA with successful backend-ci>
-```
-
-Bootstrap creates or verifies PostgreSQL, Redis, MinIO and the environment
-network, then initializes service-scoped databases, ACL users and buckets. It
-does not publish a mutable image tag and does not deploy Agent Runtime.
-
-## Deploy
-
-Run the same workflow with `operation=deploy`. The workflow:
-
-1. verifies successful CI for the requested full commit and resolves its immutable image digest from GHCR;
-2. for an existing release in this root, downloads the public live OpenAPI over
-   the reviewed TLS CA and runs `scripts/check_deployed_openapi_compatibility.py`
-   against the candidate snapshot. Removed operations, newly mandatory request
-   fields, and removed success fields fail closed **before any service or schema
-   mutation**. An empty isolated release root has no prior live contract, so its
-   first deploy skips this comparison. A
-   retired API or stricter password confirmation needs a separate supported-
-   client audit and a compatible migration/version strategy; there is no
-   emergency bypass in this workflow;
-   see [API versioned retirement runbook](api-retirement-runbook.md) for the
-   read-only client-exit audit and its currently unmet conditions;
-3. transfers an immutable `git archive` snapshot and `scripts/release.py`;
-4. acquires the environment release lock;
-5. validates the private env and Compose rendering;
-6. verifies the image revision label and digest;
-7. checks object storage and startup settings;
-8. creates a mode-`0600` database backup before a required migration;
-9. switches only application services, never reconciles stateful containers;
-10. verifies loopback and public `/v1/health/ready`;
-11. promotes `${RELEASE_ROOT}/current/backend/release-manifest.json`.
-
-For Agent-backed releases, deploy Backend first and give Agent the promoted
-Backend manifest.
-
-## Rollback
-
-Run `backend-delivery` with `operation=rollback` and explicitly confirm schema
-compatibility. Rollback changes application code only; it never downgrades the
-database. If the previous image cannot read the current schema, roll forward.
-
-## Manual validation only
-
-These commands render the committed contract and do not mutate a server:
-
-```bash
-make backend-staging-config
-make backend-production-config
-```
-
-Direct `docker compose up/down` targets for deployment are intentionally absent.
-Emergency host operations must use the same release lock and a reviewed runbook.
-
-## Nginx and network boundary
-
-The app container binds only to the configured loopback address. Nginx owns the
-public TLS listener and proxies to that address. PostgreSQL, Redis and MinIO have
-no public host ports. The checked-in Nginx template still names the current
-staging DNS (`backend-test...`); production must use a separately reviewed site
-and certificate rather than copying the staging hostname.
-
-## Verification
-
-After deploy, verify:
-
-```text
-GET /v1/health/live
-GET /v1/health/ready
-GET /.well-known/jwks.json
-GET /v1/health/metrics (with service key)
-```
-
-Then run `docs/release-smoke-checklist.md`, verify the release manifest
-`environment`, commit, image digest and OpenAPI hash, and only then allow Agent
-or App delivery to proceed.
+Record commit, immutable image digest, migrations, API contract, host, private
+env path and readiness evidence per region. Rollback never downgrades the
+database schema automatically; confirm client/schema compatibility and verify
+restoration before any pointer switch. Retain the prior manifest and backups.
+A passing static check or CI build does not prove deployment. This runbook
+contains no claim about the current live host state.

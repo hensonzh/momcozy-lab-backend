@@ -69,7 +69,7 @@ def test_invite_login_returns_token_pair_and_device_contract() -> None:
     assert fake_service.invite_login_kwargs["device_context"].device_id == "flutter-device-001"
 
 
-def test_b_email_registration_and_login_work_but_invite_endpoint_is_disabled() -> None:
+def test_north_america_email_registration_and_login_work_but_invite_endpoint_is_disabled() -> None:
     fake_service = FakeAuthAccountService()
     app = create_app(Settings(app_env="test", auth_invite_login_enabled=False, auth_invite_codes=()))
     app.dependency_overrides[get_auth_account_service] = lambda: fake_service
