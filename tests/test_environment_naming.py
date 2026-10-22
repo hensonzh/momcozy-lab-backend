@@ -26,3 +26,13 @@ def test_release_builds_only_use_main() -> None:
     source = json.loads((ROOT / "deploy/us-east-uat/release-source.json").read_text())
     assert source["source_branch"] == "main"
     assert not (ROOT / "env/production.env.example").exists()
+
+
+def test_pull_requests_validate_without_publishing_or_deploying() -> None:
+    workflow = (ROOT / ".github/workflows/backend-pr-verify.yml").read_text()
+    assert "pull_request:\n    branches: [main]" in workflow
+    assert "permissions:\n  contents: read" in workflow
+    for check in ("ruff check", "mypy app scripts", "pytest tests", "alembic", "export_openapi.py"):
+        assert check in workflow
+    for forbidden in ("docker build", "docker push", "packages: write", "workflow_dispatch:", "secrets."):
+        assert forbidden not in workflow

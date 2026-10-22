@@ -48,7 +48,7 @@ def _safe_name(name: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", name)) and name not in (".", "..")
 
 
-def _check_hash(path: Path, digest: str) -> None:
+def _check_hash(path: Path, digest: object) -> None:
     _regular(path)
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or _hash(path) != digest:
         raise ValueError("North America backup artifact checksum mismatch")

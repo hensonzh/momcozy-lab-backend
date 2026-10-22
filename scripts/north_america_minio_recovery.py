@@ -21,6 +21,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import IO
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
@@ -35,8 +36,8 @@ BUCKETS = {"product": "momcozy-product-us-east-uat", "agent": "momcozy-agent-us-
 CONTAINER_ID = re.compile(r"[0-9a-f]{12,64}")
 
 
-def _run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, **kwargs)
+def _run(command: list[str]) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
 
 def north_america_minio_id() -> str:
@@ -71,7 +72,7 @@ def _files(folder: Path) -> dict[str, str]:
     return result
 
 
-def _extract(stream: object, folder: Path) -> None:
+def _extract(stream: IO[bytes], folder: Path) -> None:
     with tarfile.open(fileobj=stream, mode="r|") as archive:
         for member in archive:
             if (member.name not in {"product", "agent", "iam.zip"}
@@ -84,9 +85,10 @@ def _extract(stream: object, folder: Path) -> None:
                 target.mkdir(mode=0o700, parents=True, exist_ok=True)
             else:
                 target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                with archive.extractfile(member) as source, target.open("xb") as output:
-                    if source is None:
-                        raise ValueError("empty North America MinIO archive entry")
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ValueError("empty North America MinIO archive entry")
+                with source, target.open("xb") as output:
                     while data := source.read(1024 * 1024):
                         output.write(data)
                 target.chmod(0o600)

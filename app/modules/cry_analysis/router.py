@@ -195,5 +195,7 @@ async def get_cry_analysis_for_agent(
     if analysis.thread_id is None:
         analysis.thread_id = payload.thread_id
         await session.flush()
-    return CryAnalysisInternalRead(id=analysis.id, status=analysis.status, answer=analysis.answer,
-                                   created_at=analysis.created_at, thread_id=payload.thread_id)
+    return CryAnalysisInternalRead.model_validate({
+        'id': analysis.id, 'status': analysis.status, 'answer': analysis.answer,
+        'created_at': analysis.created_at, 'thread_id': payload.thread_id,
+    })

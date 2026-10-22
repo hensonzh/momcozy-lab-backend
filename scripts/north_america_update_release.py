@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from types import SimpleNamespace
+from typing import Any
 
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 if str(SOURCE_ROOT) not in sys.path:
@@ -59,7 +59,7 @@ def _snapshot(source: Path, commit: str) -> None:
         raise ValueError("North America activated source differs from clean main plus its generated manifest")
 
 
-def _slot(service: str, slot: str) -> tuple[Path, dict]:
+def _slot(service: str, slot: str) -> tuple[Path, dict[str, Any]]:
     path = ROOT / slot / service / "release-manifest.json"
     data = _manifest(path, ROOT, service, slot)
     source = (ROOT / slot / service).resolve(strict=True)
@@ -68,11 +68,11 @@ def _slot(service: str, slot: str) -> tuple[Path, dict]:
     return source, data
 
 
-def _runtime(args: argparse.Namespace, source: Path, data: dict) -> argparse.Namespace:
-    return SimpleNamespace(service=args.service, source=source, env_file=args.env_file,
-                           commit=data["commit"], image=data["image_ref"],
-                           local_image=_local_tag(args.service, data["commit"]),
-                           image_id=data["local_image_id"])
+def _runtime(args: argparse.Namespace, source: Path, data: dict[str, Any]) -> argparse.Namespace:
+    return argparse.Namespace(service=args.service, source=source, env_file=args.env_file,
+                              commit=data["commit"], image=data["image_ref"],
+                              local_image=_local_tag(args.service, data["commit"]),
+                              image_id=data["local_image_id"])
 
 
 def admit_target(args: argparse.Namespace) -> None:
@@ -110,7 +110,7 @@ def admit_target(args: argparse.Namespace) -> None:
     _validate_backup_mount(ROOT)
 
 
-def verify_running(args: argparse.Namespace, manifest: dict, source: Path) -> None:
+def verify_running(args: argparse.Namespace, manifest: dict[str, Any], source: Path) -> None:
     _snapshot(source, manifest["commit"])
     runtime = _runtime(args, source, manifest)
     verify_image(runtime.local_image, runtime.commit, args.service, runtime.image_id)
@@ -123,8 +123,8 @@ def admit_new(args: argparse.Namespace) -> None:
     if args.source != ROOT / "releases" / args.service / args.commit or (args.source / "release-manifest.json").exists():
         raise ValueError("North America update needs a new, clean commit release source")
     if args.service == "backend":
-        backend_preflight(SimpleNamespace(target=args.target, source=args.source, commit=args.commit,
-                                          image=args.image, backend_env=args.env_file, agent_env=args.agent_env))
+        backend_preflight(argparse.Namespace(target=args.target, source=args.source, commit=args.commit,
+                                            image=args.image, backend_env=args.env_file, agent_env=args.agent_env))
     else:
         result = subprocess.run([sys.executable, str(args.source / "scripts/north_america_release.py"),
                                  "--target", str(args.target), "--source", str(args.source),
@@ -169,9 +169,9 @@ def prepare(args: argparse.Namespace) -> tuple[argparse.Namespace, argparse.Name
             raise ValueError("North America rollback image schema differs from the live database")
     else:
         admit_new(args)
-        desired = SimpleNamespace(service=args.service, source=args.source, env_file=args.env_file,
-                                  commit=args.commit, image=args.image, local_image=args.local_image,
-                                  image_id=args.image_id)
+        desired = argparse.Namespace(service=args.service, source=args.source, env_file=args.env_file,
+                                     commit=args.commit, image=args.image, local_image=args.local_image,
+                                     image_id=args.image_id)
         if image_head(args.local_image) != revision:
             raise ValueError("North America update requires the same schema; migration needs a separately reviewed plan")
     return old, desired, revision
