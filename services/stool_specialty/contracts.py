@@ -27,6 +27,9 @@ StoolRiskLevel: TypeAlias = Literal[
 StoolField: TypeAlias = Literal[
     "color", "consistency", "findings", "risk_level", "summary", "care_advice",
 ]
+MEDICAL_RULE_VERSION: Literal["stool.medical.rules.2026-10-23.v1"] = (
+    "stool.medical.rules.2026-10-23.v1"
+)
 
 _COLORS = {"yellow", "yellow_brown", "brown", "green", "dark_green", "red", "black", "pale_gray_white", "mixed", "unknown"}
 _CONSISTENCIES = {"watery", "loose", "mushy", "formed", "hard_pellets", "sticky_tarry", "unknown"}
@@ -107,23 +110,20 @@ class PhotoObservation(BaseModel):
         return self
 
 
-class StoolAnalysisResult(BaseModel):
-    """Candidate result. Product validates it again before publication."""
+class StoolVisualAssessment(BaseModel):
+    """Model-produced visual observations; no model-owned medical risk or advice."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    schema_version: Literal["stool.result.v1"] = "stool.result.v1"
     assessment_status: Literal["assessed", "unable_to_assess"]
     color: StoolColor
     consistency: StoolConsistency
     findings: list[StoolFinding] = Field(min_length=1, max_length=7)
-    risk_level: StoolRiskLevel | None
     summary: str = Field(min_length=1, max_length=500)
-    care_advice: str = Field(min_length=1, max_length=800)
     uncertainties: list[str] = Field(default_factory=list, max_length=8)
     photo_observations: list[PhotoObservation] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")
-    def validate_medical_consistency(self) -> StoolAnalysisResult:
+    def validate_visual_consistency(self) -> StoolVisualAssessment:
         if len(set(self.findings)) != len(self.findings):
             raise ValueError("Duplicate findings")
         if "none" in self.findings and len(self.findings) != 1:
@@ -132,18 +132,13 @@ class StoolAnalysisResult(BaseModel):
         if positions != list(range(len(positions))):
             raise ValueError("Photo observations must be complete and ordered")
         if self.assessment_status == "unable_to_assess":
-            if self.risk_level is not None or not self.uncertainties:
-                raise ValueError("Unable assessment requires uncertainty and no risk level")
-        elif self.risk_level is None:
-            raise ValueError("Assessed result requires a risk level")
+            if not self.uncertainties:
+                raise ValueError("Unable assessment requires uncertainty")
         observed_findings = {
             finding for observation in self.photo_observations for finding in observation.findings
         }
         if not (_HIGH_FINDINGS & observed_findings).issubset(set(self.findings)):
             raise ValueError("Per-photo safety findings must be preserved in the overall result")
-        if _HIGH_FINDINGS.intersection(self.findings) and self.assessment_status == "assessed":
-            if self.risk_level is None or _RISK_ORDER[self.risk_level] < _RISK_ORDER["contact_pediatrician"]:
-                raise ValueError("Safety findings cannot be downgraded")
         for observation in self.photo_observations:
             if (observation.color == "red"
                     and not ({"suspected_blood", "uncertain"} & set(observation.findings))):
@@ -162,6 +157,27 @@ class StoolAnalysisResult(BaseModel):
             raise ValueError("Pale stool requires the corresponding safety finding")
         if self.consistency == "sticky_tarry" and "suspected_tarry_black_after_meconium" not in self.findings:
             raise ValueError("Tarry stool requires the corresponding safety finding")
+        return self
+
+
+class StoolAnalysisResult(StoolVisualAssessment):
+    """Rule-owned result. Product validates it again before publication."""
+
+    schema_version: Literal["stool.result.v1"] = "stool.result.v1"
+    rule_version: Literal["stool.medical.rules.2026-10-23.v1"] = MEDICAL_RULE_VERSION
+    risk_level: StoolRiskLevel | None
+    care_advice: str = Field(min_length=1, max_length=800)
+
+    @model_validator(mode="after")
+    def validate_medical_consistency(self) -> StoolAnalysisResult:
+        if self.assessment_status == "unable_to_assess":
+            if self.risk_level is not None:
+                raise ValueError("Unable assessment requires no risk level")
+        elif self.risk_level is None:
+            raise ValueError("Assessed result requires a risk level")
+        if _HIGH_FINDINGS.intersection(self.findings) and self.assessment_status == "assessed":
+            if self.risk_level is None or _RISK_ORDER[self.risk_level] < _RISK_ORDER["contact_pediatrician"]:
+                raise ValueError("Safety findings cannot be downgraded")
         return self
 
 

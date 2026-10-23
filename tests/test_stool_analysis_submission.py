@@ -356,3 +356,26 @@ def test_idempotency_rejects_changed_market_or_language(tmp_path):
             assert (await session.get(StoolAnalysis, first.id)).language == "zh"
         await engine.dispose()
     asyncio.run(run())
+
+
+def test_age_scope_uses_the_first_birthday_not_a_fixed_day_count(tmp_path):
+    async def run():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'birthday.db'}")
+        tables = [User.__table__, BabyProfile.__table__, StoolPhoto.__table__,
+                  StoolAnalysis.__table__, StoolAnalysisPhoto.__table__, StoolAnalysisEvent.__table__]
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        storage = Storage()
+        ids = await fixture(sessions, storage)
+        birthday = datetime(2026, 10, 23, tzinfo=timezone.utc)
+        async with sessions.begin() as session:
+            (await session.get(BabyProfile, ids[1])).birth_date = birthday.date().replace(year=2025)
+        accepted = await prepare(sessions, storage, ids, key="birthday", at=birthday)
+        assert accepted.status == "queued"
+        with pytest.raises(ApiError) as error:
+            await prepare(sessions, storage, ids, key="after-birthday", at=birthday + timedelta(days=1))
+        assert error.value.code == "stool_analysis_age_unsupported"
+        await engine.dispose()
+
+    asyncio.run(run())

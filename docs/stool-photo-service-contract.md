@@ -57,7 +57,7 @@
 
 **上下文封装通过 `stool.followup.ref.v1` 引用和 `stool.result.v1` 结果实现：**
 
-当前代码状态（2026-10-23）：Product Backend 已持久化任务、来源指纹、字段事件和最终结果；独立无状态服务使用可配置的 `gpt-5.4-mini` 生成严格结构化候选结果；App 已实现字段流、完成卡、历史恢复、删除与追问选择；Agent Runtime 每次相关模型调用前重新请求 Product，并把同次图片与完成结果作为低信任上下文。所有真实能力开关默认关闭，医学和隐私验收仍是生产门禁。
+当前代码状态（2026-10-23）：Product Backend 已持久化任务、来源指纹、字段事件和最终结果；独立无状态服务使用可配置的 `gpt-5.4-mini` 生成严格视觉观察，再由 `stool.medical.rules.2026-10-23.v1` 确定性生成风险和建议；App 已实现完成卡、历史恢复、删除与追问选择；Agent Runtime 每次相关模型调用前重新请求 Product，并把同次图片与完成结果作为低信任上下文。所有真实能力开关默认关闭，医学和隐私验收仍是生产门禁。
 
 - Product Backend 持有权威的 `analysis_id`、`owner_user_id`、`baby_id`、来源照片 ID/指纹/审核策略、最终结构化结果与版本、完成时间、生命周期和关联的授权对话。只有 `status=completed`、最终结果通过 schema/医学安全校验并持久化、照片仍可访问时才生成可用上下文引用。`queued/running/failed/cancelled` 的部分字段、过期审核或被撤销的照片不构成最终结果。不要从 App 传来的结论或普通附件推断“已完成”。
 - App/后续 Run 只传受限的 `analysis_id` 引用，不传原图 URL、对象 key、供应商响应、自由文本医学结论或“已通过审核”布尔值。Product Backend 对每次解析核验当前用户/宝宝/关联对话授权及保留期；Agent Runtime 的内部服务身份不能绕过当前用户权限。参照现有文件资产机制，但必须使用**专项用途的解析边界**，不能把 `stool_photos` 伪装成普通 `model_image` 文件附件。
@@ -83,7 +83,7 @@
 
 OpenAI 官方 Decisions API（`https://developers.openai.com/api/docs/guides/decisions`，实施时须复核）当前为公开测试版，支持图片 `predicate`/`choice`/`score` 问题；可作为**审核服务的候选实现**，不作为独立 API 契约，也不能把概率当成已校准的产品阈值。供应商调用需要由后端从私有存储读取字节，不能将项目 `photo_id` 当成其 `file_id` 输入；能力、费用和可用性发布前重新核对。输出由策略层校准为稳定原因码，保留供应商/提示/阈值版本，模型失败则 fail-closed。OpenAI Moderation API 的通用有害内容类别不等价于“是否有宝宝面部/隐私部位”或“便便是否清晰”。
 
-**必须先决定第三方图片处理是否允许**（儿童图片、地区、用户告知/授权、合同、数据保留和事故流程）。后端发现“隐私部位”若依赖第三方图片理解，就意味着图片已先传给第三方；不能宣传为“敏感图不会传第三方”。在批准前供应商适配器默认关闭，照片审核不可自动放行。目前 Decisions 适配器仅返回 `inconclusive`，**即使配置了第三方访问也不放行**；须有标注集、阈值和策略签字后才可添加自动放行逻辑。如需“敏感图绝不进入第三方”，须先在本地或自有环境做拦截/裁剪且验证其漏检风险。日志、指标、错误回执和 CI 样例均不得包含原图、EXIF、模型输入或婴儿可识别信息。
+**必须先决定第三方图片处理是否允许**（儿童图片、地区、用户告知/授权、合同、数据保留和事故流程）。后端发现“隐私部位”若依赖第三方图片理解，就意味着图片已先传给第三方；不能宣传为“敏感图不会传第三方”。供应商适配器默认关闭；明确配置隐私批准、`gpt-6-luna` 和审核开关后，Decisions 适配器才按版本化严格阈值输出 passed/rejected/inconclusive。真实开放前仍须以标注集校准阈值并完成策略签字。如需“敏感图绝不进入第三方”，须先在本地或自有环境做拦截/裁剪并验证漏检风险。日志、指标、错误回执和 CI 样例均不得包含原图、EXIF、模型输入或婴儿可识别信息。
 
 ## 验收门槛（测试先于发布）
 
@@ -102,7 +102,7 @@ PR 级门禁先覆盖确定性规则/权限/事件断言；受限夜间回归覆
 ## 与现状的差距及实施切片
 
 - 目前 `app/lib/features/agent_hub/agent_hub_page.dart` 的看便便任务卡已移除旧版选图后通过通用 Agent Run 提交的行为；改为原图 10 MB、格式及本机可解码短边校验，专用私有上传与逐张审核。能力探针由服务端配置控制且默认关闭；HEIC 的短边在本机不支持解码时由 Backend 最终验证。
-- **新增** `backend/app/modules/stool_photos` 私有原图上传、像素/格式校验、状态查询、能力探针与撤销；`backend/app/workers/stool_photo_reviews.py` 提供持久审核及清理 worker，已接入本地/CI 的独立 worker，生产尚未部署。默认审核 provider 为 disabled；Decisions 适配器按严格阈值输出 passed/rejected/inconclusive。独立分析服务和 App 流式完成卡已接入，但生产默认关闭。
+- **新增** `backend/app/modules/stool_photos` 私有原图上传、像素/格式校验、状态查询、能力探针与撤销；`backend/app/workers/stool_photo_reviews.py` 提供持久审核、显式删除和审核到期未关联照片清理。部署 Compose 和 B 激活脚本已包含审核 worker、分析 worker 与最小凭据专项容器；真实主机仍未在本次变更中启用。默认审核 provider 为 disabled。
 - `backend/app/modules/files/service.py` 的通用上传只按字节上限拦截；`backend/app/modules/files/vision_providers.py` 的 `general` 是通用描述，`schedule` 是日程提取；不可换名当专项审核。现有文件尚无便便用途隔离或审核凭证。
 - `agent/app/agent_runtime/context/stool_followup.py` 已实现逐次授权的同源结果与图片物化；不会把图片字节或结果写进普通历史/压缩状态。
 

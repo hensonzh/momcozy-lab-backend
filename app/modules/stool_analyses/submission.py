@@ -6,7 +6,7 @@ commit together. The photo/review/retention policy is not released yet.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Literal, Sequence
 from uuid import UUID, uuid4
@@ -29,6 +29,13 @@ from .transport_contract import SpecialtyTransportEvent
 
 def _not_approved() -> ApiError:
     return ApiError(code="stool_photos_not_approved", message="Every photo must have a current approved review.", status=409)
+
+
+def _first_birthday(birth_date: date) -> date:
+    try:
+        return birth_date.replace(year=birth_date.year + 1)
+    except ValueError:  # February 29 has no same-date anniversary in a non-leap year.
+        return birth_date.replace(year=birth_date.year + 1, day=28)
 
 
 class StoolAnalysisSubmission:
@@ -61,8 +68,7 @@ class StoolAnalysisSubmission:
             raise ApiError(code="stool_analysis_context_unavailable", message="Analysis context is unavailable.", status=409)
         if baby.birth_date is None:
             raise ApiError(code="stool_analysis_age_unsupported", message="Baby age is required for analysis.", status=409)
-        age_days = (at.date() - baby.birth_date).days
-        if age_days < 0 or age_days > 366:
+        if at.date() < baby.birth_date or at.date() > _first_birthday(baby.birth_date):
             raise ApiError(code="stool_analysis_age_unsupported", message="Stool analysis supports babies from birth to one year.", status=409)
         rows = (await self.session.scalars(select(StoolPhoto).where(
             StoolPhoto.id.in_(photo_ids), StoolPhoto.owner_user_id == owner,

@@ -101,7 +101,19 @@ def test_stool_capability_disables_capture_without_calibrated_review_policy():
     app.dependency_overrides[require_current_user] = lambda: SimpleNamespace(user_id=owner)
     response = TestClient(app).get('/v1/stool-photos/capability')
     assert response.status_code == 200
-    assert response.json() == {'review_available': False, 'analysis_available': False}
+    assert response.json() == {'review_available': False, 'analysis_available': False, 'followup_available': False}
+
+
+
+def test_followup_capability_requires_both_analysis_and_followup_gates():
+    owner = uuid4()
+    app = create_app(Settings(app_env="test"))
+    app.dependency_overrides[require_current_user] = lambda: SimpleNamespace(user_id=owner)
+    for analysis, followup, expected in ((False, False, False), (True, False, False), (True, True, True)):
+        app.state.settings = Settings(app_env="test", stool_analysis_enabled=analysis, stool_followup_enabled=followup)
+        response = TestClient(app).get('/v1/stool-photos/capability')
+        assert response.status_code == 200
+        assert response.json()['followup_available'] is expected
 
 
 def test_stool_upload_fails_closed_when_review_unavailable_even_for_valid_authenticated_photo():
@@ -118,5 +130,5 @@ def test_stool_upload_fails_closed_when_review_unavailable_even_for_valid_authen
     assert response.json()["error"]["code"] == "stool_photo_review_unavailable"
     assert service.uploads == 0
     assert TestClient(app).get("/v1/stool-photos/capability").json() == {
-        "review_available": False, "analysis_available": False,
+        "review_available": False, "analysis_available": False, "followup_available": False,
     }

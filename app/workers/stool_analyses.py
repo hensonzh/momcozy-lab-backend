@@ -10,7 +10,7 @@ import httpx
 from ..core.settings import Settings
 from ..infrastructure.db import create_db_engine, create_session_factory
 from ..infrastructure.object_storage import create_object_storage
-from ..modules.stool_analyses.dispatch_pump import StoolAnalysisDispatchPump
+from ..modules.stool_analyses.dispatch_pump import StoolAnalysisDispatchPump, dispatch_lease_for_timeout
 from ..modules.stool_analyses.transport_client import SpecialtyClient
 
 LOGGER = logging.getLogger(__name__)
@@ -33,11 +33,15 @@ async def run() -> None:
                 http, origin=settings.stool_specialty_origin,
                 market=cast(Literal["CN", "US"], settings.stool_specialty_market),
                 secret=settings.stool_specialty_service_secret,
-                allow_insecure_test=settings.app_env in {"local", "test"},
+                allow_insecure_private=(
+                    settings.app_env in {"local", "test"}
+                    or settings.stool_specialty_allow_insecure_private_network
+                ),
             )
             pump = StoolAnalysisDispatchPump(
                 sessions=sessions, storage=storage, client=client,
                 market=cast(Literal["CN", "US"], settings.stool_specialty_market),
+                lease=dispatch_lease_for_timeout(settings.stool_specialty_request_timeout_seconds),
             )
             while True:
                 try:

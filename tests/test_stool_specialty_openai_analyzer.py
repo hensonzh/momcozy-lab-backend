@@ -7,7 +7,8 @@ from uuid import uuid4
 import pytest
 
 from services.stool_specialty.analyzer import OpenAIStoolAnalyzer, SYSTEM_PROMPT
-from services.stool_specialty.contracts import AnalysisInput, StoolAnalysisResult
+from services.stool_specialty.contracts import AnalysisInput, StoolVisualAssessment
+from services.stool_specialty.medical_rules import MEDICAL_RULE_VERSION
 
 
 class FakeClient:
@@ -48,10 +49,9 @@ def payload():
 
 
 def result():
-    return StoolAnalysisResult.model_validate({
+    return StoolVisualAssessment.model_validate({
         "assessment_status": "assessed", "color": "brown", "consistency": "formed",
-        "findings": ["none"], "risk_level": "routine", "summary": "Visible brown formed stool.",
-        "care_advice": "Continue routine observation.", "uncertainties": [],
+        "findings": ["none"], "summary": "Visible brown formed stool.", "uncertainties": [],
         "photo_observations": [{"position": 0, "image_quality": "adequate", "color": "brown",
             "consistency": "formed", "findings": ["none"], "note": "The stool is visible."}],
     })
@@ -65,13 +65,16 @@ def test_lightweight_model_uses_private_structured_responses_request():
     )
     output = asyncio.run(analyzer.analyze(payload()))
     assert output.risk_level == "routine"
+    assert output.rule_version == MEDICAL_RULE_VERSION
+    assert output.care_advice.startswith("Continue observing")
     assert fake.client_kwargs == {"api_key": "test-key", "max_retries": 0, "timeout": 3}
     assert fake.parse_kwargs["model"] == "gpt-5.4-mini"
     assert fake.parse_kwargs["instructions"] == SYSTEM_PROMPT
-    assert fake.parse_kwargs["text_format"] is StoolAnalysisResult
+    assert fake.parse_kwargs["text_format"] is StoolVisualAssessment
     assert fake.parse_kwargs["store"] is False
     assert fake.parse_kwargs["input"][0]["content"][1]["type"] == "input_image"
     assert fake.parse_kwargs["input"][0]["content"][1]["detail"] == "high"
+    assert MEDICAL_RULE_VERSION in fake.parse_kwargs["input"][0]["content"][0]["text"]
     assert "owner" not in str(fake.parse_kwargs).lower()
 
 

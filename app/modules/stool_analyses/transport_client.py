@@ -22,13 +22,16 @@ class SpecialtyPermanentError(Exception):
 
 class SpecialtyClient:
     def __init__(self, http: httpx.AsyncClient, *, origin: str, market: str, secret: str,
-                 allow_insecure_test: bool = False) -> None:
+                 allow_insecure_private: bool = False) -> None:
         parsed = urlparse(origin)
         try:
             valid_port = parsed.port is None or 1 <= parsed.port <= 65535
         except ValueError:
             valid_port = False
-        if (not valid_port or parsed.scheme not in ({"http", "https"} if allow_insecure_test else {"https"})
+        allowed_schemes = {"https"}
+        if allow_insecure_private and parsed.hostname in {"stool-specialty", "localhost", "127.0.0.1"}:
+            allowed_schemes.add("http")
+        if (not valid_port or parsed.scheme not in allowed_schemes
                 or not parsed.hostname or parsed.username or parsed.password
                 or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
             raise ValueError("Specialty origin must be a secure service origin")

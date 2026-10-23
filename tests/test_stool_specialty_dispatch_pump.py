@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.infrastructure.db.base import Base
 from app.modules.baby.profile_models import BabyProfile
-from app.modules.stool_analyses.dispatch_pump import SyntheticStoolDispatchPump
+from app.modules.stool_analyses.dispatch_pump import (
+    SyntheticStoolDispatchPump, dispatch_lease_for_timeout,
+)
 from app.modules.stool_analyses.models import StoolAnalysis, StoolAnalysisEvent, StoolAnalysisPhoto
 from app.modules.stool_analyses.transport_client import SpecialtyClient
 from app.modules.stool_photos.models import StoolPhoto
@@ -58,6 +60,11 @@ async def pump(sessions, storage, specialty):
     http = httpx.AsyncClient(transport=httpx.ASGITransport(app=specialty), base_url="https://specialty.test")
     return http, SyntheticStoolDispatchPump(sessions=sessions, storage=storage,
         client=SpecialtyClient(http, origin="https://specialty.test", market="US", secret=SECRET), market="US")
+
+
+def test_dispatch_lease_always_exceeds_the_whole_http_timeout():
+    assert dispatch_lease_for_timeout(45) == timedelta(seconds=75)
+    assert dispatch_lease_for_timeout(1) >= timedelta(seconds=60)
 
 
 def test_streamed_failure_is_durable_replay_after_restart(tmp_path):

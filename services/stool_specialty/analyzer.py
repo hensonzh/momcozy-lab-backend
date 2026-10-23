@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from .contracts import AnalysisInput, StoolAnalysisResult
+from .contracts import AnalysisInput, StoolAnalysisResult, StoolVisualAssessment
+from .medical_rules import apply_medical_rules, medical_rule_context
 
 SYSTEM_PROMPT = Path(__file__).with_name("system_prompt.txt").read_text(encoding="utf-8").strip()
 MAX_OUTPUT_TOKENS = 2200
@@ -37,7 +38,8 @@ class OpenAIStoolAnalyzer:
             "language": payload.language,
             "baby_context": payload.baby_context.model_dump(mode="json"),
             "photo_count": len(payload.photos),
-            "instruction": "Analyze the ordered images and return only the structured result.",
+            "medical_rules": medical_rule_context(market=payload.market, language=payload.language),
+            "instruction": "Analyze the ordered images and return only structured visual observations.",
         }
         content: list[dict[str, Any]] = [{
             "type": "input_text",
@@ -61,7 +63,7 @@ class OpenAIStoolAnalyzer:
                         model=self.model,
                         instructions=SYSTEM_PROMPT,
                         input=[{"role": "user", "content": content}],
-                        text_format=StoolAnalysisResult,
+                        text_format=StoolVisualAssessment,
                         store=False,
                         max_output_tokens=MAX_OUTPUT_TOKENS,
                     ),
@@ -72,7 +74,8 @@ class OpenAIStoolAnalyzer:
         if str(getattr(response, "status", "completed") or "") != "completed":
             raise RuntimeError("Stool model response incomplete")
         try:
-            result = StoolAnalysisResult.model_validate(getattr(response, "output_parsed", None))
+            assessment = StoolVisualAssessment.model_validate(getattr(response, "output_parsed", None))
+            result = apply_medical_rules(payload, assessment)
         except Exception as exc:
             raise RuntimeError("Stool model response invalid") from exc
         if len(result.photo_observations) != len(payload.photos):

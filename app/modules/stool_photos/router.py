@@ -59,7 +59,11 @@ async def stool_photo_capability(
     review_available: bool = Depends(stool_photo_review_available),
 ) -> dict[str, bool]:
     settings = _request.app.state.settings
-    return {"review_available": review_available, "analysis_available": bool(settings.stool_analysis_enabled)}
+    return {
+        "review_available": review_available,
+        "analysis_available": bool(settings.stool_analysis_enabled),
+        "followup_available": bool(settings.stool_analysis_enabled and settings.stool_followup_enabled),
+    }
 
 
 @router.get("/{photo_id}/review", response_model=StoolPhotoRead)

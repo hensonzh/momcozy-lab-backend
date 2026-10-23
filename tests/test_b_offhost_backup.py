@@ -81,6 +81,7 @@ def test_package_three_verified_runs(tmp_path: Path) -> None:
 
 def test_direct_script_invocation() -> None:
     import subprocess
-    result = subprocess.run(["python3", str(Path(__file__).resolve().parents[1] / "scripts/b_offhost_backup.py"), "--help"],
+    import sys
+    result = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "scripts/b_offhost_backup.py"), "--help"],
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0

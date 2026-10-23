@@ -704,3 +704,23 @@ def test_stool_analysis_and_followup_are_explicitly_configured(monkeypatch: pyte
                  stool_specialty_service_secret="s" * 32).validate_for_startup()
     with pytest.raises(ValueError, match="STOOL_FOLLOWUP_ENABLED"):
         Settings(stool_followup_enabled=True).validate_for_startup()
+
+
+def test_decisions_review_uses_the_supported_model_only() -> None:
+    assert Settings().stool_photo_review_model == "gpt-6-luna"
+    valid = Settings(
+        app_env="test",
+        openai_api_key="test-key",
+        stool_photo_review_provider="decisions",
+        stool_photo_review_model="gpt-6-luna",
+        stool_photo_third_party_approved=True,
+    )
+    valid.validate_for_startup()
+    with pytest.raises(ValueError, match="gpt-6-luna"):
+        Settings(
+            app_env="test",
+            openai_api_key="test-key",
+            stool_photo_review_provider="decisions",
+            stool_photo_review_model="gpt-5.4-mini",
+            stool_photo_third_party_approved=True,
+        ).validate_for_startup()

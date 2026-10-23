@@ -17,6 +17,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY --chown=app:app alembic.ini alembic.ini
 COPY --chown=app:app migrations migrations
 COPY --chown=app:app app app
+COPY --chown=app:app services services
 COPY --chown=app:app assets assets
 COPY --chown=app:app scripts/deliver_auth_emails.py scripts/deliver_auth_emails.py
 RUN install -d -o app -g app /workspace/.local/object_storage

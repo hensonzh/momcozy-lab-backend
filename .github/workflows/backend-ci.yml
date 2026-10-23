@@ -146,7 +146,7 @@ jobs:
       - name: Verify non-root runtime user
         run: test "$(docker image inspect --format '{{.Config.User}}' momcozy-lab-backend:ci)" = "app"
 
-      - name: Build independent stool specialty image (not published or deployed)
+      - name: Build the isolated specialty image contract
         uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
         with:
           context: .

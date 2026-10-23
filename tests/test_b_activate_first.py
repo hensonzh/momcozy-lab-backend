@@ -3,6 +3,7 @@
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,7 +20,8 @@ def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPat
     source = tmp_path / "release"
     source.mkdir()
     (source / "docker-compose.us-east-uat.yml").write_text(
-        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n  stool-photo-review-worker:\n"
+        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n"
+        "  stool-photo-review-worker:\n  stool-specialty:\n  stool-analysis-worker:\n"
     )
     args = SimpleNamespace(service="backend", source=source, env_file=private,
                            local_image="b:verified", commit="a" * 40)
@@ -27,7 +29,10 @@ def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPat
     assert calls
     command = calls[0]
     assert "--no-deps" in command and "--pull" in command and "never" in command
-    assert command[-4:] == ["api", "notification-worker", "auth-email-worker", "stool-photo-review-worker"]
+    assert command[-6:] == [
+        "api", "notification-worker", "auth-email-worker", "stool-photo-review-worker",
+        "stool-specialty", "stool-analysis-worker",
+    ]
     assert not any(name in command for name in ("postgres", "redis", "minio", "down", "-v"))
 
 
@@ -61,7 +66,7 @@ def test_refuses_pointer_or_manifest_before_mutation(tmp_path: Path, monkeypatch
 
 
 def test_direct_entrypoint_imports() -> None:
-    result = subprocess.run(["python3", str(Path(__file__).resolve().parents[1] / "scripts/b_activate_first.py"), "--help"],
+    result = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "scripts/b_activate_first.py"), "--help"],
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0
 

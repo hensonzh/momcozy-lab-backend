@@ -1,6 +1,7 @@
 """Live B MinIO recovery refuses the wrong state and never targets A."""
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -75,7 +76,7 @@ def test_restoration_uses_scratch_networkless_minio(tmp_path: Path, monkeypatch:
 
 
 def test_direct_script_invocation_imports_repository() -> None:
-    result = subprocess.run(["python3", str(recovery.SOURCE_ROOT / "scripts/b_minio_recovery.py"), "--help"],
+    result = subprocess.run([sys.executable, str(recovery.SOURCE_ROOT / "scripts/b_minio_recovery.py"), "--help"],
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0
     assert "--apply" in result.stdout

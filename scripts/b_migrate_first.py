@@ -41,7 +41,10 @@ def check_first_release() -> None:
     )
     if result.stdout.strip():
         raise ValueError("B first release already has Agent containers")
-    for service in ("api", "notification-worker", "auth-email-worker", "stool-photo-review-worker"):
+    for service in (
+        "api", "notification-worker", "auth-email-worker", "stool-photo-review-worker",
+        "stool-specialty", "stool-analysis-worker",
+    ):
         result = subprocess.run(
             ["docker", "ps", "-a", "--filter", "label=com.docker.compose.project=momcozy-lab-backend-us-east-uat",
              "--filter", f"label=com.docker.compose.service={service}", "--format", "{{.ID}}"],

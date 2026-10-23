@@ -27,13 +27,15 @@ def verify(repo: str, commit: str, digest: str) -> None:
         raise ValueError("published B image identity differs")
     # Compile and resolve B Compose entry modules without executing startup or
     # connecting to DB/Redis/provider services on the CI runner.
-    imports = ("app.main", "scripts.deliver_auth_emails") if repo == "backend" else ("app.main", "app.workers.agent_run")
+    imports = (("app.main", "scripts.deliver_auth_emails", "services.stool_specialty.main")
+               if repo == "backend" else ("app.main", "app.workers.agent_run"))
     modules = repr(imports)
     subprocess.run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "python", image,
                     "-c", "import importlib.util, sys; sys.exit(0 if all(importlib.util.find_spec(name) is not None for name in " + modules + ") else 1)"],
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
     subprocess.run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "python", image,
-                    "-m", "compileall", "-q", "app", "migrations", "scripts"],
+                    "-m", "compileall", "-q", "app", "migrations", "scripts",
+                    *(["services"] if repo == "backend" else [])],
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
     subprocess.run(["docker", "run", "--rm", "--network", "none", "--entrypoint", "python", image,
                     "-m", "alembic", "-c", "alembic.ini", "heads"],
