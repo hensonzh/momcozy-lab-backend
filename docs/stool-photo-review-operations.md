@@ -14,7 +14,7 @@
 
 ## Decisions 审核策略
 
-照片审核固定使用 Decisions 和 `gpt-6-luna`；没有独立功能开关，缺少专用 `STOOL_DECISIONS_API_KEY` 时不可提交。
+照片审核固定使用 Decisions 和 `gpt-6-sol`；没有独立功能开关，缺少专用 `STOOL_DECISIONS_API_KEY` 时不可提交。
 
 策略分别判断：便便主体、颜色/形状清晰度、光线，以及宝宝面部、隐私部位和其他敏感信息。明确不符合时拒绝；所有正向条件高置信满足且敏感项低置信时通过；中间区间返回 `inconclusive`。provider 错误、超时、结果缺失或对象被篡改一律 fail closed。阈值属于工程默认值，真实发布前仍须用经同意的儿童图片标注集校准。
 

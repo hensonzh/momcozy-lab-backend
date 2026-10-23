@@ -712,4 +712,4 @@ def test_decisions_review_uses_the_supported_model_only() -> None:
     async def unused(_payload):
         return {}
 
-    assert DecisionsReviewProvider(post=unused).model == "gpt-6-luna"
+    assert DecisionsReviewProvider(post=unused).model == "gpt-6-sol"

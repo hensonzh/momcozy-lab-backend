@@ -48,7 +48,7 @@ class DecisionsReviewProvider:
         self,
         *,
         post: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
-        model: str = "gpt-6-luna",
+        model: str = "gpt-6-sol",
         pass_threshold: float = 0.85,
         reject_threshold: float = 0.80,
         policy_version: str = "stool-photo-review-v1",
