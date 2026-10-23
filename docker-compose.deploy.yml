@@ -96,6 +96,64 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  stool-photo-review-worker:
+    <<: *backend-image
+    command: python -m app.workers.stool_photo_reviews
+    restart: unless-stopped
+    init: true
+    cpus: 0.25
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  stool-analysis-worker:
+    <<: *backend-image
+    command: python -m app.workers.stool_analyses
+    restart: unless-stopped
+    init: true
+    cpus: 0.5
+    mem_limit: 768m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      stool-specialty:
+        condition: service_healthy
+
+  stool-specialty:
+    image: ${MOMCOZY_BACKEND_IMAGE:?Set MOMCOZY_BACKEND_IMAGE to an immutable digest reference}
+    command: uvicorn services.stool_specialty.main:app --host 0.0.0.0 --port 8000 --no-access-log
+    environment:
+      APP_ENV: ${APP_ENV:?Set APP_ENV}
+      SSL_CERT_FILE: /run/momcozy/trust-bundle.pem
+      STOOL_SPECIALTY_MARKET: ${STOOL_SPECIALTY_MARKET:-}
+      STOOL_SPECIALTY_SERVICE_SECRET: ${STOOL_SPECIALTY_SERVICE_SECRET:-}
+      STOOL_SPECIALTY_ANALYSIS_ENABLED: ${STOOL_SPECIALTY_ANALYSIS_ENABLED:-false}
+      STOOL_SPECIALTY_PROVIDER: ${STOOL_SPECIALTY_PROVIDER:-disabled}
+      STOOL_SPECIALTY_OPENAI_MODEL: ${STOOL_SPECIALTY_OPENAI_MODEL:-gpt-5.4-mini}
+      STOOL_SPECIALTY_REQUEST_TIMEOUT_SECONDS: ${STOOL_SPECIALTY_REQUEST_TIMEOUT_SECONDS:-35}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      - ${MOMCOZY_BACKEND_TRUST_BUNDLE_FILE:-/etc/ssl/certs/ca-certificates.crt}:/run/momcozy/trust-bundle.pem:ro
+    networks:
+      deployment:
+        aliases: [stool-specialty]
+    restart: unless-stopped
+    init: true
+    cpus: 0.5
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   postgres:
     image: postgres:16
     restart: unless-stopped

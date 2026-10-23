@@ -72,6 +72,22 @@ def prepare_model_image(body: bytes) -> bytes:
         image.close()
 
 
+def prepare_bounded_model_image(
+    body: bytes, *, max_side: int = 2048, max_bytes: int = 2_000_000,
+) -> bytes:
+    """Metadata-free model JPEG with explicit dimensions and byte ceiling."""
+    if max_side < 720 or max_bytes < 100_000:
+        raise ValueError("Invalid model image bounds")
+    with Image.open(BytesIO(prepare_model_image(body))) as image:
+        image.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        for quality in (85, 70, 55):
+            output = BytesIO()
+            image.save(output, format="JPEG", quality=quality, optimize=True)
+            if len(output.getvalue()) <= max_bytes:
+                return output.getvalue()
+    raise ApiError(code="stool_photo_model_image_too_large", message="Photo cannot be prepared safely.", status=422)
+
+
 def prepare_stool_thumbnail(body: bytes, *, content_type: str, width: int, height: int) -> bytes:
     """Private 512px JPEG preview. No source EXIF, original bytes or object key leave storage."""
     image, image_format = _read_image(body)

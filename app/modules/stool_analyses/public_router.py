@@ -1,15 +1,10 @@
-"""Fail-closed App contract for a future, independently validated specialty service.
-
-Only tests override availability; Agent thread ownership is verified by
-its own bearer-authenticated endpoint. No clinical result writer, provider, public feature flag, or user-visible stream
-is enabled by adding these routes.
-"""
+"""Configuration-gated public App contract for the independent stool-analysis flow."""
 from __future__ import annotations
 
 import json
 from datetime import datetime
 from collections.abc import AsyncIterator
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import httpx
@@ -29,8 +24,8 @@ from ..audit.repository import AuditRepository
 from ..auth import CurrentUser
 from ..stool_photos.repository import StoolPhotoRepository
 from ..stool_photos.service import StoolPhotoService
-from .events import StoolNonmedicalEventLedger
-from .submission import SyntheticStoolSubmission
+from .events import StoolAnalysisEventLedger
+from .submission import StoolAnalysisSubmission
 from .photo_viewer import StoolAnalysisPhotoViewer
 from .deletion import StoolAnalysisDeletionService
 
@@ -51,6 +46,8 @@ class StoolAnalysisRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
     analysis_id: UUID
     status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    result_schema_version: Literal["stool.result.v1"] | None = None
+    result: dict[str, Any] | None = None
 
 
 class StoolAnalysisHistoryItem(StoolAnalysisRead):
@@ -72,9 +69,8 @@ class StoolAnalysisPhotosRead(BaseModel):
     items: list[StoolAnalysisPhotoRead]
 
 
-def analysis_available() -> bool:
-    # Requires medically validated specialty service, approved retention and thread binding.
-    return False
+def analysis_available(request: Request) -> bool:
+    return bool(request.app.state.settings.stool_analysis_enabled)
 
 
 def _require_available(available: bool) -> None:
@@ -131,20 +127,20 @@ def get_submission_service(
     guard: None = Depends(require_analysis_available),
     session: AsyncSession = Depends(get_session),
     storage: ObjectStorage = Depends(get_object_storage),
-) -> SyntheticStoolSubmission:
+) -> StoolAnalysisSubmission:
     repository = AuditRepository(session)
-    return SyntheticStoolSubmission(
+    return StoolAnalysisSubmission(
         session=session, storage=storage,
         idempotency=IdempotencyService(repository=repository), audit=AuditService(repository=repository),
     )
 
 
 def get_event_ledger(guard: None = Depends(require_analysis_available),
-                     session: AsyncSession = Depends(get_session)) -> StoolNonmedicalEventLedger:
-    return StoolNonmedicalEventLedger(session)
+                     session: AsyncSession = Depends(get_session)) -> StoolAnalysisEventLedger:
+    return StoolAnalysisEventLedger(session)
 
 
-@router.post("", status_code=202, response_model=StoolAnalysisRead)
+@router.post("", status_code=202, response_model=StoolAnalysisRead, response_model_exclude_none=True)
 async def submit_stool_analysis(
     payload: StoolAnalysisCreate, request: Request, response: Response,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=255),
@@ -152,7 +148,7 @@ async def submit_stool_analysis(
     user: CurrentUser = Depends(require_current_user),
     available: bool = Depends(analysis_available),
     verified_thread_id: UUID = Depends(verify_stool_thread),
-    service: SyntheticStoolSubmission = Depends(get_submission_service),
+    service: StoolAnalysisSubmission = Depends(get_submission_service),
 ) -> StoolAnalysisRead:
     response.headers["Cache-Control"] = "private, no-store"
     _require_available(available)
@@ -165,7 +161,11 @@ async def submit_stool_analysis(
         trusted_market=market, language=language,
         request_id=str(getattr(request.state, "request_id", "") or ""),
     )
-    return StoolAnalysisRead.model_validate({"analysis_id": analysis.id, "status": analysis.status})
+    return StoolAnalysisRead.model_validate({
+        "analysis_id": analysis.id, "status": analysis.status,
+        "result_schema_version": getattr(analysis, "result_schema_version", None),
+        "result": getattr(analysis, "final_result", None),
+    })
 
 
 @router.get("", response_model=StoolAnalysisHistoryPage)
@@ -176,7 +176,7 @@ async def list_stool_analyses(
     user: CurrentUser = Depends(require_current_user),
     available: bool = Depends(analysis_available),
     verified_thread_id: UUID = Depends(verify_stool_history_thread),
-    ledger: StoolNonmedicalEventLedger = Depends(get_event_ledger),
+    ledger: StoolAnalysisEventLedger = Depends(get_event_ledger),
 ) -> StoolAnalysisHistoryPage:
     response.headers["Cache-Control"] = "private, no-store"
     _require_available(available)
@@ -188,20 +188,26 @@ async def list_stool_analyses(
     return StoolAnalysisHistoryPage(items=[StoolAnalysisHistoryItem.model_validate({
         "analysis_id": row.id, "baby_id": row.baby_id,
         "status": row.status, "created_at": row.created_at,
+        "result_schema_version": getattr(row, "result_schema_version", None),
+        "result": getattr(row, "final_result", None),
     }) for row in rows], next_cursor=next_cursor)
 
 
-@router.get("/{analysis_id}", response_model=StoolAnalysisRead)
+@router.get("/{analysis_id}", response_model=StoolAnalysisRead, response_model_exclude_none=True)
 async def get_stool_analysis(
     analysis_id: UUID, response: Response,
     user: CurrentUser = Depends(require_current_user),
     available: bool = Depends(analysis_available),
-    ledger: StoolNonmedicalEventLedger = Depends(get_event_ledger),
+    ledger: StoolAnalysisEventLedger = Depends(get_event_ledger),
 ) -> StoolAnalysisRead:
     response.headers["Cache-Control"] = "private, no-store"
     _require_available(available)
     analysis = await ledger.get_analysis(owner=user.user_id, analysis_id=analysis_id)
-    return StoolAnalysisRead.model_validate({"analysis_id": analysis.id, "status": analysis.status})
+    return StoolAnalysisRead.model_validate({
+        "analysis_id": analysis.id, "status": analysis.status,
+        "result_schema_version": getattr(analysis, "result_schema_version", None),
+        "result": getattr(analysis, "final_result", None),
+    })
 
 
 def get_photo_viewer(
@@ -279,7 +285,7 @@ async def stream_stool_analysis_events(
     after_sequence: int = Query(default=0, ge=0),
     user: CurrentUser = Depends(require_current_user),
     available: bool = Depends(analysis_available),
-    ledger: StoolNonmedicalEventLedger = Depends(get_event_ledger),
+    ledger: StoolAnalysisEventLedger = Depends(get_event_ledger),
 ) -> StreamingResponse:
     _require_available(available)
     # Materialize a bounded committed page under authorization before streaming.
@@ -289,7 +295,9 @@ async def stream_stool_analysis_events(
         data = json.dumps({
             "analysis_id": str(item.analysis_id), "sequence": item.sequence,
             "schema_version": item.schema_version, "event_type": item.event_type,
-        }, separators=(",", ":"))
+            **({"payload": getattr(item, "payload", None)}
+               if getattr(item, "payload", None) is not None else {}),
+        }, separators=(",", ":"), ensure_ascii=False)
         frames.append(f"id: {item.sequence}\nevent: {item.event_type}\ndata: {data}\n\n")
     return StreamingResponse(
         iter(frames), media_type="text/event-stream",

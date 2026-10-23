@@ -67,23 +67,24 @@ def business_services(service: str, source: Path | None = None) -> tuple[str, ..
     if service != "backend":
         raise ValueError("Unknown B service")
     base = ("api", "notification-worker", "auth-email-worker")
+    stool = ("stool-photo-review-worker", "stool-specialty", "stool-analysis-worker")
     if source is None:
-        return (*base, "stool-photo-review-worker")  # First release of this source.
+        return (*base, *stool)
     compose = (source / "docker-compose.us-east-uat.yml").read_text()
     if any(f"\n  {name}:\n" not in compose for name in base):
         raise ValueError("B release source omits a required Product service")
-    return (*base, "stool-photo-review-worker") if "\n  stool-photo-review-worker:\n" in compose else base
+    return (*base, *(name for name in stool if f"\n  {name}:\n" in compose))
 
 
 def stop_removed_review_worker(service: str, running: argparse.Namespace, desired: argparse.Namespace) -> None:
-    """Stop only a verified B Product worker omitted by the desired source."""
+    """Stop verified Product stool services omitted by the desired source."""
     if service != "backend":
         return
     current = business_services(service, running.source)
     next_services = business_services(service, desired.source)
-    if "stool-photo-review-worker" in current and "stool-photo-review-worker" not in next_services:
-        _run(_compose(running, ["stop", "stool-photo-review-worker"]),
-             cwd=running.source, env=_environment(running))
+    for name in sorted(set(current) - set(next_services)):
+        if name.startswith("stool-"):
+            _run(_compose(running, ["stop", name]), cwd=running.source, env=_environment(running))
 
 
 def check_service_containers_absent(service: str) -> None:
@@ -119,16 +120,17 @@ def check_running_service_provenance(args: argparse.Namespace) -> None:
                 or labels.get("com.docker.compose.project.environment_file") != str(args.env_file)
                 or labels.get("com.docker.compose.config-hash") != configured_hash[1]):
             raise ValueError("North America running container provenance differs; refuse first-release promotion")
-        if service == "api" and container["State"].get("Health", {}).get("Status") != "healthy":
-            raise ValueError("North America API container is not healthy")
-    if args.service == "backend" and "stool-photo-review-worker" not in expected:
-        # A rollback to an older manifest must not leave the newer photo worker
-        # running as an untracked orphan under the same B project.
-        ids = _run(["docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
-                    "--filter", "label=com.docker.compose.service=stool-photo-review-worker",
-                    "--format", "{{.ID}}"])
-        if ids.strip():
-            raise ValueError("North America unexpected stool-photo worker is still running")
+        if service in {"api", "stool-specialty"} and container["State"].get("Health", {}).get("Status") != "healthy":
+            raise ValueError("North America health-checked container is not healthy")
+    if args.service == "backend":
+        for name in ("stool-photo-review-worker", "stool-specialty", "stool-analysis-worker"):
+            if name in expected:
+                continue
+            ids = _run(["docker", "ps", "--filter", f"label=com.docker.compose.project={project}",
+                        "--filter", f"label=com.docker.compose.service={name}",
+                        "--format", "{{.ID}}"])
+            if ids.strip():
+                raise ValueError("North America unexpected stool service is still running")
 
 
 def _compose(args: argparse.Namespace, command: list[str]) -> list[str]:

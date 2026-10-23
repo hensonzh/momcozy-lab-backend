@@ -24,6 +24,7 @@ from app.modules.stool_photos.service import StoolPhotoService
 from app.modules.users.models import User
 from app.workers.stool_photo_reviews import LEASE, process_next, purge_deleted
 from test_stool_photo_rules import image_bytes
+from stool_result_fixture import valid_stool_result
 
 DATABASE_URL = os.getenv('MOMCOZY_TEST_DATABASE_URL', '')
 ENDPOINT = os.getenv('MOMCOZY_TEST_OBJECT_STORAGE_ENDPOINT_URL', '')
@@ -240,7 +241,7 @@ def test_postgres_minio_synthetic_result_is_persistent_and_rechecked_per_call():
             async with sessions.begin() as session:
                 session.add(User(id=owner))
                 await session.flush()
-                session.add(BabyProfile(id=baby_id, owner_user_id=owner, name='Synthetic infant'))
+                session.add(BabyProfile(id=baby_id, owner_user_id=owner, name='Synthetic infant', birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
                 session.add(DeviceSession(id=device_id, user_id=owner, status='active'))
             photo_id, _ = await create_photo(sessions, storage, owner, 'synthetic-result')
             assert await process_next(sessions, storage, OutcomeProvider('passed'))
@@ -249,7 +250,7 @@ def test_postgres_minio_synthetic_result_is_persistent_and_rechecked_per_call():
                 session.add(StoolAnalysis(
                     id=analysis_id, owner_user_id=owner, baby_id=baby_id, thread_id=thread_id,
                     status='completed', result_schema_version='stool.result.v1',
-                    final_result={'color': 'synthetic'}, result_validated_at=now,
+                    final_result=valid_stool_result(), result_validated_at=now,
                     completed_at=now, context_expires_at=now + timedelta(minutes=30),
                 ))
                 await session.flush()
@@ -262,7 +263,7 @@ def test_postgres_minio_synthetic_result_is_persistent_and_rechecked_per_call():
                     actor_user_id=owner, baby_id=baby_id, thread_id=thread_id, session_id=device_id,
                     analysis_id=analysis_id, token_expires_at=now + timedelta(minutes=10), now=now,
                 )
-                assert resolved.result == {'color': 'synthetic'}
+                assert resolved.result == valid_stool_result()
                 assert len(resolved.images) == 1 and resolved.images[0].startswith(b'\xff\xd8')
             assert counting.reads == 1
             async with sessions.begin() as session:
@@ -272,7 +273,7 @@ def test_postgres_minio_synthetic_result_is_persistent_and_rechecked_per_call():
                     actor_user_id=owner, baby_id=baby_id, thread_id=thread_id, session_id=device_id,
                     analysis_id=analysis_id, token_expires_at=now + timedelta(minutes=10), now=now,
                 )
-                assert historical.result == {'color': 'synthetic'}
+                assert historical.result == valid_stool_result()
             assert counting.reads == 2
             async with sessions.begin() as session:
                 (await session.get(DeviceSession, device_id)).status = 'revoked'

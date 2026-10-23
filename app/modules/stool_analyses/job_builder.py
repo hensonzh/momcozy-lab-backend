@@ -4,11 +4,9 @@ from __future__ import annotations
 import base64
 from datetime import timezone
 from hashlib import sha256
-from io import BytesIO
 from typing import Literal, cast
 from uuid import UUID
 
-from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,7 +14,7 @@ from ...core.errors import ApiError
 from ...infrastructure.object_storage import ObjectStorage
 from ..baby.profile_models import BabyProfile
 from ..stool_photos.models import StoolPhoto
-from ..stool_photos.rules import MAX_ORIGINAL_BYTES, prepare_model_image, validate_original
+from ..stool_photos.rules import MAX_ORIGINAL_BYTES, prepare_bounded_model_image, validate_original
 from ..users.models import User
 from .models import StoolAnalysis, StoolAnalysisPhoto
 from .transport_contract import SpecialtyAnalysisInput, SpecialtyBabyContext, SpecialtyPhotoInput
@@ -28,14 +26,10 @@ def _unavailable() -> ApiError:
 
 def _derived_jpeg(original: bytes) -> bytes:
     """Strip source metadata and cap the temporary wire image at 2 MB."""
-    with Image.open(BytesIO(prepare_model_image(original))) as image:
-        image.thumbnail((2048, 2048))
-        for quality in (85, 70, 55):
-            output = BytesIO()
-            image.save(output, format="JPEG", quality=quality, optimize=True)
-            if len(output.getvalue()) <= 2_000_000:
-                return output.getvalue()
-    raise _unavailable()
+    try:
+        return prepare_bounded_model_image(original)
+    except Exception as exc:
+        raise _unavailable() from exc
 
 
 class StoolSpecialtyInputBuilder:

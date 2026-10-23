@@ -6,7 +6,7 @@ commit together. The photo/review/retention policy is not released yet.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from typing import Literal, Sequence
 from uuid import UUID, uuid4
@@ -31,7 +31,14 @@ def _not_approved() -> ApiError:
     return ApiError(code="stool_photos_not_approved", message="Every photo must have a current approved review.", status=409)
 
 
-class SyntheticStoolSubmission:
+def _first_birthday(birth_date: date) -> date:
+    try:
+        return birth_date.replace(year=birth_date.year + 1)
+    except ValueError:  # February 29 has no same-date anniversary in a non-leap year.
+        return birth_date.replace(year=birth_date.year + 1, day=28)
+
+
+class StoolAnalysisSubmission:
     """Prepare a queued record/card only; no public API, network job or medical result."""
 
     def __init__(self, *, session: AsyncSession, storage: ObjectStorage,
@@ -59,6 +66,10 @@ class SyntheticStoolSubmission:
         if (account is None or account.status != "active" or account.deleted_at is not None
                 or baby is None or baby.deleted_at is not None):
             raise ApiError(code="stool_analysis_context_unavailable", message="Analysis context is unavailable.", status=409)
+        if baby.birth_date is None:
+            raise ApiError(code="stool_analysis_age_unsupported", message="Baby age is required for analysis.", status=409)
+        if at.date() < baby.birth_date or at.date() > _first_birthday(baby.birth_date):
+            raise ApiError(code="stool_analysis_age_unsupported", message="Stool analysis supports babies from birth to one year.", status=409)
         rows = (await self.session.scalars(select(StoolPhoto).where(
             StoolPhoto.id.in_(photo_ids), StoolPhoto.owner_user_id == owner,
         ).order_by(StoolPhoto.id).with_for_update())).all()
@@ -86,7 +97,7 @@ class SyntheticStoolSubmission:
             "photos": [(str(photo.id), photo.sha256) for photo in photos],
         })
         decision = await self.idempotency.reserve(
-            actor_user_id=owner, scope="stool_analysis.prepare_synthetic", key=idempotency_key,
+            actor_user_id=owner, scope="stool_analysis.submit", key=idempotency_key,
             request_hash=digest, expires_at=at + timedelta(days=1),
         )
         if decision.status == "replay":
@@ -119,8 +130,11 @@ class SyntheticStoolSubmission:
         ))
         await self.idempotency.mark_completed(record=decision.record, response_ref=str(analysis.id))
         await self.audit.record(
-            actor_user_id=owner, action="stool_analysis.prepare_synthetic",
+            actor_user_id=owner, action="stool_analysis.submit",
             resource_type="stool_analysis", resource_id=str(analysis.id), request_id=request_id,
             details={"photo_count": len(photos)},
         )
         return analysis
+
+
+SyntheticStoolSubmission = StoolAnalysisSubmission

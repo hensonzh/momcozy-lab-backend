@@ -687,3 +687,40 @@ def test_specialty_market_is_explicit_and_restricted(monkeypatch: pytest.MonkeyP
     assert Settings().stool_specialty_market == ""
     with pytest.raises(ValueError, match="STOOL_SPECIALTY_MARKET"):
         Settings(stool_specialty_market="EU").validate_for_startup()
+
+
+def test_stool_analysis_and_followup_are_explicitly_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STOOL_ANALYSIS_ENABLED", "true")
+    monkeypatch.setenv("STOOL_FOLLOWUP_ENABLED", "true")
+    monkeypatch.setenv("STOOL_SPECIALTY_MARKET", "US")
+    monkeypatch.setenv("STOOL_SPECIALTY_ORIGIN", "https://stool-specialty.internal")
+    monkeypatch.setenv("STOOL_SPECIALTY_SERVICE_SECRET", "s" * 32)
+    settings = Settings.from_env()
+    assert settings.stool_analysis_enabled and settings.stool_followup_enabled
+    settings.validate_for_startup()
+
+    with pytest.raises(ValueError, match="STOOL_SPECIALTY_ORIGIN"):
+        Settings(stool_analysis_enabled=True, stool_specialty_market="US",
+                 stool_specialty_service_secret="s" * 32).validate_for_startup()
+    with pytest.raises(ValueError, match="STOOL_FOLLOWUP_ENABLED"):
+        Settings(stool_followup_enabled=True).validate_for_startup()
+
+
+def test_decisions_review_uses_the_supported_model_only() -> None:
+    assert Settings().stool_photo_review_model == "gpt-6-luna"
+    valid = Settings(
+        app_env="test",
+        openai_api_key="test-key",
+        stool_photo_review_provider="decisions",
+        stool_photo_review_model="gpt-6-luna",
+        stool_photo_third_party_approved=True,
+    )
+    valid.validate_for_startup()
+    with pytest.raises(ValueError, match="gpt-6-luna"):
+        Settings(
+            app_env="test",
+            openai_api_key="test-key",
+            stool_photo_review_provider="decisions",
+            stool_photo_review_model="gpt-5.4-mini",
+            stool_photo_third_party_approved=True,
+        ).validate_for_startup()

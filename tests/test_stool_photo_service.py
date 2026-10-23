@@ -218,6 +218,61 @@ def test_original_is_not_auto_purged_by_age_but_explicit_delete_still_purges():
     asyncio.run(run())
 
 
+def test_expired_unlinked_original_is_tombstoned_but_linked_history_survives():
+    from datetime import datetime, timedelta, timezone
+    from app.workers.stool_photo_reviews import expire_unlinked, purge_deleted
+
+    async def run():
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(User.__table__.create)
+            await conn.run_sync(StoolPhoto.__table__.create)
+            await conn.run_sync(BabyProfile.__table__.create)
+            await conn.run_sync(StoolAnalysis.__table__.create)
+            await conn.run_sync(StoolAnalysisPhoto.__table__.create)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        owner, baby_id, thread_id = uuid4(), uuid4(), uuid4()
+        async with sessions.begin() as session:
+            session.add_all([
+                User(id=owner, status="active"),
+                BabyProfile(id=baby_id, owner_user_id=owner, name="Baby"),
+            ])
+        store = Storage()
+        async with sessions.begin() as session:
+            service = StoolPhotoService(repository=StoolPhotoRepository(session), storage=store,
+                                        idempotency=Idempotency(), audit=Audit())
+            orphan = await service.upload(owner=owner, body=image_bytes(), key="orphan", request_id="r")
+        async with sessions.begin() as session:
+            service = StoolPhotoService(repository=StoolPhotoRepository(session), storage=store,
+                                        idempotency=Idempotency(), audit=Audit())
+            linked = await service.upload(owner=owner, body=image_bytes(), key="linked", request_id="r")
+            orphan = await session.get(StoolPhoto, orphan.id)
+            assert orphan is not None
+            expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+            for photo in (orphan, linked):
+                photo.review_status = "passed"
+                photo.review_sha256 = photo.sha256
+                photo.review_expires_at = expired
+            analysis = StoolAnalysis(owner_user_id=owner, baby_id=baby_id, thread_id=thread_id)
+            session.add(analysis)
+            await session.flush()
+            session.add(StoolAnalysisPhoto(
+                analysis_id=analysis.id, photo_id=linked.id, position=0,
+                original_sha256=linked.sha256,
+            ))
+            orphan_id, linked_id = orphan.id, linked.id
+            orphan_key, linked_key = orphan.object_key, linked.object_key
+        assert await expire_unlinked(sessions, now=datetime.now(timezone.utc))
+        async with sessions.begin() as session:
+            assert (await session.get(StoolPhoto, orphan_id)).deleted_at is not None
+            assert (await session.get(StoolPhoto, linked_id)).deleted_at is None
+        assert await purge_deleted(sessions, store)
+        assert orphan_key not in store.values and linked_key in store.values
+        await engine.dispose()
+
+    asyncio.run(run())
+
+
 def test_object_deletion_failure_leaves_tombstone_for_worker_retry():
     from sqlalchemy import select
     from app.workers.stool_photo_reviews import purge_deleted
@@ -385,16 +440,21 @@ def test_worker_loop_survives_one_off_purge_failure(monkeypatch):
         calls.append('process')
         return False
 
+    async def expire(*args):
+        calls.append('expire')
+        return False
+
     async def stop_after_second_iteration(*args):
         if calls.count('purge') == 2:
             raise asyncio.CancelledError
 
     monkeypatch.setattr(worker, 'purge_deleted', purge)
+    monkeypatch.setattr(worker, 'expire_unlinked', expire)
     monkeypatch.setattr(worker, 'process_next', process)
     monkeypatch.setattr(worker.asyncio, 'sleep', stop_after_second_iteration)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(worker.run_loop(None, None, None))
-    assert calls == ['purge', 'process', 'purge', 'process']
+    assert calls == ['purge', 'expire', 'process', 'purge', 'expire', 'process']
 
 
 def test_failed_request_commit_compensates_uploaded_object():

@@ -19,8 +19,9 @@ workers, and evals belong to the independently deployed Agent Runtime repository
 - `vision-provider-integration.md`: owner-scoped schedule screenshot preview
   contract.
 - `stool-specialty-delivery-plan.md`: sequenced implementation, owner boundaries, evidence-based gates, and current blockers.
-- `stool-specialty-transport.md`: synthetic-only Product-to-specialty derived-JPEG input and nonmedical stream schema; no medical result.
-- `stool-specialty-network-contract.md`: standalone stateless synthetic stream, one Product-owned task ledger, scoped service identity, and remaining release gates. The new service is not published or deployed.
+- `stool-specialty-transport.md`: Product-to-specialty derived-JPEG input, structured result and field-stream contract.
+- `stool-specialty-system-prompt.md`: runtime system prompt source mirrored for medical/product review.
+- `stool-specialty-network-contract.md`: standalone stateless model service, one Product-owned task/result ledger, scoped service identity, and remaining production release gates.
 - `stool-photo-service-contract.md`: staged stool review / specialty analysis
   contract and release gates.
 - `stool-photo-review-operations.md`: implemented photo-review slice, worker

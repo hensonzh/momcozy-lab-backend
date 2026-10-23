@@ -8,12 +8,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.infrastructure.db.base import Base
 from app.modules.baby.profile_models import BabyProfile
-from app.modules.stool_analyses.dispatch_pump import SyntheticStoolDispatchPump
+from app.modules.stool_analyses.dispatch_pump import (
+    SyntheticStoolDispatchPump, dispatch_lease_for_timeout,
+)
 from app.modules.stool_analyses.models import StoolAnalysis, StoolAnalysisEvent, StoolAnalysisPhoto
 from app.modules.stool_analyses.transport_client import SpecialtyClient
 from app.modules.stool_photos.models import StoolPhoto
 from app.modules.users.models import User
 from services.stool_specialty.app import create_app
+from services.stool_specialty.contracts import PhotoObservation, StoolAnalysisResult
 from services.stool_specialty.settings import SpecialtySettings
 from test_stool_analysis_submission import Storage, fixture, prepare
 from test_stool_specialty_client import SECRET, wire
@@ -28,15 +31,40 @@ async def database(path):
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
-def service(enabled=True):
-    return create_app(SpecialtySettings(app_env="test", market="US", service_shared_secret=SECRET,
-                                        synthetic_analyze_enabled=enabled))
+class Analyzer:
+    def __init__(self, *, fail=True):
+        self.fail = fail
+
+    async def analyze(self, _payload):
+        if self.fail:
+            raise RuntimeError("synthetic provider failure")
+        return StoolAnalysisResult(
+            assessment_status="assessed", color="yellow", consistency="mushy",
+            findings=["none"], risk_level="routine", summary="Common yellow mushy appearance.",
+            care_advice="Continue routine observation.",
+            photo_observations=[PhotoObservation(position=0, image_quality="adequate",
+                color="yellow", consistency="mushy", findings=["none"], note="Clear image.")],
+        )
+
+
+def service(enabled=True, *, fail=True):
+    settings = SpecialtySettings(
+        app_env="test", market="US", service_shared_secret=SECRET,
+        analysis_enabled=enabled, provider="openai" if enabled else "disabled",
+        openai_api_key="test-key" if enabled else "",
+    )
+    return create_app(settings, analyzer=Analyzer(fail=fail) if enabled else None)
 
 
 async def pump(sessions, storage, specialty):
     http = httpx.AsyncClient(transport=httpx.ASGITransport(app=specialty), base_url="https://specialty.test")
     return http, SyntheticStoolDispatchPump(sessions=sessions, storage=storage,
         client=SpecialtyClient(http, origin="https://specialty.test", market="US", secret=SECRET), market="US")
+
+
+def test_dispatch_lease_always_exceeds_the_whole_http_timeout():
+    assert dispatch_lease_for_timeout(45) == timedelta(seconds=75)
+    assert dispatch_lease_for_timeout(1) >= timedelta(seconds=60)
 
 
 def test_streamed_failure_is_durable_replay_after_restart(tmp_path):
@@ -270,5 +298,36 @@ def test_deletion_after_progress_discards_late_terminal_event(tmp_path):
             assert [(row.sequence, row.event_type) for row in rows] == [
                 (1, "stool.card.created"), (2, "stool.analysis.started"),
             ]
+        await engine.dispose()
+    asyncio.run(run())
+
+
+def test_completed_result_and_field_events_are_durable_and_replayable(tmp_path):
+    async def run():
+        engine, sessions = await database(tmp_path / "completed.db")
+        storage = Storage()
+        ids = await fixture(sessions, storage)
+        now = datetime.now(timezone.utc)
+        analysis = await prepare(sessions, storage, ids, at=now, market="US", language="en")
+        http, processor = await pump(sessions, storage, service(fail=False))
+        async with http:
+            assert await processor.run_once(now=now)
+        async with sessions.begin() as session:
+            stored = await session.get(StoolAnalysis, analysis.id)
+            events = list((await session.scalars(select(StoolAnalysisEvent).where(
+                StoolAnalysisEvent.analysis_id == analysis.id,
+            ).order_by(StoolAnalysisEvent.sequence))).all())
+            assert stored.status == "completed"
+            assert stored.result_schema_version == "stool.result.v1"
+            assert stored.final_result["risk_level"] == "routine"
+            assert stored.completed_at is not None and stored.result_validated_at is not None
+            assert [(row.sequence, row.event_type) for row in events] == [
+                (1, "stool.card.created"), (2, "stool.analysis.started"),
+                (3, "stool.field.ready"), (4, "stool.field.ready"),
+                (5, "stool.field.ready"), (6, "stool.field.ready"),
+                (7, "stool.field.ready"), (8, "stool.field.ready"),
+                (9, "stool.analysis.completed"),
+            ]
+            assert events[6].payload == {"field": "summary", "value": "Common yellow mushy appearance."}
         await engine.dispose()
     asyncio.run(run())

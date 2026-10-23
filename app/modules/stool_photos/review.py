@@ -33,7 +33,7 @@ class DisabledReviewProvider:
 
 
 class DecisionsReviewProvider:
-    """Candidate image-understanding adapter; no automatic approvals before calibration."""
+    """Strict suitability/privacy policy over bounded Decisions probabilities."""
 
     QUESTIONS = (
         ("stool_visible", "Does this image clearly contain baby stool? Do not make a medical judgement."),
@@ -48,14 +48,22 @@ class DecisionsReviewProvider:
         self,
         *,
         post: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
-        policy_version: str = "candidate-v1",
+        model: str = "gpt-6-luna",
+        pass_threshold: float = 0.85,
+        reject_threshold: float = 0.80,
+        policy_version: str = "stool-photo-review-v1",
     ) -> None:
+        if not model or not 0.5 < pass_threshold <= 1 or not 0.5 < reject_threshold <= 1:
+            raise ValueError("Invalid review policy")
         self.post = post
+        self.model = model
+        self.pass_threshold = pass_threshold
+        self.reject_threshold = reject_threshold
         self.policy_version = policy_version
 
     async def review(self, image: bytes) -> ReviewOutcome:
         payload = {
-            "model": "gpt-6-luna",
+            "model": self.model,
             "input": [{"role": "user", "content": [
                 {"type": "input_text", "text": "Assess photo suitability and privacy only; do not diagnose."},
                 {"type": "input_image", "image_url": f"data:image/jpeg;base64,{base64.b64encode(image).decode('ascii')}"},
@@ -78,8 +86,27 @@ class DecisionsReviewProvider:
             for name, _ in self.QUESTIONS
         ):
             raise ValueError("Invalid review response")
-        # Until thresholds are calibrated on consented pediatric images, no score can grant passage.
-        return ReviewOutcome("inconclusive", ("policy_not_calibrated",), self.policy_version)
+        probability = {name: float(by_name[name]["probability"]) for name, _ in self.QUESTIONS}
+        positive = {
+            "stool_visible": "not_stool",
+            "color_shape_visible": "color_shape_unclear",
+            "adequate_lighting": "lighting_abnormal",
+        }
+        negative = {
+            "face_visible": "face_visible",
+            "private_parts_visible": "private_parts_visible",
+            "sensitive_info_visible": "sensitive_info_visible",
+        }
+        rejected = [reason for name, reason in positive.items()
+                    if probability[name] <= 1 - self.reject_threshold]
+        rejected.extend(reason for name, reason in negative.items()
+                        if probability[name] >= self.reject_threshold)
+        if rejected:
+            return ReviewOutcome("rejected", tuple(rejected), self.policy_version)
+        if (all(probability[name] >= self.pass_threshold for name in positive)
+                and all(probability[name] <= 1 - self.pass_threshold for name in negative)):
+            return ReviewOutcome("passed", (), self.policy_version)
+        return ReviewOutcome("inconclusive", ("review_uncertain",), self.policy_version)
 
 
 async def post_decisions(payload: dict[str, Any], *, api_key: str, timeout: float = 20.0) -> dict[str, Any]:

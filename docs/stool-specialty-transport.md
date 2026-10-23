@@ -1,9 +1,10 @@
-# 看便便服务的最小传输契约（合成验证）
+# 看便便服务传输契约 v1
 
-以 [网络边界](stool-specialty-network-contract.md) 为准。独立服务只接收 Product 主动发送的临时派生 JPEG + 固定宝宝背景，不反向取图、不建任务库。源模型为 `app/modules/stool_analyses/transport_contract.py` 和独立服务副本 `services/stool_specialty/contracts.py`；快照为 `docs/contracts/stool-specialty-transport.synthetic.json` 和 `stool-specialty.openapi.synthetic.json`。
+独立服务只接收 Product 主动发送的临时派生 JPEG 与最小宝宝背景，不反向取图、不建任务库、不长期存图。权威模型位于 `services/stool_specialty/contracts.py`，Product 通过 `app/modules/stool_analyses/transport_contract.py` 复用同一契约；快照为 `docs/contracts/stool-specialty-transport.v1.json` 和 `stool-specialty.openapi.v1.json`。
 
-- 输入 `stool.analyze.synthetic.v1`：单个 `analysis_id`、`market=CN|US`、`language=zh|en`、最小宝宝背景、1–3 张连续位置且不重复的 `{photo_id,position,original_sha256,jpeg_b64}`；不含 owner ID、公开 URL 或原图对象 key。JSON Schema 的唯一性和有序性仍需 Pydantic 跨字段检查。
-- 输出仅有 `stool.events.v1` 的 SSE：Product 先提交序号 1 `stool.card.created`；当前专项服务只返回序号 2 `stool.analysis.started` 和序号 3 `stool.analysis.failed`（旧合成任务仍可只有序号 2 的失败），不含任意自由文本、医学字段或完成事件。客户端要按分析 ID、序号、类型和严格字段验证，Product 才能入账并重放。
-- 生产环境门禁默认关闭；**合成失败不是便便分析结果**。医学字段字典、多图冲突/红旗规则、中英表达、0–1 岁边界、隐私与区域审批完成前，不接受真实儿童图片，也不开放 `field.ready`、`completed` 或 Agent 真实追问。
+- 输入 `stool.analyze.v1`：`analysis_id`、`market=CN|US`、`language=zh|en`、宝宝背景，以及 1–3 张有序 `{photo_id,position,original_sha256,jpeg_b64}`。不传 owner ID、对象 key、公开 URL 或 EXIF 原图。
+- 独立服务默认使用可配置的轻量视觉模型 `gpt-5.4-mini`，通过 Responses structured output 只生成视觉观察；版本化规则 `stool.medical.rules.2026-10-23.v1` 再确定性生成 `stool.result.v1` 的风险、摘要与护理建议，请求 `store=false`。模型、超时与开关分别由 `STOOL_SPECIALTY_OPENAI_MODEL`、`STOOL_SPECIALTY_REQUEST_TIMEOUT_SECONDS`、`STOOL_SPECIALTY_ANALYSIS_ENABLED` 配置。
+- Product 已持久化序号 1 `stool.card.created`；服务依次返回序号 2 `stool.analysis.started`、序号 3–8 六个 `stool.field.ready`（颜色、性状、可见特征、关注程度、解读、建议），最后序号 9 `stool.analysis.completed`。模型或契约失败返回安全的 `stool.analysis.failed`，不回显供应商原文。
+- Product 对分析 ID、市场、序号、字段类型、最终结果 Schema、字段与终态一致性重新校验后才落库并向 App 重放。App 不从自由文本推断状态。
 
-更新快照：`python -m scripts.export_stool_specialty_transport`、`python scripts/export_stool_specialty_openapi.py`。合成验证用 `pytest tests/test_stool_specialty_*`；独立 PostgreSQL/MinIO 只用于 Product 持久化测试，专项服务不依赖它们。
+运行时能力默认关闭。打开真实入口需要同时配置照片审核、Product 分析开关、独立服务、区域身份密钥和 Agent 追问开关；医学效果、儿童图片隐私和中美区域发布验收仍是上线门禁。

@@ -67,7 +67,7 @@ async def fixture(sessions, storage):
     storage.data[key] = body
     async with sessions.begin() as session:
         session.add(User(id=owner, status="active"))
-        session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant"))
+        session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant", birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
         session.add(StoolPhoto(
             id=photo_id, owner_user_id=owner, object_key=key, sha256=digest,
             content_type=metadata.content_type, size_bytes=len(body),
@@ -110,7 +110,7 @@ def test_synthetic_submission_is_ordered_persistent_and_idempotent(tmp_path):
         assert (first.market, first.language, first.baby_profile_version, first.baby_feeding_mode) == (
             "CN", "zh", 1, "unknown",
         )
-        assert len(audit.calls) == 1 and audit.calls[0]["action"] == "stool_analysis.prepare_synthetic"
+        assert len(audit.calls) == 1 and audit.calls[0]["action"] == "stool_analysis.submit"
         await engine.dispose()
         engine = create_async_engine(url)
         sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -129,6 +129,7 @@ def test_synthetic_submission_is_ordered_persistent_and_idempotent(tmp_path):
 @pytest.mark.parametrize("change", [
     "empty", "duplicate", "foreign_owner", "foreign_baby", "not_passed", "no_expiry",
     "expired", "purged", "hash_changed", "storage_tampered", "storage_missing",
+    "missing_birth_date", "too_old", "future_birth_date",
 ])
 def test_invalid_submission_creates_no_task_or_event(tmp_path, change):
     async def run():
@@ -153,6 +154,14 @@ def test_invalid_submission_creates_no_task_or_event(tmp_path, change):
             storage.data[ids[4]] = b"tampered"
         elif change == "storage_missing":
             del storage.data[ids[4]]
+        elif change in {"missing_birth_date", "too_old", "future_birth_date"}:
+            async with sessions.begin() as session:
+                profile = await session.get(BabyProfile, ids[1])
+                profile.birth_date = {
+                    "missing_birth_date": None,
+                    "too_old": datetime.now(timezone.utc).date() - timedelta(days=367),
+                    "future_birth_date": datetime.now(timezone.utc).date() + timedelta(days=1),
+                }[change]
         else:
             async with sessions.begin() as session:
                 photo = await session.get(StoolPhoto, ids[3])
@@ -250,9 +259,7 @@ def test_synthetic_prepare_public_contract_is_closed_without_thread_binding() ->
 
     schema = create_app(Settings(app_env="test")).openapi()
     assert "post" in schema["paths"]["/v1/stool-analyses"]
-    from app.modules.stool_analyses.public_router import analysis_available
-
-    assert analysis_available() is False
+    assert Settings().stool_analysis_enabled is False
     assert "/v1/stool-analyses/submit" not in schema["paths"]
 
 
@@ -348,4 +355,27 @@ def test_idempotency_rejects_changed_market_or_language(tmp_path):
             assert await session.scalar(select(func.count()).select_from(StoolAnalysis)) == 1
             assert (await session.get(StoolAnalysis, first.id)).language == "zh"
         await engine.dispose()
+    asyncio.run(run())
+
+
+def test_age_scope_uses_the_first_birthday_not_a_fixed_day_count(tmp_path):
+    async def run():
+        engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'birthday.db'}")
+        tables = [User.__table__, BabyProfile.__table__, StoolPhoto.__table__,
+                  StoolAnalysis.__table__, StoolAnalysisPhoto.__table__, StoolAnalysisEvent.__table__]
+        async with engine.begin() as conn:
+            await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        storage = Storage()
+        ids = await fixture(sessions, storage)
+        birthday = datetime(2026, 10, 23, tzinfo=timezone.utc)
+        async with sessions.begin() as session:
+            (await session.get(BabyProfile, ids[1])).birth_date = birthday.date().replace(year=2025)
+        accepted = await prepare(sessions, storage, ids, key="birthday", at=birthday)
+        assert accepted.status == "queued"
+        with pytest.raises(ApiError) as error:
+            await prepare(sessions, storage, ids, key="after-birthday", at=birthday + timedelta(days=1))
+        assert error.value.code == "stool_analysis_age_unsupported"
+        await engine.dispose()
+
     asyncio.run(run())

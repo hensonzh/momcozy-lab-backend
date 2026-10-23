@@ -1,7 +1,8 @@
-"""Test-only Product processor: one task ledger, one stateless specialty stream."""
+"""Product worker processor: one task ledger, one stateless specialty stream."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -12,18 +13,32 @@ from .dispatch import DispatchLease, StoolDispatchQueue
 from .job_builder import StoolSpecialtyInputBuilder
 from .transport_client import SpecialtyClient, SpecialtyPermanentError, SpecialtyTransientError
 
-LEASE = timedelta(seconds=30)
+MIN_LEASE = timedelta(seconds=60)
+LEASE_SAFETY_MARGIN_SECONDS = 30
 MAX_ATTEMPTS = 5
 
 
-class SyntheticStoolDispatchPump:
-    """Only manually invoked with synthetic data; no real-photo deployment entry point."""
+def dispatch_lease_for_timeout(timeout_seconds: float) -> timedelta:
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("A positive finite timeout is required")
+    return max(
+        MIN_LEASE,
+        timedelta(seconds=math.ceil(timeout_seconds) + LEASE_SAFETY_MARGIN_SECONDS),
+    )
+
+
+class StoolAnalysisDispatchPump:
+    """Lease one Product task and persist only validated specialty events."""
 
     def __init__(self, *, sessions: async_sessionmaker[AsyncSession], storage: ObjectStorage,
-                 client: SpecialtyClient, market: Literal["CN", "US"]) -> None:
+                 client: SpecialtyClient, market: Literal["CN", "US"],
+                 lease: timedelta = MIN_LEASE) -> None:
         if client.market != market:
             raise ValueError("Specialty service and Product market must match")
+        if lease < MIN_LEASE:
+            raise ValueError("Stool analysis lease must be at least 60 seconds")
         self.sessions, self.storage, self.client, self.market = sessions, storage, client, market
+        self.lease = lease
 
     async def _fail(self, lease: DispatchLease, now: datetime) -> None:
         async with self.sessions.begin() as session:
@@ -34,7 +49,7 @@ class SyntheticStoolDispatchPump:
             return now if now is not None else datetime.now(timezone.utc)
 
         async with self.sessions.begin() as session:
-            lease = await StoolDispatchQueue(session, market=self.market).claim(now=clock(), lease=LEASE)
+            lease = await StoolDispatchQueue(session, market=self.market).claim(now=clock(), lease=self.lease)
         if lease is None:
             return False
         try:
@@ -63,3 +78,6 @@ class SyntheticStoolDispatchPump:
                 else:
                     await queue.retry(lease, now=clock(), delay=timedelta(seconds=min(2 ** lease.attempt, 120)))
         return True
+
+
+SyntheticStoolDispatchPump = StoolAnalysisDispatchPump

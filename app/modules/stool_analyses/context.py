@@ -12,10 +12,10 @@ from hashlib import sha256
 from typing import Any, Mapping, Sequence
 from uuid import UUID
 
-from ..stool_photos.rules import prepare_model_image
+from ..stool_photos.rules import prepare_bounded_model_image
 from ...core.errors import ApiError
 
-RESULT_SCHEMA_VERSION = "stool.result.v1"  # Draft; not a clinical validation schema.
+RESULT_SCHEMA_VERSION = "stool.result.v1"
 
 HANDLING = (
     "The following images are observation material from the same completed "
@@ -116,7 +116,7 @@ def build_stool_followup_context(
         ):
             raise _unavailable()
         try:
-            derived.append(prepare_model_image(photo.body))
+            derived.append(prepare_bounded_model_image(photo.body))
         except Exception as exc:
             raise _unavailable() from exc
 

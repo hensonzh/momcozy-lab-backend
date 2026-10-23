@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..baby.profile_models import BabyProfile
 from ..stool_photos.models import StoolPhoto
 from ..users.models import User
-from .events import StoolNonmedicalEventLedger
+from .events import StoolAnalysisEventLedger
 from .models import StoolAnalysis, StoolAnalysisEvent, StoolAnalysisPhoto
 from .transport_contract import SpecialtyTransportEvent
 
@@ -105,10 +105,10 @@ class StoolDispatchQueue:
         last = await self.session.scalar(select(StoolAnalysisEvent).where(
             StoolAnalysisEvent.analysis_id == analysis.id,
         ).order_by(StoolAnalysisEvent.sequence.desc()).limit(1))
-        await StoolNonmedicalEventLedger(self.session).append(owner=analysis.owner_user_id, event=SpecialtyTransportEvent(
+        await StoolAnalysisEventLedger(self.session).append(owner=analysis.owner_user_id, event=SpecialtyTransportEvent(
             schema_version="stool.events.v1", analysis_id=analysis.id,
-            sequence=3 if last is not None and last.event_type == "stool.analysis.started" else 2,
-            event_type="stool.analysis.failed",
+            sequence=(last.sequence + 1 if last is not None else 2),
+            event_type="stool.analysis.failed", payload={"code": "analysis_failed"},
         ))
 
     async def can_send(self, lease: DispatchLease, *, now: datetime) -> bool:
@@ -123,16 +123,13 @@ class StoolDispatchQueue:
 
     async def append(self, lease: DispatchLease, event: SpecialtyTransportEvent, *, now: datetime) -> bool:
         analysis = await self._current(lease, now=now)
-        if (analysis is None or event.analysis_id != lease.analysis_id
-                or (event.sequence, event.event_type) not in (
-                    (2, "stool.analysis.started"), (2, "stool.analysis.failed"), (3, "stool.analysis.failed"),
-                )):
+        if analysis is None or event.analysis_id != lease.analysis_id:
             return False
         if not await self._eligible(analysis):
             await self._fail(analysis)
             return False
-        await StoolNonmedicalEventLedger(self.session).append(owner=analysis.owner_user_id, event=event)
-        if event.event_type == "stool.analysis.failed":
+        await StoolAnalysisEventLedger(self.session).append(owner=analysis.owner_user_id, event=event, now=now)
+        if event.event_type in ("stool.analysis.completed", "stool.analysis.failed"):
             analysis.run_lease_until = None
         return True
 

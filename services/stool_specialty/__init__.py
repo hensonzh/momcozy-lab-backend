@@ -1,1 +1,1 @@
-"""Independent, synthetic-only stool specialty job ingress."""
+"""Independent, stateless stool specialty analysis service."""

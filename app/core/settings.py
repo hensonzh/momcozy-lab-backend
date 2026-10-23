@@ -108,8 +108,16 @@ class Settings:
     vision_provider: str = "disabled"
     vision_openai_model: str = "gpt-5.4-mini"
     stool_specialty_market: str = ""  # Explicit deployment region, not inferred from App or S3.
+    stool_photo_review_enabled: bool = False
     stool_photo_review_provider: str = "disabled"
+    stool_photo_review_model: str = "gpt-6-luna"
     stool_photo_third_party_approved: bool = False
+    stool_analysis_enabled: bool = False
+    stool_followup_enabled: bool = False
+    stool_specialty_origin: str = ""
+    stool_specialty_service_secret: str = ""
+    stool_specialty_request_timeout_seconds: float = 45.0
+    stool_specialty_allow_insecure_private_network: bool = False
     vision_request_timeout_seconds: float = 20.0
     log_level: str = "INFO"
 
@@ -212,8 +220,21 @@ class Settings:
             ),
             vision_provider=_env("VISION_PROVIDER", cls.vision_provider).lower(),
             stool_specialty_market=_env("STOOL_SPECIALTY_MARKET", cls.stool_specialty_market).upper(),
+            stool_photo_review_enabled=_env_bool("STOOL_PHOTO_REVIEW_ENABLED", cls.stool_photo_review_enabled),
             stool_photo_review_provider=_env("STOOL_PHOTO_REVIEW_PROVIDER", cls.stool_photo_review_provider).lower(),
+            stool_photo_review_model=_env("STOOL_PHOTO_REVIEW_MODEL", cls.stool_photo_review_model),
             stool_photo_third_party_approved=_env_bool("STOOL_PHOTO_THIRD_PARTY_APPROVED", cls.stool_photo_third_party_approved),
+            stool_analysis_enabled=_env_bool("STOOL_ANALYSIS_ENABLED", cls.stool_analysis_enabled),
+            stool_followup_enabled=_env_bool("STOOL_FOLLOWUP_ENABLED", cls.stool_followup_enabled),
+            stool_specialty_origin=_env("STOOL_SPECIALTY_ORIGIN", cls.stool_specialty_origin).rstrip("/"),
+            stool_specialty_service_secret=_env("STOOL_SPECIALTY_SERVICE_SECRET", cls.stool_specialty_service_secret),
+            stool_specialty_request_timeout_seconds=_env_float(
+                "STOOL_SPECIALTY_REQUEST_TIMEOUT_SECONDS", cls.stool_specialty_request_timeout_seconds,
+            ),
+            stool_specialty_allow_insecure_private_network=_env_bool(
+                "STOOL_SPECIALTY_ALLOW_INSECURE_PRIVATE_NETWORK",
+                cls.stool_specialty_allow_insecure_private_network,
+            ),
             vision_openai_model=_env("VISION_OPENAI_MODEL", cls.vision_openai_model),
             vision_request_timeout_seconds=_env_float(
                 "VISION_REQUEST_TIMEOUT_SECONDS",
@@ -363,8 +384,35 @@ class Settings:
             errors.append("STOOL_SPECIALTY_MARKET must be empty, CN or US")
         if self.stool_photo_review_provider not in {"disabled", "decisions"}:
             errors.append("STOOL_PHOTO_REVIEW_PROVIDER must be disabled or decisions")
+        if self.stool_photo_review_provider == "decisions" and not self.stool_photo_review_model:
+            errors.append("STOOL_PHOTO_REVIEW_MODEL is required for decisions review")
+        if (self.stool_photo_review_provider == "decisions"
+                and self.stool_photo_review_model != "gpt-6-luna"):
+            errors.append("STOOL_PHOTO_REVIEW_MODEL must be gpt-6-luna for decisions review")
         if self.stool_photo_review_provider == "decisions" and (not self.stool_photo_third_party_approved or not self.openai_api_key):
             errors.append("STOOL_PHOTO_REVIEW_PROVIDER=decisions requires third-party approval and OPENAI_API_KEY")
+        if self.stool_photo_review_enabled and self.stool_photo_review_provider == "disabled":
+            errors.append("STOOL_PHOTO_REVIEW_ENABLED requires a review provider")
+        if self.stool_analysis_enabled:
+            if self.stool_specialty_market not in {"CN", "US"}:
+                errors.append("STOOL_ANALYSIS_ENABLED requires STOOL_SPECIALTY_MARKET")
+            if not self.stool_specialty_origin:
+                errors.append("STOOL_ANALYSIS_ENABLED requires STOOL_SPECIALTY_ORIGIN")
+            if len(self.stool_specialty_service_secret.encode("utf-8")) < 32:
+                errors.append("STOOL_ANALYSIS_ENABLED requires a 32-byte STOOL_SPECIALTY_SERVICE_SECRET")
+        if self.stool_specialty_allow_insecure_private_network:
+            specialty = urlparse(self.stool_specialty_origin)
+            if (specialty.scheme != "http" or specialty.hostname != "stool-specialty"
+                    or specialty.username or specialty.password or specialty.path not in ("", "/")
+                    or specialty.query or specialty.fragment):
+                errors.append(
+                    "STOOL_SPECIALTY_ALLOW_INSECURE_PRIVATE_NETWORK requires an http://stool-specialty origin"
+                )
+        if self.stool_followup_enabled and not self.stool_analysis_enabled:
+            errors.append("STOOL_FOLLOWUP_ENABLED requires STOOL_ANALYSIS_ENABLED")
+        if (not isfinite(self.stool_specialty_request_timeout_seconds)
+                or self.stool_specialty_request_timeout_seconds <= 0):
+            errors.append("STOOL_SPECIALTY_REQUEST_TIMEOUT_SECONDS must be positive")
         if self.vision_provider not in SUPPORTED_VISION_PROVIDERS:
             errors.append(f"VISION_PROVIDER must be one of {', '.join(sorted(SUPPORTED_VISION_PROVIDERS))}")
         if self.vision_provider == "openai" and not self.openai_api_key:

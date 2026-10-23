@@ -1,4 +1,4 @@
-"""Export the synthetic-only independent specialty transport DTO snapshot."""
+"""Export the structured independent specialty transport DTO snapshot."""
 from __future__ import annotations
 
 import argparse
@@ -13,15 +13,15 @@ if str(ROOT) not in sys.path:
 
 from app.modules.stool_analyses.transport_contract import SpecialtyAnalysisInput, SpecialtyTransportEvent  # noqa: E402
 
-DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "docs/contracts/stool-specialty-transport.synthetic.json"
+DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "docs/contracts/stool-specialty-transport.v1.json"
 
 
 def build_catalog() -> dict[str, Any]:
     return {
-        "status": "synthetic_only_no_medical_result",
+        "status": "structured_stool_result_v1",
         "contracts": {
             "analysis_input": SpecialtyAnalysisInput.model_json_schema(),
-            "nonmedical_event": SpecialtyTransportEvent.model_json_schema(),
+            "analysis_event": SpecialtyTransportEvent.model_json_schema(),
         },
     }
 

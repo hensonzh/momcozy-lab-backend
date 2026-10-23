@@ -22,13 +22,16 @@ class SpecialtyPermanentError(Exception):
 
 class SpecialtyClient:
     def __init__(self, http: httpx.AsyncClient, *, origin: str, market: str, secret: str,
-                 allow_insecure_test: bool = False) -> None:
+                 allow_insecure_private: bool = False) -> None:
         parsed = urlparse(origin)
         try:
             valid_port = parsed.port is None or 1 <= parsed.port <= 65535
         except ValueError:
             valid_port = False
-        if (not valid_port or parsed.scheme not in ({"http", "https"} if allow_insecure_test else {"https"})
+        allowed_schemes = {"https"}
+        if allow_insecure_private and parsed.hostname in {"stool-specialty", "localhost", "127.0.0.1"}:
+            allowed_schemes.add("http")
+        if (not valid_port or parsed.scheme not in allowed_schemes
                 or not parsed.hostname or parsed.username or parsed.password
                 or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
             raise ValueError("Specialty origin must be a secure service origin")
@@ -52,15 +55,16 @@ class SpecialtyClient:
             ) as response:
                 if response.status_code in (401, 403, 422):
                     raise SpecialtyPermanentError("Specialty identity or input rejected")
-                if (response.status_code != 200 or not response.headers.get("Content-Type", "").startswith("text/event-stream")
+                if (response.status_code != 200
+                        or not response.headers.get("Content-Type", "").startswith("text/event-stream")
                         or response.headers.get("Cache-Control") != "private, no-store"):
                     raise SpecialtyTransientError("Specialty stream unavailable")
                 buffer = b""
-                count = 0
+                expected_sequence = 2
                 terminal = False
                 async for chunk in response.aiter_bytes():
                     buffer += chunk
-                    if len(buffer) > 4096:
+                    if len(buffer) > 32 * 1024:
                         raise SpecialtyPermanentError("Oversized specialty event")
                     while b"\n\n" in buffer:
                         wire, buffer = buffer.split(b"\n\n", 1)
@@ -71,15 +75,22 @@ class SpecialtyClient:
                             event = SpecialtyTransportEvent.model_validate_json(lines[2][6:])
                         except (UnicodeError, ValueError, ValidationError) as exc:
                             raise SpecialtyPermanentError("Invalid specialty event") from exc
-                        allowed = ((2, "stool.analysis.started"), (2, "stool.analysis.failed")) if count == 0 else (
-                            (3, "stool.analysis.failed"),
-                        ) if count == 1 and not terminal else ()
-                        if (event.analysis_id != payload.analysis_id or event.schema_version != "stool.events.v1"
-                                or (event.sequence, event.event_type) not in allowed
+                        if (terminal or event.analysis_id != payload.analysis_id
+                                or event.schema_version != "stool.events.v1"
+                                or event.sequence != expected_sequence
+                                or event.event_type in ("stool.card.created", "stool.analysis.cancelled")
                                 or lines[:2] != [f"id: {event.sequence}", f"event: {event.event_type}"]):
                             raise SpecialtyPermanentError("Invalid specialty event")
-                        count += 1
-                        terminal = event.event_type == "stool.analysis.failed"
+                        if expected_sequence == 2 and event.event_type not in (
+                            "stool.analysis.started", "stool.analysis.failed",
+                        ):
+                            raise SpecialtyPermanentError("Invalid specialty event")
+                        if expected_sequence > 2 and event.event_type not in (
+                            "stool.field.ready", "stool.analysis.completed", "stool.analysis.failed",
+                        ):
+                            raise SpecialtyPermanentError("Invalid specialty event")
+                        expected_sequence += 1
+                        terminal = event.event_type in ("stool.analysis.completed", "stool.analysis.failed")
                         yield event
                 if buffer or not terminal:
                     raise SpecialtyTransientError("Incomplete specialty stream")

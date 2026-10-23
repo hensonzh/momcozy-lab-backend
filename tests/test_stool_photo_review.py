@@ -90,18 +90,20 @@ def test_review_without_expiry_or_with_purged_original_never_qualifies():
     assert require_approved_photos([photo(owner, "passed", review_expires_at=naive_expiry)], owner)
 
 
-def test_decisions_adapter_returns_inconclusive_without_calibrated_release_policy():
+def test_decisions_adapter_applies_strict_suitability_and_privacy_policy():
     async def fake_post(payload):
         assert payload["model"] == "gpt-6-luna"
         assert len(payload["questions"]) >= 4
+        positive = {"stool_visible", "color_shape_visible", "adequate_lighting"}
         return {"answers": [
-            {"name": q["name"], "type": "predicate", "probability": 0.99}
+            {"name": q["name"], "type": "predicate",
+             "probability": 0.99 if q["name"] in positive else 0.01}
             for q in payload["questions"]
         ]}
-    provider = DecisionsReviewProvider(post=fake_post, policy_version="candidate-v1")
+    provider = DecisionsReviewProvider(post=fake_post)
     result = asyncio.run(provider.review(b"\xff\xd8fake"))
-    assert result.status == "inconclusive"
-    assert result.reason_codes == ("policy_not_calibrated",)
+    assert result.status == "passed"
+    assert result.reason_codes == ()
 
 
 def test_passed_review_rejects_changed_content_and_expiry():

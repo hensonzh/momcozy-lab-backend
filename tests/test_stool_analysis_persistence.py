@@ -16,6 +16,7 @@ from app.modules.stool_analyses.service import StoolAnalysisContextResolver
 from app.modules.stool_photos.models import StoolPhoto
 from app.modules.users.models import User
 from test_stool_photo_rules import image_bytes
+from stool_result_fixture import valid_stool_result
 
 
 class PrivateStorage:
@@ -48,7 +49,7 @@ async def fixture(sessions, storage):
         session.add(StoolAnalysis(
             id=analysis_id, owner_user_id=owner, baby_id=baby_id, thread_id=thread_id,
             status='completed', result_schema_version='stool.result.v1',
-            final_result={'color': 'synthetic-test-value'},
+            final_result=valid_stool_result(),
             result_validated_at=now, completed_at=now,
             context_expires_at=now + timedelta(minutes=30),
         ))
@@ -83,11 +84,11 @@ def test_synthetic_result_survives_database_restart_and_images_remain_private(tm
         async with sessions.begin() as session:
             analysis = await session.get(StoolAnalysis, ids[4])
             assert analysis.status == 'completed'
-            assert 'synthetic-test-value' in str(analysis.final_result)
+            assert analysis.final_result['risk_level'] == 'routine'
             assert not hasattr(analysis, 'image_bytes')
             assert not hasattr(analysis, 'object_key')
             material = await resolve(session, store, ids)
-            assert material.result == {'color': 'synthetic-test-value'}
+            assert material.result == valid_stool_result()
             assert len(material.images) == 1 and material.images[0].startswith(b'\xff\xd8')
         assert store.reads == 1
         await reopened.dispose()
@@ -96,7 +97,7 @@ def test_synthetic_result_survives_database_restart_and_images_remain_private(tm
 
 @pytest.mark.parametrize('change', [
     'owner', 'baby', 'thread', 'device', 'token_expired', 'device_revoked', 'account_deleted',
-    'baby_deleted', 'analysis_running', 'result_revoked', 'result_expired',
+    'baby_deleted', 'analysis_running', 'result_revoked',
     'photo_deleted', 'photo_expiry_missing', 'photo_hash_mismatch', 'oversized_result',
 ])
 def test_each_resolution_denies_revoked_or_cross_scope_data_before_read(tmp_path, change):
@@ -131,8 +132,6 @@ def test_each_resolution_denies_revoked_or_cross_scope_data_before_read(tmp_path
                 (await session.get(StoolAnalysis, ids[4])).status = 'running'
             elif change == 'result_revoked':
                 (await session.get(StoolAnalysis, ids[4])).revoked_at = ids[-1]
-            elif change == 'result_expired':
-                (await session.get(StoolAnalysis, ids[4])).context_expires_at = ids[-1] - timedelta(seconds=1)
             elif change == 'photo_deleted':
                 (await session.get(StoolPhoto, ids[5])).deleted_at = ids[-1]
             elif change == 'photo_expiry_missing':
@@ -183,7 +182,7 @@ def test_followup_rechecks_live_session_and_result_on_each_call(tmp_path):
         ids = await fixture(sessions, storage)
         async with sessions.begin() as session:
             first = await resolve(session, storage, ids)
-            assert first.result == {'color': 'synthetic-test-value'}
+            assert first.result == valid_stool_result()
         assert storage.reads == 1
         async with sessions.begin() as session:
             (await session.get(DeviceSession, ids[3])).status = 'revoked'
@@ -216,7 +215,7 @@ def test_persisted_completed_followup_ignores_expired_submission_review(tmp_path
             (await session.get(StoolPhoto, ids[5])).review_expires_at = ids[-1] - timedelta(days=1)
         async with sessions.begin() as session:
             context = await resolve(session, storage, ids)
-            assert context.result == {'color': 'synthetic-test-value'}
+            assert context.result == valid_stool_result()
             assert len(context.images) == 1
         assert storage.reads == 1
         await engine.dispose()

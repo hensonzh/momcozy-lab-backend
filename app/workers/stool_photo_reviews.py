@@ -7,13 +7,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from hashlib import sha256
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..core.settings import Settings
 from ..infrastructure.db.session import create_db_engine, create_session_factory
 from ..infrastructure.object_storage import ObjectStorage, create_object_storage
 from ..modules.stool_photos.models import StoolPhoto
+from ..modules.stool_analyses.models import StoolAnalysisPhoto
 from ..modules.stool_photos.review import (
     DecisionsReviewProvider, DisabledReviewProvider, ReviewOutcome, ReviewProvider,
     post_decisions, review_photo,
@@ -35,7 +36,7 @@ def review_provider(settings: Settings) -> ReviewProvider:
     async def post(payload: dict[str, Any]) -> dict[str, Any]:
         return await post_decisions(payload, api_key=settings.openai_api_key)
 
-    return DecisionsReviewProvider(post=post)
+    return DecisionsReviewProvider(post=post, model=settings.stool_photo_review_model)
 
 
 async def process_next(sessions: async_sessionmaker[AsyncSession], storage: ObjectStorage,
@@ -102,6 +103,41 @@ async def purge_deleted(sessions: async_sessionmaker[AsyncSession], storage: Obj
     return True
 
 
+async def expire_unlinked(
+    sessions: async_sessionmaker[AsyncSession], *, now: datetime | None = None,
+) -> bool:
+    """Tombstone uploads that can no longer be submitted and belong to no analysis.
+
+    Linked originals remain available for long-term follow-up even after their
+    admission review expires. This only closes the response-loss/orphan case.
+    """
+    at = now or datetime.now(timezone.utc)
+    linked = exists(select(StoolAnalysisPhoto.photo_id).where(
+        StoolAnalysisPhoto.photo_id == StoolPhoto.id,
+    ))
+    async with sessions.begin() as session:
+        photo = await session.scalar(select(StoolPhoto).where(
+            StoolPhoto.deleted_at.is_(None),
+            StoolPhoto.purged_at.is_(None),
+            ~linked,
+            or_(
+                StoolPhoto.review_expires_at <= at,
+                and_(
+                    StoolPhoto.review_expires_at.is_(None),
+                    StoolPhoto.created_at <= at - REVIEW_TTL,
+                ),
+            ),
+        ).order_by(StoolPhoto.created_at, StoolPhoto.id).with_for_update(skip_locked=True).limit(1))
+        if photo is None:
+            return False
+        photo.deleted_at = at
+        photo.review_status = "failed"
+        photo.review_sha256 = None
+        photo.review_expires_at = None
+        photo.reason_codes = ["unclaimed_review_expired"]
+    return True
+
+
 async def run() -> None:
     settings = Settings.from_env()
     settings.validate_for_startup()
@@ -123,6 +159,11 @@ async def run_loop(sessions: async_sessionmaker[AsyncSession], storage: ObjectSt
         except Exception:
             # A failed deletion must not starve unrelated pending reviews.
             LOGGER.warning("Stool photo purge failed; retrying later.")
+        try:
+            if await expire_unlinked(sessions):
+                continue
+        except Exception:
+            LOGGER.warning("Stool photo orphan expiry failed; retrying later.")
         try:
             if await process_next(sessions, storage, provider):
                 continue

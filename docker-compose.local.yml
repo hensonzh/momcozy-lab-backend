@@ -68,9 +68,6 @@ services:
     command: python -m app.workers.stool_photo_reviews
     env_file:
       - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
-    environment:
-      STOOL_PHOTO_REVIEW_PROVIDER: disabled
-      STOOL_PHOTO_THIRD_PARTY_APPROVED: "false"
     init: true
     restart: unless-stopped
     depends_on:
@@ -78,6 +75,59 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+
+  stool-analysis-worker:
+    image: momcozy-lab-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.workers.stool_analyses
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      stool-specialty:
+        condition: service_healthy
+
+  stool-specialty:
+    image: momcozy-stool-specialty:local
+    build:
+      context: .
+      dockerfile: services/stool_specialty/Dockerfile
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
+    environment:
+      DATABASE_URL: ""
+      REDIS_URL: ""
+      OBJECT_STORAGE_BUCKET: ""
+      OBJECT_STORAGE_ENDPOINT_URL: ""
+      OBJECT_STORAGE_ACCESS_KEY_ID: ""
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: ""
+      MOMCOZY_POSTGRES_ADMIN_PASSWORD: ""
+      MOMCOZY_PRODUCT_POSTGRES_PASSWORD: ""
+      MOMCOZY_AGENT_POSTGRES_PASSWORD: ""
+      MOMCOZY_REDIS_ADMIN_PASSWORD: ""
+      MOMCOZY_PRODUCT_REDIS_PASSWORD: ""
+      MOMCOZY_AGENT_REDIS_PASSWORD: ""
+      MOMCOZY_MINIO_ROOT_USER: ""
+      MOMCOZY_MINIO_ROOT_PASSWORD: ""
+      MOMCOZY_PRODUCT_MINIO_ACCESS_KEY: ""
+      MOMCOZY_PRODUCT_MINIO_SECRET_KEY: ""
+      MOMCOZY_AGENT_MINIO_ACCESS_KEY: ""
+      MOMCOZY_AGENT_MINIO_SECRET_KEY: ""
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   auth-email-worker:
     image: momcozy-lab-backend:local

@@ -19,7 +19,8 @@ def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPat
     source = tmp_path / "release"
     source.mkdir()
     (source / "docker-compose.us-east-uat.yml").write_text(
-        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n  stool-photo-review-worker:\n"
+        "services:\n  api:\n  notification-worker:\n  auth-email-worker:\n"
+        "  stool-photo-review-worker:\n  stool-specialty:\n  stool-analysis-worker:\n"
     )
     args = SimpleNamespace(service="backend", source=source, env_file=private,
                            local_image="b:verified", commit="a" * 40)
@@ -27,7 +28,10 @@ def test_activation_only_targets_business_services(monkeypatch: pytest.MonkeyPat
     assert calls
     command = calls[0]
     assert "--no-deps" in command and "--pull" in command and "never" in command
-    assert command[-4:] == ["api", "notification-worker", "auth-email-worker", "stool-photo-review-worker"]
+    assert command[-6:] == [
+        "api", "notification-worker", "auth-email-worker", "stool-photo-review-worker",
+        "stool-specialty", "stool-analysis-worker",
+    ]
     assert not any(name in command for name in ("postgres", "redis", "minio", "down", "-v"))
 
 

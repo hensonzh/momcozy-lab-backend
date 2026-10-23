@@ -1,32 +1,24 @@
-# Stool photo review implementation status (2026-10-22)
+# 看便便照片审核：运行与发布边界（2026-10-23）
 
-**Not a production-ready medical service.** This slice provides only dedicated private photo upload and a fail-closed review queue. There is no medically validated analysis endpoint, completed result, field-level card stream, or calibrated admission threshold; Product only supports a nonmedical shell/failure replay. The App now uses the dedicated picker/repository behind a fail-closed capability check. New legacy poop-marked Agent Runs are rejected by Agent Runtime. Do not enable/release it as the reviewed service.
+**工程实现完成，生产默认关闭。** 照片审核只决定图片是否适合进入看便便分析，不生成医学结论。真实儿童图片处理仍需中美隐私、安全和审核质量验收。
 
-## Endpoints and worker
+## 接口与 worker
 
-- `GET /v1/stool-photos/capability`: bearer; both `review_available` and `analysis_available` are false until their independent release gates pass. App disables capture/upload while review is unavailable; the Backend now also rejects even authenticated direct uploads with `503 / stool_photo_review_unavailable` before storing an original. The capability and upload route share the same fail-closed gate, which is false until the service is separately released.
-- `POST /v1/stool-photos`: currently gated off; when review is released: bearer, `Idempotency-Key`, multipart original image `file`; body bytes capped at 10 MiB. Detect actual JPEG/PNG/HEIC encoding and decode, short edge at least 720 px after orientation, max 64 million decoded pixels. Ignores client-provided filename/MIME as format evidence. Creates a private `stool_photos` row and returns `202`/`pending` with `photo_id` and `review_id` (same ID).
-- `GET /v1/stool-photos/{photo_id}/review`: owner-scoped status and stable reason codes. Never returns raw image, provider scores, EXIF or storage key.
-- `DELETE /v1/stool-photos/{photo_id}`: owner-scoped immediate tombstone; durable worker retries object removal. This does **not** guarantee the deletion can recall an image already sent to a third party.
-- Start `python -m app.workers.stool_photo_reviews` **only after applying Alembic revision `20261022_0031`** and configuring object storage. It claims `pending` or expired review leases, verifies the original SHA-256, strips EXIF in a derived JPEG, and records `passed/rejected/inconclusive/failed`. A disabled provider records `failed`; it does not approve. The same worker now purges only originals explicitly tombstoned by the user or account deletion; it does **not** age-purge originals. A passed review is usable for submission for 180 days from `reviewed_at` (exclusive expiry boundary). This product-selected window is not a clinical validity claim or an approved privacy retention policy. Expired reviews cannot authorize a new submission; the user must obtain a new review, currently by deleting/re-uploading. Existing one-day approvals are not silently extended in the database; they must be reviewed again. Originals remaining after review expiry still require an approved retention/deletion policy and orphan-object reconciliation before release. The worker is wired only into local Compose and the CI smoke stack, after migration. Production/UAT deployment Compose is unchanged. Without a running worker in a future approved environment, `pending` will remain pending.
+- `GET /v1/stool-photos/capability`：返回服务端权威的 `review_available`、`analysis_available` 与 `followup_available`。追问仅在分析和追问开关均开启时可用；App 不自行推断能力。
+- `POST /v1/stool-photos`：能力开启后接收认证的单张原图；要求 `Idempotency-Key`，服务端按真实编码复验 JPEG/PNG/HEIC、≤10 MiB、短边 ≥720px 和解码像素上限。审核关闭时在读取/保存原图前返回 503。
+- `GET /v1/stool-photos/{photo_id}/review`：仅 owner 可读审核状态、原因码、策略版本和有效期。
+- `DELETE /v1/stool-photos/{photo_id}`：立即写删除墓碑；worker 可重试物理删除对象。
+- `python -m app.workers.stool_photo_reviews`：持久领取待审核照片，核 SHA-256，生成去 EXIF 派生图，调用审核 provider 并写回 `passed/rejected/inconclusive/failed`；同时处理显式删除墓碑。
 
-`STOOL_PHOTO_REVIEW_PROVIDER=disabled` by default. `decisions` requires `STOOL_PHOTO_THIRD_PARTY_APPROVED=true` and `OPENAI_API_KEY`; the environment flag represents an **external privacy approval** and cannot itself provide one. Even enabled, the Decisions candidate returns `inconclusive` until the pediatric image policy, thresholds and consented evaluation set are approved. The adapter never produces a medical conclusion. Don't enable third-party transfer as a debugging shortcut.
+审核通过凭证可用于**新分析提交**的窗口为 180 天；已关联分析的原图不会因审核到期自动清理，以支持长期带图追问。审核到期且从未关联任何分析的上传会被写删除墓碑并由 worker 物理清理，避免响应丢失形成永久孤儿数据。提交时 Product 会再次核验 owner、删除状态、有效期和原图指纹。
 
-The server-side admission helper `require_approved_photos` checks count, uniqueness, owner, deletion/purge, current status, the 180-day review expiration and the binding to the original SHA-256. The medical submission endpoint is **not implemented**. A synthetic-only in-process submission slice now re-reads and verifies the private original, but it is not exposed to App or dispatched to medical analysis. App picks unscaled bytes, checks size/format and locally decodable short edge (HEIC that cannot be decoded locally is validated by Backend), uploads behind a server capability check, polls per-photo status, and keeps analysis disabled until the separate specialty service exists. Uploads lock an active account row so concurrent account deletion cannot leave a new eligible photo; account deletion revokes review eligibility and tombstones unpurged photos in the same database transaction; physical object deletion is eventual via the retrying worker, **not immediate**. Request commit failures and partial object writes trigger best-effort rollback cleanup. An abrupt process death between object write and database commit (or a failed compensation delete) can still strand an untracked private original; a durable reservation/object reconciliation process and incident response/medical-record retention policy are release blockers.
+## Decisions 审核策略
 
-## B US-East UAT manifest (not deployed by this change)
+`STOOL_PHOTO_REVIEW_ENABLED=false`、`STOOL_PHOTO_REVIEW_PROVIDER=disabled` 为默认值。启用 `decisions` 还要求 `STOOL_PHOTO_THIRD_PARTY_APPROVED=true`、`OPENAI_API_KEY` 和配置模型（默认 `gpt-6-luna`）。
 
-The B-only Compose manifest now includes `stool-photo-review-worker` in Product's
-first activation, update/recovery and image-provenance checks. Its environment
-**forces** `STOOL_PHOTO_REVIEW_PROVIDER=disabled` and
-`STOOL_PHOTO_THIRD_PARTY_APPROVED=false` regardless of the private env. A
-pending photo is failed without reading its original; the worker may still
-retry deletion tombstones. This code/manifest check is not evidence that the
-worker is running on the host. Verify actual B release provenance, migration,
-process health and a synthetic deletion rehearsal before any user-facing
-capability can be enabled. A-lane manifests remain unchanged.
+策略分别判断：便便主体、颜色/形状清晰度、光线，以及宝宝面部、隐私部位和其他敏感信息。明确不符合时拒绝；所有正向条件高置信满足且敏感项低置信时通过；中间区间返回 `inconclusive`。provider 错误、超时、结果缺失或对象被篡改一律 fail closed。阈值属于工程默认值，真实发布前仍须用经同意的儿童图片标注集校准。
 
-## Local and CI worker verification
+## 运维要求
 
 `make backend-up` now builds/starts `stool-photo-review-worker` **after** the migration; the local Compose and CI override force `STOOL_PHOTO_REVIEW_PROVIDER=disabled` and `STOOL_PHOTO_THIRD_PARTY_APPROVED=false` regardless of the local env file. The CI smoke job starts the worker after Alembic, verifies the process is running, then executes the PostgreSQL + MinIO integration tests using fresh random schema and bucket; cleanup removes only those test resources. Do **not** use an existing user bucket for these tests. No real pediatric photos, third-party review or production deployment is involved.
 
@@ -55,3 +47,7 @@ No real pediatric photos or external API calls belong in this test suite. SQLite
 `app/modules/stool_analyses/` now contains a durable result/photo-link ledger (migration `20261022_0032`), an in-process resolver, and a dedicated Agent-only internal POST endpoint. The endpoint requires the Agent Runtime service identity and **always returns unavailable by default**; tests alone override that gate. With synthetic seeded results it checks current account/device session, baby/thread/owner, result/photo state, SHA-256, and retention on every request, then sends only EXIF-stripped in-memory JPEGs and a bounded result. Account deletion revokes access and scrubs the persisted result in the same DB transaction. The Agent typed client and transient model-input adapter are wired to a versioned analysis reference but remain default-disabled for real Run context. There is still **no** public submit, medically validated result writer/schema, real provider call, clinical release, or agreed result-erasure policy. Do not enable the internal gate for debugging.
 
 A completed analysis may continue to resolve the same image **after its submission review window expires** only while that analysis result is separately valid, the original still exists, and owner/baby/thread/session, photo fingerprint, current review status, and revocation checks pass. Review expiration never renews the original approval for a **new** submission. `context_expires_at`, account/photo deletion, review-policy revocation and privacy retention remain independent gates. Current tests use synthetic results, not clinical validation.
+
+- 不在日志、指标、错误回执或普通 CI 工件中保存图片、EXIF、base64、供应商原始响应或概率。
+- worker 未运行时不得开放上传能力，否则照片会长期停留在 pending。
+- 生产发布须演练：worker 重启、对象写入后数据库失败、删除重试、账号注销、第三方不可用、审核策略撤销和跨区域隔离。

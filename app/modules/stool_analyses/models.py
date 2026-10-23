@@ -1,4 +1,4 @@
-"""Private specialty-analysis result ledger. No medical provider is enabled."""
+"""Private Product-owned stool analysis task, result and event ledger."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, JSON, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ...infrastructure.db.base import Base
@@ -68,15 +68,15 @@ class StoolAnalysisPhoto(Base):
 
 
 class StoolAnalysisEvent(Base):
-    """Committed nonmedical event; future clinical events need a new validated contract."""
+    """Committed, replayable card, field, terminal or failure event."""
 
     __tablename__ = "stool_analysis_events"
     __table_args__ = (
         UniqueConstraint("analysis_id", "sequence", name="uq_stool_analysis_events_sequence"),
         CheckConstraint("sequence > 0", name="sequence_positive"),
         CheckConstraint(
-            "event_type IN ('stool.card.created','stool.analysis.started','stool.analysis.failed','stool.analysis.cancelled')",
-            name="nonmedical_type",
+            "event_type IN ('stool.card.created','stool.analysis.started','stool.field.ready','stool.analysis.completed','stool.analysis.failed','stool.analysis.cancelled')",
+            name="type",
         ),
     )
 
@@ -85,4 +85,5 @@ class StoolAnalysisEvent(Base):
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_version: Mapped[str] = mapped_column(String(40), nullable=False)
     event_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
