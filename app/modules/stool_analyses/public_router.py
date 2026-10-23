@@ -1,4 +1,4 @@
-"""Configuration-gated public App contract for the independent stool-analysis flow."""
+"""Public App contract for the independent stool-analysis flow."""
 from __future__ import annotations
 
 import json
@@ -70,7 +70,7 @@ class StoolAnalysisPhotosRead(BaseModel):
 
 
 def analysis_available(request: Request) -> bool:
-    return bool(request.app.state.settings.stool_analysis_enabled)
+    return bool(request.app.state.settings.stool_analysis_ready)
 
 
 def _require_available(available: bool) -> None:
@@ -115,7 +115,6 @@ async def verify_stool_history_thread(
     thread_id: UUID,
     request: Request,
     user: CurrentUser = Depends(require_current_user),
-    _guard: None = Depends(require_analysis_available),
     gateway: RuntimeConversationGateway = Depends(get_stool_conversation_gateway),
 ) -> UUID:
     await gateway.verify_owner(user.user_id, thread_id,
@@ -135,8 +134,7 @@ def get_submission_service(
     )
 
 
-def get_event_ledger(guard: None = Depends(require_analysis_available),
-                     session: AsyncSession = Depends(get_session)) -> StoolAnalysisEventLedger:
+def get_event_ledger(session: AsyncSession = Depends(get_session)) -> StoolAnalysisEventLedger:
     return StoolAnalysisEventLedger(session)
 
 
@@ -174,12 +172,10 @@ async def list_stool_analyses(
     cursor: UUID | None = None,
     limit: int = Query(default=50, ge=1, le=50),
     user: CurrentUser = Depends(require_current_user),
-    available: bool = Depends(analysis_available),
     verified_thread_id: UUID = Depends(verify_stool_history_thread),
     ledger: StoolAnalysisEventLedger = Depends(get_event_ledger),
 ) -> StoolAnalysisHistoryPage:
     response.headers["Cache-Control"] = "private, no-store"
-    _require_available(available)
     if verified_thread_id != thread_id:
         raise ApiError(code="stool_thread_binding_unavailable", message="Thread binding is unavailable.", status=409)
     rows, next_cursor = await ledger.list_for_thread(
@@ -197,11 +193,9 @@ async def list_stool_analyses(
 async def get_stool_analysis(
     analysis_id: UUID, response: Response,
     user: CurrentUser = Depends(require_current_user),
-    available: bool = Depends(analysis_available),
     ledger: StoolAnalysisEventLedger = Depends(get_event_ledger),
 ) -> StoolAnalysisRead:
     response.headers["Cache-Control"] = "private, no-store"
-    _require_available(available)
     analysis = await ledger.get_analysis(owner=user.user_id, analysis_id=analysis_id)
     return StoolAnalysisRead.model_validate({
         "analysis_id": analysis.id, "status": analysis.status,
@@ -211,7 +205,6 @@ async def get_stool_analysis(
 
 
 def get_photo_viewer(
-    guard: None = Depends(require_analysis_available),
     session: AsyncSession = Depends(get_session),
     storage: ObjectStorage = Depends(get_object_storage),
 ) -> StoolAnalysisPhotoViewer:
@@ -222,11 +215,9 @@ def get_photo_viewer(
 async def list_stool_analysis_photos(
     analysis_id: UUID, response: Response,
     user: CurrentUser = Depends(require_current_user),
-    available: bool = Depends(analysis_available),
     viewer: StoolAnalysisPhotoViewer = Depends(get_photo_viewer),
 ) -> StoolAnalysisPhotosRead:
     response.headers["Cache-Control"] = "private, no-store"
-    _require_available(available)
     refs = await viewer.list_refs(owner=user.user_id, analysis_id=analysis_id)
     return StoolAnalysisPhotosRead(items=[
         StoolAnalysisPhotoRead(photo_id=photo_id, position=position)
@@ -241,10 +232,8 @@ async def list_stool_analysis_photos(
 async def get_stool_analysis_thumbnail(
     analysis_id: UUID, photo_id: UUID,
     user: CurrentUser = Depends(require_current_user),
-    available: bool = Depends(analysis_available),
     viewer: StoolAnalysisPhotoViewer = Depends(get_photo_viewer),
 ) -> Response:
-    _require_available(available)
     jpeg = await viewer.thumbnail(owner=user.user_id, analysis_id=analysis_id, photo_id=photo_id)
     return Response(content=jpeg, media_type="image/jpeg", headers={
         "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
@@ -284,10 +273,8 @@ async def stream_stool_analysis_events(
     analysis_id: UUID,
     after_sequence: int = Query(default=0, ge=0),
     user: CurrentUser = Depends(require_current_user),
-    available: bool = Depends(analysis_available),
     ledger: StoolAnalysisEventLedger = Depends(get_event_ledger),
 ) -> StreamingResponse:
-    _require_available(available)
     # Materialize a bounded committed page under authorization before streaming.
     events = await ledger.list_after(owner=user.user_id, analysis_id=analysis_id, after=after_sequence)
     frames = []

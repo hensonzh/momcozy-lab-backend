@@ -34,4 +34,4 @@ def test_ci_review_worker_receives_ephemeral_auth_key_for_startup():
     compose = (ROOT / "docker-compose.ci.yml").read_text()
     worker = compose.split("  stool-photo-review-worker:", 1)[1].split("\n  migrate:", 1)[0]
     assert "AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64:?Set AUTH_JWT_PRIVATE_KEY_B64}" in worker
-    assert "STOOL_PHOTO_REVIEW_PROVIDER: disabled" in worker
+    assert 'STOOL_DECISIONS_API_KEY: ""' in worker

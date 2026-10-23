@@ -31,7 +31,7 @@ def get_service(session: AsyncSession = Depends(get_session),
 
 def stool_photo_review_available(request: Request) -> bool:
     settings = request.app.state.settings
-    return bool(settings.stool_photo_review_enabled and settings.stool_photo_review_provider != "disabled")
+    return bool(settings.stool_analysis_ready)
 
 
 @router.post("", response_model=StoolPhotoRead, status_code=202)
@@ -61,8 +61,8 @@ async def stool_photo_capability(
     settings = _request.app.state.settings
     return {
         "review_available": review_available,
-        "analysis_available": bool(settings.stool_analysis_enabled),
-        "followup_available": bool(settings.stool_analysis_enabled and settings.stool_followup_enabled),
+        "analysis_available": settings.stool_analysis_ready,
+        "followup_available": settings.stool_analysis_ready,
     }
 
 

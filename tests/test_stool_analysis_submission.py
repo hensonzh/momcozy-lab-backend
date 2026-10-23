@@ -259,7 +259,7 @@ def test_synthetic_prepare_public_contract_is_closed_without_thread_binding() ->
 
     schema = create_app(Settings(app_env="test")).openapi()
     assert "post" in schema["paths"]["/v1/stool-analyses"]
-    assert Settings().stool_analysis_enabled is False
+    assert Settings().stool_analysis_ready is False
     assert "/v1/stool-analyses/submit" not in schema["paths"]
 
 

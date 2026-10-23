@@ -96,8 +96,8 @@ def test_compose_file_nonsecret_topology_is_exact_after_clean_render(monkeypatch
     assert api["environment"]["REDIS_URL"].rsplit("@", 1)[-1] == "redis:6379/0"
     assert api["environment"]["OBJECT_STORAGE_BUCKET"] == "momcozy-product-us-east-uat"
     review = config["services"]["stool-photo-review-worker"]
-    assert review["environment"]["STOOL_PHOTO_REVIEW_PROVIDER"] == "disabled"
-    assert review["environment"]["STOOL_PHOTO_THIRD_PARTY_APPROVED"] == "false"
+    assert "STOOL_PHOTO_REVIEW_PROVIDER" not in review["environment"]
+    assert "STOOL_PHOTO_THIRD_PARTY_APPROVED" not in review["environment"]
     assert review["environment"]["DATABASE_URL"] == api["environment"]["DATABASE_URL"]
     assert review["environment"]["OBJECT_STORAGE_BUCKET"] == api["environment"]["OBJECT_STORAGE_BUCKET"]
     assert "ports" not in review

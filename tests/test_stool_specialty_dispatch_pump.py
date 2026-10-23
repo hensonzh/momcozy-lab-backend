@@ -47,13 +47,12 @@ class Analyzer:
         )
 
 
-def service(enabled=True, *, fail=True):
+def service(*, configured=True, fail=True):
     settings = SpecialtySettings(
         app_env="test", market="US", service_shared_secret=SECRET,
-        analysis_enabled=enabled, provider="openai" if enabled else "disabled",
-        openai_api_key="test-key" if enabled else "",
+        openai_api_key="test-key" if configured else "",
     )
-    return create_app(settings, analyzer=Analyzer(fail=fail) if enabled else None)
+    return create_app(settings, analyzer=Analyzer(fail=fail))
 
 
 async def pump(sessions, storage, specialty):
@@ -125,13 +124,13 @@ def test_unavailable_service_retries_then_recovers_without_second_job(tmp_path):
         ids = await fixture(sessions, storage)
         now = datetime.now(timezone.utc)
         analysis = await prepare(sessions, storage, ids, at=now, market="US", language="en")
-        http, processor = await pump(sessions, storage, service(False))
+        http, processor = await pump(sessions, storage, service(configured=False))
         async with http:
             assert await processor.run_once(now=now)
         async with sessions.begin() as session:
             row = await session.get(StoolAnalysis, analysis.id)
             assert row.status == "queued" and row.run_attempt == 1
-        http, processor = await pump(sessions, storage, service(True))
+        http, processor = await pump(sessions, storage, service(configured=True))
         async with http:
             assert not await processor.run_once(now=now + timedelta(seconds=1))
             assert await processor.run_once(now=now + timedelta(seconds=3))

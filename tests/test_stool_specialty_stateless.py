@@ -38,11 +38,10 @@ def token(body, *, market="US", secret=SECRET):
     )
 
 
-def settings(*, enabled=False):
+def settings(*, configured=False):
     return SpecialtySettings(
         app_env="test", market="US", service_shared_secret=SECRET,
-        analysis_enabled=enabled, provider="openai" if enabled else "disabled",
-        openai_api_key="test-key" if enabled else "",
+        openai_api_key="test-key" if configured else "",
     )
 
 
@@ -67,7 +66,7 @@ class Analyzer:
         )
 
 
-def test_closed_by_default_and_success_stream_is_ordered_and_bounded():
+def test_unconfigured_service_rejects_analysis_and_configured_stream_is_ordered():
     async def run():
         body = payload()
         disabled = create_app(settings())
@@ -75,7 +74,7 @@ def test_closed_by_default_and_success_stream_is_ordered_and_bounded():
             assert (await http.post("/v1/analyze/stream", json=body,
                 headers={"Authorization": "Bearer " + token(body)})).status_code == 503
         analyzer = Analyzer()
-        service = create_app(settings(enabled=True), analyzer=analyzer)
+        service = create_app(settings(configured=True), analyzer=analyzer)
         assert not hasattr(service.state, "sessions")
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service), base_url="http://test") as http:
             assert (await http.post("/v1/analyze/stream", json=body)).status_code == 401
@@ -102,7 +101,7 @@ def test_closed_by_default_and_success_stream_is_ordered_and_bounded():
 def test_model_failure_is_safe_terminal_failure_without_leakage():
     async def run():
         body = payload()
-        service = create_app(settings(enabled=True), analyzer=Analyzer(fail=True))
+        service = create_app(settings(configured=True), analyzer=Analyzer(fail=True))
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service), base_url="http://test") as http:
             response = await http.post("/v1/analyze/stream", json=body,
                 headers={"Authorization": "Bearer " + token(body)})
@@ -117,7 +116,7 @@ def test_model_failure_is_safe_terminal_failure_without_leakage():
 def test_scope_and_payload_fail_closed():
     async def run():
         body = payload()
-        service = create_app(settings(enabled=True), analyzer=Analyzer())
+        service = create_app(settings(configured=True), analyzer=Analyzer())
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service), base_url="http://test") as http:
             for auth in (token(body, market="CN"), token(body, secret="forged-" + SECRET)):
                 assert (await http.post("/v1/analyze/stream", json=body,

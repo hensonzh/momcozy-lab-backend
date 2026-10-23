@@ -689,38 +689,23 @@ def test_specialty_market_is_explicit_and_restricted(monkeypatch: pytest.MonkeyP
         Settings(stool_specialty_market="EU").validate_for_startup()
 
 
-def test_stool_analysis_and_followup_are_explicitly_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STOOL_ANALYSIS_ENABLED", "true")
+def test_stool_readiness_uses_credentials_not_feature_switches(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STOOL_ANALYSIS_ENABLED", "true")  # Retired value has no effect.
     monkeypatch.setenv("STOOL_FOLLOWUP_ENABLED", "true")
-    monkeypatch.setenv("STOOL_SPECIALTY_MARKET", "US")
-    monkeypatch.setenv("STOOL_SPECIALTY_ORIGIN", "https://stool-specialty.internal")
-    monkeypatch.setenv("STOOL_SPECIALTY_SERVICE_SECRET", "s" * 32)
     settings = Settings.from_env()
-    assert settings.stool_analysis_enabled and settings.stool_followup_enabled
-    settings.validate_for_startup()
-
-    with pytest.raises(ValueError, match="STOOL_SPECIALTY_ORIGIN"):
-        Settings(stool_analysis_enabled=True, stool_specialty_market="US",
-                 stool_specialty_service_secret="s" * 32).validate_for_startup()
-    with pytest.raises(ValueError, match="STOOL_FOLLOWUP_ENABLED"):
-        Settings(stool_followup_enabled=True).validate_for_startup()
+    assert not settings.stool_review_ready and not settings.stool_analysis_ready
+    assert not Settings(openai_api_key="general-vision-key").stool_review_ready
+    configured = Settings(stool_specialty_market="US", stool_specialty_origin="https://specialty.test",
+                          stool_specialty_service_secret="s" * 32, stool_decisions_api_key="test-key")
+    assert configured.stool_review_ready and configured.stool_analysis_ready
+    configured.validate_for_startup()
+    assert not Settings(stool_decisions_api_key="test-key").stool_analysis_ready
 
 
 def test_decisions_review_uses_the_supported_model_only() -> None:
-    assert Settings().stool_photo_review_model == "gpt-6-luna"
-    valid = Settings(
-        app_env="test",
-        openai_api_key="test-key",
-        stool_photo_review_provider="decisions",
-        stool_photo_review_model="gpt-6-luna",
-        stool_photo_third_party_approved=True,
-    )
-    valid.validate_for_startup()
-    with pytest.raises(ValueError, match="gpt-6-luna"):
-        Settings(
-            app_env="test",
-            openai_api_key="test-key",
-            stool_photo_review_provider="decisions",
-            stool_photo_review_model="gpt-5.4-mini",
-            stool_photo_third_party_approved=True,
-        ).validate_for_startup()
+    from app.modules.stool_photos.review import DecisionsReviewProvider
+
+    async def unused(_payload):
+        return {}
+
+    assert DecisionsReviewProvider(post=unused).model == "gpt-6-luna"

@@ -50,7 +50,7 @@ def _identity(
 
 def create_app(settings: SpecialtySettings, *, analyzer: StoolAnalyzer | None = None) -> FastAPI:
     settings.validate()
-    if analyzer is None and settings.analysis_enabled:
+    if analyzer is None and settings.ready:
         analyzer = OpenAIStoolAnalyzer(
             api_key=settings.openai_api_key, model=settings.openai_model,
             timeout_seconds=settings.request_timeout_seconds,
@@ -64,7 +64,7 @@ def create_app(settings: SpecialtySettings, *, analyzer: StoolAnalyzer | None = 
         request: Request, call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         response: Response
-        if request.url.path == "/v1/analyze/stream" and not settings.analysis_enabled:
+        if request.url.path == "/v1/analyze/stream" and not settings.ready:
             response = JSONResponse(status_code=503, content={"detail": {"code": "specialty_analysis_unavailable"}})
         else:
             response = await call_next(request)
@@ -80,7 +80,7 @@ def create_app(settings: SpecialtySettings, *, analyzer: StoolAnalyzer | None = 
 
     @service.get("/healthz")
     def health() -> dict[str, str]:
-        return {"status": "ready" if settings.analysis_enabled else "closed"}
+        return {"status": "ready" if settings.ready else "unavailable"}
 
     @service.post("/v1/analyze/stream", responses={503: {"description": "Analysis unavailable"}})
     async def analyze_stream(

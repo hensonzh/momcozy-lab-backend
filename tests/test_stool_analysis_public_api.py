@@ -1,4 +1,4 @@
-"""Synthetic-only public contract stays closed without clinical and thread gates."""
+"""Synthetic public contract keeps admission separate from authorized history."""
 import json
 from types import SimpleNamespace
 from uuid import uuid4
@@ -57,7 +57,7 @@ def test_explicit_analysis_deletion_still_requires_auth_when_analysis_closed():
     assert response.status_code == 401
 
 
-def test_default_public_analysis_contract_is_closed_without_any_service_call():
+def test_unconfigured_analysis_rejects_new_submission_but_preserves_history():
     owner, baby, thread, photo = (uuid4() for _ in range(4))
     app = create_app(Settings(app_env='test', stool_specialty_market='CN'))
     service = FakeSubmission(owner, baby, thread)
@@ -68,11 +68,13 @@ def test_default_public_analysis_contract_is_closed_without_any_service_call():
     response = client.post('/v1/stool-analyses', json=payload, headers={'Idempotency-Key': 'once'})
     assert response.status_code == 503
     assert service.calls == []
-    assert client.get(f'/v1/stool-analyses/{service.analysis_id}').status_code == 503
-    assert client.get(f'/v1/stool-analyses?thread_id={thread}').status_code == 503
-    assert client.get(f'/v1/stool-analyses/{service.analysis_id}/photos').status_code == 503
-    assert client.get(f'/v1/stool-analyses/{service.analysis_id}/photos/{photo}/thumbnail').status_code == 503
-    assert client.get(f'/v1/stool-analyses/{service.analysis_id}/events/stream').status_code == 503
+    # Configuration blocks new submissions, not owner-scoped history access.
+    ledger = FakeLedger(owner, service.analysis_id)
+    app.dependency_overrides[get_event_ledger] = lambda: ledger
+    app.dependency_overrides[verify_stool_history_thread] = lambda: thread
+    assert client.get(f'/v1/stool-analyses/{service.analysis_id}').status_code == 200
+    assert client.get(f'/v1/stool-analyses?thread_id={thread}').status_code == 200
+    assert client.get(f'/v1/stool-analyses/{service.analysis_id}/events/stream').status_code == 200
 
 
 def test_even_test_enabled_analysis_requires_configured_agent_thread_binding():

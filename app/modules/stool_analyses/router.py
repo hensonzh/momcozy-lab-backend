@@ -1,17 +1,16 @@
-"""Gated internal resolver; medical submissions and providers remain unavailable."""
+"""Owner-scoped internal resolver for completed stool analyses."""
 from __future__ import annotations
 
 import base64
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import Depends, Request, Response
+from fastapi import Depends, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...api.dependencies import get_object_storage, require_agent_runtime_client
 from ...api.surface import SurfaceAPIRouter, api_surface
-from ...core.errors import ApiError
 from ...infrastructure.db import get_session
 from ...infrastructure.object_storage import ObjectStorage
 from ..auth import ServiceClient
@@ -47,11 +46,6 @@ class StoolContextResponse(BaseModel):
     images_b64: list[str] = Field(min_length=1, max_length=3)
 
 
-def context_available(request: Request) -> bool:
-    settings = request.app.state.settings
-    return bool(settings.stool_analysis_enabled and settings.stool_followup_enabled)
-
-
 def get_context_service(
     session: AsyncSession = Depends(get_session),
     storage: ObjectStorage = Depends(get_object_storage),
@@ -63,12 +57,9 @@ def get_context_service(
 async def resolve_stool_context(
     payload: StoolContextRequest, response: Response,
     _service_client: ServiceClient = Depends(require_agent_runtime_client),
-    available: bool = Depends(context_available),
     service: StoolAnalysisContextResolver = Depends(get_context_service),
 ) -> StoolContextResponse:
     response.headers["Cache-Control"] = "private, no-store"
-    if not available:
-        raise ApiError(code="stool_analysis_context_unavailable", message="Analysis context is unavailable.", status=503)
     resolved = await service.resolve(
         analysis_id=payload.analysis_id, actor_user_id=payload.actor_user_id, session_id=payload.session_id,
         baby_id=payload.baby_id, thread_id=payload.thread_id,

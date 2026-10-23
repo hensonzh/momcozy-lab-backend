@@ -1,6 +1,6 @@
 # 看便便专项服务：单向、无状态分析流
 
-**工程状态（2026-10-23）：端到端代码链路已实现，真实生产能力默认关闭。** 独立服务可调用轻量视觉模型并流式返回严格结构化结果；Product 仍是唯一持久化方。医学效果与儿童图片处理中美发布验收未完成，不能仅凭工程测试打开生产开关。
+**工程状态（2026-10-23）：端到端代码链路已实现。** 独立服务流式返回结构化结果；Product 是唯一持久化方。未配置所需凭据时拒绝新提交；部署前仍需完成医学和隐私验收。
 
 ## 一条链路
 
@@ -14,9 +14,9 @@
 
 ## 配置
 
-- Product：`STOOL_PHOTO_REVIEW_ENABLED`、`STOOL_ANALYSIS_ENABLED`、`STOOL_FOLLOWUP_ENABLED`、`STOOL_SPECIALTY_MARKET`、`STOOL_SPECIALTY_ORIGIN`、`STOOL_SPECIALTY_SERVICE_SECRET`。
-- 独立服务：`STOOL_SPECIALTY_ANALYSIS_ENABLED`、`STOOL_SPECIALTY_PROVIDER=openai`、`STOOL_SPECIALTY_OPENAI_MODEL=gpt-6-sol`、`OPENAI_API_KEY`；风险和建议由版本化确定性规则生成。
-- 所有能力默认关闭；配置错误 fail closed。
+- Product：`STOOL_DECISIONS_API_KEY`（Decisions 照片审核）、`STOOL_SPECIALTY_MARKET`、`STOOL_SPECIALTY_ORIGIN`、`STOOL_SPECIALTY_SERVICE_SECRET`。审核、分析和追问没有独立功能开关。
+- 独立服务：`STOOL_SPECIALTY_OPENAI_MODEL=gpt-6-sol`、`OPENAI_API_KEY`；风险和建议由版本化确定性规则生成。
+- 缺少配置时拒绝新提交，已保存结果的授权读取和删除仍可用。
 
 ## 上线门禁
 

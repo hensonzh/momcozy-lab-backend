@@ -28,15 +28,13 @@ REVIEW_TTL = timedelta(days=180)  # Product-selected submission window; not clin
 
 
 def review_provider(settings: Settings) -> ReviewProvider:
-    if settings.stool_photo_review_provider != "decisions":
-        return DisabledReviewProvider()
-    if not settings.stool_photo_third_party_approved or not settings.openai_api_key:
+    if not settings.stool_review_ready:
         return DisabledReviewProvider()
 
     async def post(payload: dict[str, Any]) -> dict[str, Any]:
-        return await post_decisions(payload, api_key=settings.openai_api_key)
+        return await post_decisions(payload, api_key=settings.stool_decisions_api_key)
 
-    return DecisionsReviewProvider(post=post, model=settings.stool_photo_review_model)
+    return DecisionsReviewProvider(post=post)
 
 
 async def process_next(sessions: async_sessionmaker[AsyncSession], storage: ObjectStorage,

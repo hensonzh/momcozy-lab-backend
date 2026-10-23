@@ -19,8 +19,8 @@ LOGGER = logging.getLogger(__name__)
 async def run() -> None:
     settings = Settings.from_env()
     settings.validate_for_startup()
-    if not settings.stool_analysis_enabled:
-        LOGGER.info("Stool analysis worker is disabled.")
+    if not settings.stool_analysis_ready:
+        LOGGER.info("Stool analysis service is not configured.")
         await asyncio.Event().wait()
         return
     engine = create_db_engine(settings)

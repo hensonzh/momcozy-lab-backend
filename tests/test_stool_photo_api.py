@@ -84,18 +84,12 @@ def test_stool_upload_rejects_too_large_before_service_call():
     assert response.status_code == 413 and service.uploads == 0
 
 
-def test_review_provider_requires_explicit_privacy_approval_and_key():
-    import pytest
-    for settings in (
-        Settings(app_env="test", stool_photo_review_provider="decisions"),
-        Settings(app_env="test", stool_photo_review_provider="decisions", stool_photo_third_party_approved=True),
-    ):
-        with pytest.raises(ValueError):
-            settings.validate_for_startup()
-    Settings(app_env="test", stool_photo_review_provider="disabled").validate_for_startup()
+def test_review_requires_configured_key_and_does_not_use_a_switch():
+    assert not Settings(app_env="test").stool_review_ready
+    assert Settings(app_env="test", stool_decisions_api_key="test-key").stool_review_ready
 
 
-def test_stool_capability_disables_capture_without_calibrated_review_policy():
+def test_stool_capability_is_unavailable_without_credentials():
     owner = uuid4()
     app = create_app(Settings(app_env="test"))
     app.dependency_overrides[require_current_user] = lambda: SimpleNamespace(user_id=owner)
@@ -105,15 +99,16 @@ def test_stool_capability_disables_capture_without_calibrated_review_policy():
 
 
 
-def test_followup_capability_requires_both_analysis_and_followup_gates():
+def test_review_analysis_and_followup_capabilities_share_one_configuration():
     owner = uuid4()
     app = create_app(Settings(app_env="test"))
     app.dependency_overrides[require_current_user] = lambda: SimpleNamespace(user_id=owner)
-    for analysis, followup, expected in ((False, False, False), (True, False, False), (True, True, True)):
-        app.state.settings = Settings(app_env="test", stool_analysis_enabled=analysis, stool_followup_enabled=followup)
-        response = TestClient(app).get('/v1/stool-photos/capability')
-        assert response.status_code == 200
-        assert response.json()['followup_available'] is expected
+    app.state.settings = Settings(
+        app_env="test", stool_decisions_api_key="test-key", stool_specialty_market="US",
+        stool_specialty_origin="https://specialty.test", stool_specialty_service_secret="s" * 32,
+    )
+    response = TestClient(app).get('/v1/stool-photos/capability')
+    assert response.json() == {'review_available': True, 'analysis_available': True, 'followup_available': True}
 
 
 def test_stool_upload_fails_closed_when_review_unavailable_even_for_valid_authenticated_photo():

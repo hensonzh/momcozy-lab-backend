@@ -74,7 +74,7 @@ def test_product_owns_durable_task_and_events_after_independent_stateless_stream
                 )
             service = create_app(SpecialtySettings(
                 app_env="test", market="US", service_shared_secret=SECRET,
-                analysis_enabled=True, provider="openai", openai_api_key="test-key",
+                openai_api_key="test-key",
             ), analyzer=Analyzer())
             assert not hasattr(service.state, "sessions")
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service),

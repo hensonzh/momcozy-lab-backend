@@ -1,4 +1,4 @@
-"""Internal-only synthetic follow-up resolver; disabled until clinical approval."""
+"""Internal-only synthetic follow-up resolver."""
 import base64
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.core.settings import Settings
 from app.factory import create_app
 from app.modules.stool_analyses.context import StoolFollowupContext
-from app.modules.stool_analyses.router import context_available, get_context_service
+from app.modules.stool_analyses.router import get_context_service
 
 KEY = 'agent-runtime-service-key-with-32-bytes'
 
@@ -35,18 +35,16 @@ def request(analysis_id, actor, baby, thread, device):
     }
 
 
-def test_internal_stool_context_requires_service_key_and_defaults_to_closed():
+def test_internal_stool_context_requires_service_key():
     analysis_id, actor, baby, thread, device = (uuid4() for _ in range(5))
     app = create_app(Settings(app_env='test', agent_runtime_service_api_key=KEY))
     fake = FakeResolver(analysis_id)
     app.dependency_overrides[get_context_service] = lambda: fake
     url = '/v1/internal/agent/stool-analyses/context/resolve'
     body = request(analysis_id, actor, baby, thread, device)
-    unauthenticated = TestClient(app).post(url, json=body)
-    assert unauthenticated.status_code == 401
-    disabled = TestClient(app).post(url, headers={'X-Service-Key': KEY}, json=body)
-    assert disabled.status_code == 503
-    assert fake.calls == []
+    assert TestClient(app).post(url, json=body).status_code == 401
+    assert TestClient(app).post(url, headers={'X-Service-Key': KEY}, json=body).status_code == 200
+    assert len(fake.calls) == 1
 
 
 def test_synthetic_internal_stool_context_returns_ordered_pair_without_object_key():
@@ -54,7 +52,6 @@ def test_synthetic_internal_stool_context_returns_ordered_pair_without_object_ke
     app = create_app(Settings(app_env='test', agent_runtime_service_api_key=KEY))
     fake = FakeResolver(analysis_id)
     app.dependency_overrides[get_context_service] = lambda: fake
-    app.dependency_overrides[context_available] = lambda: True  # Test-only gate override.
     url = '/v1/internal/agent/stool-analyses/context/resolve'
     response = TestClient(app).post(url, headers={'X-Service-Key': KEY},
                                     json=request(analysis_id, actor, baby, thread, device))
@@ -100,7 +97,6 @@ def test_real_internal_resolver_rechecks_revocation_each_synthetic_request():
                 yield StoolAnalysisContextResolver(session=session, storage=storage)
 
         app.dependency_overrides[get_context_service] = provide_service
-        app.dependency_overrides[context_available] = lambda: True
         payload = {
             'analysis_id': str(analysis), 'actor_user_id': str(owner),
             'baby_id': str(baby), 'thread_id': str(thread), 'session_id': str(device),
