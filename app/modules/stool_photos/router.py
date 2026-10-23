@@ -62,7 +62,7 @@ async def stool_photo_capability(
     return {
         "review_available": review_available,
         "analysis_available": settings.stool_analysis_ready,
-        "followup_available": settings.stool_analysis_ready,
+        "followup_available": bool(settings.agent_runtime_service_api_key),
     }
 
 

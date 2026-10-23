@@ -4,7 +4,7 @@
 
 ## 接口与 worker
 
-- `GET /v1/stool-photos/capability`：返回服务端权威的 `review_available`、`analysis_available` 与 `followup_available`。分析和追问能力基于同一服务配置；App 不自行推断能力。
+- `GET /v1/stool-photos/capability`：返回服务端权威的 `review_available`、`analysis_available` 与 `followup_available`。新提交由照片审核及专项分析凭据决定；已有结果追问由 Agent 服务凭据和逐次授权决定，App 不自行推断能力。
 - `POST /v1/stool-photos`：服务配置齐全后接收认证的单张原图；要求 `Idempotency-Key`，服务端按真实编码复验 JPEG/PNG/HEIC、≤10 MiB、短边 ≥720px 和解码像素上限。服务未配置时在读取/保存原图前返回 503。
 - `GET /v1/stool-photos/{photo_id}/review`：仅 owner 可读审核状态、原因码、策略版本和有效期。
 - `DELETE /v1/stool-photos/{photo_id}`：立即写删除墓碑；worker 可重试物理删除对象。

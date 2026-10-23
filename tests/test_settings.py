@@ -696,10 +696,14 @@ def test_stool_readiness_uses_credentials_not_feature_switches(monkeypatch: pyte
     assert not settings.stool_review_ready and not settings.stool_analysis_ready
     assert not Settings(openai_api_key="general-vision-key").stool_review_ready
     configured = Settings(stool_specialty_market="US", stool_specialty_origin="https://specialty.test",
-                          stool_specialty_service_secret="s" * 32, stool_decisions_api_key="test-key")
+                          stool_specialty_service_secret="s" * 32, stool_decisions_api_key="test-key",
+                          openai_api_key="model-key")
     assert configured.stool_review_ready and configured.stool_analysis_ready
     configured.validate_for_startup()
     assert not Settings(stool_decisions_api_key="test-key").stool_analysis_ready
+    assert not Settings(stool_decisions_api_key="test-key", stool_specialty_market="US",
+                        stool_specialty_origin="https://specialty.test",
+                        stool_specialty_service_secret="s" * 32).stool_analysis_ready
 
 
 def test_decisions_review_uses_the_supported_model_only() -> None:

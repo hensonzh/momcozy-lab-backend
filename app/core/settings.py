@@ -122,7 +122,8 @@ class Settings:
 
     @property
     def stool_analysis_ready(self) -> bool:
-        return (self.stool_review_ready and self.stool_specialty_market in {"CN", "US"}
+        return (self.stool_review_ready and bool(self.openai_api_key)
+                and self.stool_specialty_market in {"CN", "US"}
                 and bool(self.stool_specialty_origin)
                 and len(self.stool_specialty_service_secret.encode("utf-8")) >= 32)
 

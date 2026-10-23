@@ -14,7 +14,7 @@
 
 ## 配置
 
-- Product：`STOOL_DECISIONS_API_KEY`（Decisions 照片审核）、`STOOL_SPECIALTY_MARKET`、`STOOL_SPECIALTY_ORIGIN`、`STOOL_SPECIALTY_SERVICE_SECRET`。审核、分析和追问没有独立功能开关。
+- Product：`STOOL_DECISIONS_API_KEY`（Decisions 照片审核）、`OPENAI_API_KEY`（专项模型）、`STOOL_SPECIALTY_MARKET`、`STOOL_SPECIALTY_ORIGIN`、`STOOL_SPECIALTY_SERVICE_SECRET`。审核、分析和追问没有独立功能开关。
 - 独立服务：`STOOL_SPECIALTY_OPENAI_MODEL=gpt-6-sol`、`OPENAI_API_KEY`；风险和建议由版本化确定性规则生成。
 - 缺少配置时拒绝新提交，已保存结果的授权读取和删除仍可用。
 

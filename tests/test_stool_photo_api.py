@@ -104,11 +104,21 @@ def test_review_analysis_and_followup_capabilities_share_one_configuration():
     app = create_app(Settings(app_env="test"))
     app.dependency_overrides[require_current_user] = lambda: SimpleNamespace(user_id=owner)
     app.state.settings = Settings(
-        app_env="test", stool_decisions_api_key="test-key", stool_specialty_market="US",
+        app_env="test", stool_decisions_api_key="test-key", openai_api_key="model-key",
+        agent_runtime_service_api_key="a" * 32, stool_specialty_market="US",
         stool_specialty_origin="https://specialty.test", stool_specialty_service_secret="s" * 32,
     )
     response = TestClient(app).get('/v1/stool-photos/capability')
     assert response.json() == {'review_available': True, 'analysis_available': True, 'followup_available': True}
+
+
+def test_saved_followup_remains_available_without_new_analysis_credentials():
+    owner = uuid4()
+    app = create_app(Settings(app_env="test", agent_runtime_service_api_key="a" * 32))
+    app.dependency_overrides[require_current_user] = lambda: SimpleNamespace(user_id=owner)
+    assert TestClient(app).get('/v1/stool-photos/capability').json() == {
+        'review_available': False, 'analysis_available': False, 'followup_available': True,
+    }
 
 
 def test_stool_upload_fails_closed_when_review_unavailable_even_for_valid_authenticated_photo():
