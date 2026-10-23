@@ -61,7 +61,7 @@ Official API references:
 ```env
 VISION_PROVIDER=openai
 OPENAI_API_KEY=secret-from-deployment-manager
-VISION_OPENAI_MODEL=gpt-5.4-mini
+VISION_OPENAI_MODEL=gpt-6-sol
 VISION_REQUEST_TIMEOUT_SECONDS=20
 ```
 

@@ -106,7 +106,7 @@ class Settings:
     voice_realtime_model: str = ""
     voice_request_timeout_seconds: int = 30
     vision_provider: str = "disabled"
-    vision_openai_model: str = "gpt-5.4-mini"
+    vision_openai_model: str = "gpt-6-sol"
     stool_specialty_market: str = ""  # Explicit deployment region, not inferred from App or S3.
     stool_photo_review_enabled: bool = False
     stool_photo_review_provider: str = "disabled"

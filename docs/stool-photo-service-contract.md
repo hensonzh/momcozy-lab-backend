@@ -57,7 +57,7 @@
 
 **上下文封装通过 `stool.followup.ref.v1` 引用和 `stool.result.v1` 结果实现：**
 
-当前代码状态（2026-10-23）：Product Backend 已持久化任务、来源指纹、字段事件和最终结果；独立无状态服务使用可配置的 `gpt-5.4-mini` 生成严格视觉观察，再由 `stool.medical.rules.2026-10-23.v1` 确定性生成风险和建议；App 已实现完成卡、历史恢复、删除与追问选择；Agent Runtime 每次相关模型调用前重新请求 Product，并把同次图片与完成结果作为低信任上下文。所有真实能力开关默认关闭，医学和隐私验收仍是生产门禁。
+当前代码状态（2026-10-23）：Product Backend 已持久化任务、来源指纹、字段事件和最终结果；独立无状态服务使用可配置的 `gpt-6-sol` 生成严格视觉观察，再由 `stool.medical.rules.2026-10-23.v1` 确定性生成风险和建议；App 已实现完成卡、历史恢复、删除与追问选择；Agent Runtime 每次相关模型调用前重新请求 Product，并把同次图片与完成结果作为低信任上下文。所有真实能力开关默认关闭，医学和隐私验收仍是生产门禁。
 
 - Product Backend 持有权威的 `analysis_id`、`owner_user_id`、`baby_id`、来源照片 ID/指纹/审核策略、最终结构化结果与版本、完成时间、生命周期和关联的授权对话。只有 `status=completed`、最终结果通过 schema/医学安全校验并持久化、照片仍可访问时才生成可用上下文引用。`queued/running/failed/cancelled` 的部分字段、过期审核或被撤销的照片不构成最终结果。不要从 App 传来的结论或普通附件推断“已完成”。
 - App/后续 Run 只传受限的 `analysis_id` 引用，不传原图 URL、对象 key、供应商响应、自由文本医学结论或“已通过审核”布尔值。Product Backend 对每次解析核验当前用户/宝宝/关联对话授权及保留期；Agent Runtime 的内部服务身份不能绕过当前用户权限。参照现有文件资产机制，但必须使用**专项用途的解析边界**，不能把 `stool_photos` 伪装成普通 `model_image` 文件附件。

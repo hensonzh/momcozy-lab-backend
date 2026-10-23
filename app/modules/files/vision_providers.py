@@ -190,6 +190,7 @@ class OpenAIVisionProvider:
                 response = await asyncio.wait_for(
                     parse_response(
                         model=self.model,
+                        reasoning={"effort": "low"},
                         instructions=instructions,
                         input=[
                             {

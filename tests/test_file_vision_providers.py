@@ -148,6 +148,7 @@ def test_openai_vision_provider_uses_private_strict_schedule_request() -> None:
     assert [task.event for task in analysis.schedule_tasks] == ["吸奶", "散步"]
     assert fake_client.client_kwargs == {"api_key": "test-key", "max_retries": 0, "timeout": 2}
     assert fake_client.parse_kwargs["model"] == "gpt-test"
+    assert fake_client.parse_kwargs["reasoning"] == {"effort": "low"}
     assert fake_client.parse_kwargs["store"] is False
     assert fake_client.parse_kwargs["text_format"] is ScheduleVisionOutput
     assert fake_client.parse_kwargs["input"] == [

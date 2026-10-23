@@ -21,7 +21,7 @@ class OpenAIStoolAnalyzer:
     """One private Responses request; no provider response or image is stored here."""
 
     def __init__(
-        self, *, api_key: str, model: str = "gpt-5.4-mini", timeout_seconds: float = 35,
+        self, *, api_key: str, model: str = "gpt-6-sol", timeout_seconds: float = 35,
         client_factory: Any | None = None,
     ) -> None:
         self.api_key = api_key
@@ -61,6 +61,7 @@ class OpenAIStoolAnalyzer:
                 response = await asyncio.wait_for(
                     openai_client.responses.parse(
                         model=self.model,
+                        reasoning={"effort": "low"},
                         instructions=SYSTEM_PROMPT,
                         input=[{"role": "user", "content": content}],
                         text_format=StoolVisualAssessment,

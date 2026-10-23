@@ -98,7 +98,7 @@ def _check_environment_profiles(root: Path) -> list[CheckResult]:
         "AGENT_MODEL_ASSET_PUBLIC_BASE_URL=",
         "AGENT_MODEL_ASSET_INACTIVITY_TTL_SECONDS=",
         "OPENAI_API_KEY=",
-        "VISION_OPENAI_MODEL=gpt-5.4-mini",
+        "VISION_OPENAI_MODEL=gpt-6-sol",
     ]
     retired_names = {
         "AGENT_RUNTIME_WORKER_ENABLED",

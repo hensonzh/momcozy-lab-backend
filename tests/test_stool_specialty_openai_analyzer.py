@@ -69,6 +69,7 @@ def test_lightweight_model_uses_private_structured_responses_request():
     assert output.care_advice.startswith("Continue observing")
     assert fake.client_kwargs == {"api_key": "test-key", "max_retries": 0, "timeout": 3}
     assert fake.parse_kwargs["model"] == "gpt-5.4-mini"
+    assert fake.parse_kwargs["reasoning"] == {"effort": "low"}
     assert fake.parse_kwargs["instructions"] == SYSTEM_PROMPT
     assert fake.parse_kwargs["text_format"] is StoolVisualAssessment
     assert fake.parse_kwargs["store"] is False

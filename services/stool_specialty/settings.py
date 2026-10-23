@@ -19,7 +19,7 @@ class SpecialtySettings:
     analysis_enabled: bool = False
     provider: str = "disabled"
     openai_api_key: str = field(default="", repr=False)
-    openai_model: str = "gpt-5.4-mini"
+    openai_model: str = "gpt-6-sol"
     request_timeout_seconds: float = 35.0
 
     @classmethod
@@ -31,7 +31,7 @@ class SpecialtySettings:
             analysis_enabled=_bool("STOOL_SPECIALTY_ANALYSIS_ENABLED", False),
             provider=os.getenv("STOOL_SPECIALTY_PROVIDER", "disabled").lower(),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-            openai_model=os.getenv("STOOL_SPECIALTY_OPENAI_MODEL", "gpt-5.4-mini"),
+            openai_model=os.getenv("STOOL_SPECIALTY_OPENAI_MODEL", "gpt-6-sol"),
             request_timeout_seconds=float(os.getenv("STOOL_SPECIALTY_REQUEST_TIMEOUT_SECONDS", "35")),
         )
 
