@@ -31,7 +31,7 @@ def _not_approved() -> ApiError:
     return ApiError(code="stool_photos_not_approved", message="Every photo must have a current approved review.", status=409)
 
 
-class SyntheticStoolSubmission:
+class StoolAnalysisSubmission:
     """Prepare a queued record/card only; no public API, network job or medical result."""
 
     def __init__(self, *, session: AsyncSession, storage: ObjectStorage,
@@ -59,6 +59,11 @@ class SyntheticStoolSubmission:
         if (account is None or account.status != "active" or account.deleted_at is not None
                 or baby is None or baby.deleted_at is not None):
             raise ApiError(code="stool_analysis_context_unavailable", message="Analysis context is unavailable.", status=409)
+        if baby.birth_date is None:
+            raise ApiError(code="stool_analysis_age_unsupported", message="Baby age is required for analysis.", status=409)
+        age_days = (at.date() - baby.birth_date).days
+        if age_days < 0 or age_days > 366:
+            raise ApiError(code="stool_analysis_age_unsupported", message="Stool analysis supports babies from birth to one year.", status=409)
         rows = (await self.session.scalars(select(StoolPhoto).where(
             StoolPhoto.id.in_(photo_ids), StoolPhoto.owner_user_id == owner,
         ).order_by(StoolPhoto.id).with_for_update())).all()
@@ -86,7 +91,7 @@ class SyntheticStoolSubmission:
             "photos": [(str(photo.id), photo.sha256) for photo in photos],
         })
         decision = await self.idempotency.reserve(
-            actor_user_id=owner, scope="stool_analysis.prepare_synthetic", key=idempotency_key,
+            actor_user_id=owner, scope="stool_analysis.submit", key=idempotency_key,
             request_hash=digest, expires_at=at + timedelta(days=1),
         )
         if decision.status == "replay":
@@ -119,8 +124,11 @@ class SyntheticStoolSubmission:
         ))
         await self.idempotency.mark_completed(record=decision.record, response_ref=str(analysis.id))
         await self.audit.record(
-            actor_user_id=owner, action="stool_analysis.prepare_synthetic",
+            actor_user_id=owner, action="stool_analysis.submit",
             resource_type="stool_analysis", resource_id=str(analysis.id), request_id=request_id,
             details={"photo_count": len(photos)},
         )
         return analysis
+
+
+SyntheticStoolSubmission = StoolAnalysisSubmission

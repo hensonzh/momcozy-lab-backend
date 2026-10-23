@@ -1,4 +1,4 @@
-"""Independent, stateless analysis stream. No original storage, database or clinical output."""
+"""Independent, stateless stool-analysis stream."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -11,7 +11,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from .contracts import AnalysisEvent, AnalysisInput
+from .analyzer import OpenAIStoolAnalyzer, StoolAnalyzer
+from .contracts import AnalysisEvent, AnalysisInput, build_success_events
 from .settings import SpecialtySettings
 
 AUDIENCE = "momcozy-stool-specialty-v1"
@@ -47,17 +48,23 @@ def _identity(
     return claims
 
 
-def create_app(settings: SpecialtySettings) -> FastAPI:
+def create_app(settings: SpecialtySettings, *, analyzer: StoolAnalyzer | None = None) -> FastAPI:
     settings.validate()
-    service = FastAPI(title="Stool Specialty Service", version="0.2.0")
+    if analyzer is None and settings.analysis_enabled:
+        analyzer = OpenAIStoolAnalyzer(
+            api_key=settings.openai_api_key, model=settings.openai_model,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+    service = FastAPI(title="Stool Specialty Service", version="1.0.0")
     service.state.settings = settings
+    service.state.analyzer = analyzer
 
     @service.middleware("http")
     async def closed_gate_and_no_store(
         request: Request, call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         response: Response
-        if request.url.path == "/v1/analyze/stream" and not settings.synthetic_analyze_enabled:
+        if request.url.path == "/v1/analyze/stream" and not settings.analysis_enabled:
             response = JSONResponse(status_code=503, content={"detail": {"code": "specialty_analysis_unavailable"}})
         else:
             response = await call_next(request)
@@ -73,7 +80,7 @@ def create_app(settings: SpecialtySettings) -> FastAPI:
 
     @service.get("/healthz")
     def health() -> dict[str, str]:
-        return {"status": "ready"}
+        return {"status": "ready" if settings.analysis_enabled else "closed"}
 
     @service.post("/v1/analyze/stream", responses={503: {"description": "Analysis unavailable"}})
     async def analyze_stream(
@@ -82,18 +89,34 @@ def create_app(settings: SpecialtySettings) -> FastAPI:
         if (claims["purpose"] != "stool.analyze" or claims["analysis_id"] != str(payload.analysis_id)
                 or claims["market"] != payload.market):
             raise _deny(403, "service_scope_mismatch")
+        resolved_analyzer: StoolAnalyzer | None = service.state.analyzer
+        if resolved_analyzer is None:
+            raise _deny(503, "specialty_analysis_unavailable")
 
         async def events() -> AsyncIterator[str]:
-            # Clinical fields/results are not enabled. The Product backend owns
-            # the first card event and all durable replay; we emit only terminal failure.
-            for event in (
-                AnalysisEvent(analysis_id=payload.analysis_id, sequence=2, event_type="stool.analysis.started"),
-                AnalysisEvent(analysis_id=payload.analysis_id, sequence=3, event_type="stool.analysis.failed"),
-            ):
-                yield f"id: {event.sequence}\nevent: {event.event_type}\ndata: {event.model_dump_json()}\n\n"
+            started = AnalysisEvent(
+                analysis_id=payload.analysis_id, sequence=2,
+                event_type="stool.analysis.started",
+            )
+            yield _sse(started)
+            try:
+                result = await resolved_analyzer.analyze(payload)
+                success = build_success_events(payload.analysis_id, result)
+                for event in success[1:]:
+                    yield _sse(event)
+            except Exception:
+                # Never return provider bodies, prompts, image bytes or exception text.
+                yield _sse(AnalysisEvent(
+                    analysis_id=payload.analysis_id, sequence=3,
+                    event_type="stool.analysis.failed", payload={"code": "analysis_failed"},
+                ))
 
         return StreamingResponse(events(), media_type="text/event-stream", headers={
             "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
         })
 
     return service
+
+
+def _sse(event: AnalysisEvent) -> str:
+    return f"id: {event.sequence}\nevent: {event.event_type}\ndata: {event.model_dump_json()}\n\n"

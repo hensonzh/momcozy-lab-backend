@@ -67,7 +67,7 @@ async def fixture(sessions, storage):
     storage.data[key] = body
     async with sessions.begin() as session:
         session.add(User(id=owner, status="active"))
-        session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant"))
+        session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant", birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
         session.add(StoolPhoto(
             id=photo_id, owner_user_id=owner, object_key=key, sha256=digest,
             content_type=metadata.content_type, size_bytes=len(body),
@@ -110,7 +110,7 @@ def test_synthetic_submission_is_ordered_persistent_and_idempotent(tmp_path):
         assert (first.market, first.language, first.baby_profile_version, first.baby_feeding_mode) == (
             "CN", "zh", 1, "unknown",
         )
-        assert len(audit.calls) == 1 and audit.calls[0]["action"] == "stool_analysis.prepare_synthetic"
+        assert len(audit.calls) == 1 and audit.calls[0]["action"] == "stool_analysis.submit"
         await engine.dispose()
         engine = create_async_engine(url)
         sessions = async_sessionmaker(engine, expire_on_commit=False)
@@ -129,6 +129,7 @@ def test_synthetic_submission_is_ordered_persistent_and_idempotent(tmp_path):
 @pytest.mark.parametrize("change", [
     "empty", "duplicate", "foreign_owner", "foreign_baby", "not_passed", "no_expiry",
     "expired", "purged", "hash_changed", "storage_tampered", "storage_missing",
+    "missing_birth_date", "too_old", "future_birth_date",
 ])
 def test_invalid_submission_creates_no_task_or_event(tmp_path, change):
     async def run():
@@ -153,6 +154,14 @@ def test_invalid_submission_creates_no_task_or_event(tmp_path, change):
             storage.data[ids[4]] = b"tampered"
         elif change == "storage_missing":
             del storage.data[ids[4]]
+        elif change in {"missing_birth_date", "too_old", "future_birth_date"}:
+            async with sessions.begin() as session:
+                profile = await session.get(BabyProfile, ids[1])
+                profile.birth_date = {
+                    "missing_birth_date": None,
+                    "too_old": datetime.now(timezone.utc).date() - timedelta(days=367),
+                    "future_birth_date": datetime.now(timezone.utc).date() + timedelta(days=1),
+                }[change]
         else:
             async with sessions.begin() as session:
                 photo = await session.get(StoolPhoto, ids[3])
@@ -250,9 +259,7 @@ def test_synthetic_prepare_public_contract_is_closed_without_thread_binding() ->
 
     schema = create_app(Settings(app_env="test")).openapi()
     assert "post" in schema["paths"]["/v1/stool-analyses"]
-    from app.modules.stool_analyses.public_router import analysis_available
-
-    assert analysis_available() is False
+    assert Settings().stool_analysis_enabled is False
     assert "/v1/stool-analyses/submit" not in schema["paths"]
 
 

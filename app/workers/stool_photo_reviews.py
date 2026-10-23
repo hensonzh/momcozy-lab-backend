@@ -35,7 +35,7 @@ def review_provider(settings: Settings) -> ReviewProvider:
     async def post(payload: dict[str, Any]) -> dict[str, Any]:
         return await post_decisions(payload, api_key=settings.openai_api_key)
 
-    return DecisionsReviewProvider(post=post)
+    return DecisionsReviewProvider(post=post, model=settings.stool_photo_review_model)
 
 
 async def process_next(sessions: async_sessionmaker[AsyncSession], storage: ObjectStorage,

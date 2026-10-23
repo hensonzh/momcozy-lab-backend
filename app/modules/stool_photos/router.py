@@ -29,9 +29,9 @@ def get_service(session: AsyncSession = Depends(get_session),
                              idempotency=IdempotencyService(repository=audit), audit=AuditService(repository=audit))
 
 
-def stool_photo_review_available() -> bool:
-    # Fail closed until review policy, cleanup, and production worker are released.
-    return False
+def stool_photo_review_available(request: Request) -> bool:
+    settings = request.app.state.settings
+    return bool(settings.stool_photo_review_enabled and settings.stool_photo_review_provider != "disabled")
 
 
 @router.post("", response_model=StoolPhotoRead, status_code=202)
@@ -54,12 +54,12 @@ async def upload_stool_photo(
 
 @router.get("/capability")
 async def stool_photo_capability(
+    _request: Request,
     _user: CurrentUser = Depends(require_current_user),
     review_available: bool = Depends(stool_photo_review_available),
 ) -> dict[str, bool]:
-    # The candidate Decisions adapter has no approved pediatric thresholds.
-    # Do not advertise either service as usable merely because it is configured.
-    return {"review_available": review_available, "analysis_available": False}
+    settings = _request.app.state.settings
+    return {"review_available": review_available, "analysis_available": bool(settings.stool_analysis_enabled)}
 
 
 @router.get("/{photo_id}/review", response_model=StoolPhotoRead)

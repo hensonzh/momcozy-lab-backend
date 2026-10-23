@@ -1,4 +1,4 @@
-"""Deterministic synthetic-only network contract for the independent service."""
+"""Deterministic structured network contract for the independent service."""
 from __future__ import annotations
 
 import argparse
@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-DEFAULT_OUTPUT = Path("docs/contracts/stool-specialty.openapi.synthetic.json")
+DEFAULT_OUTPUT = Path("docs/contracts/stool-specialty.openapi.v1.json")
 
 
 def build_schema() -> dict[str, Any]:

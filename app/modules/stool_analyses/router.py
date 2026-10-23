@@ -5,7 +5,7 @@ import base64
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import Depends, Response
+from fastapi import Depends, Request, Response
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,9 +47,9 @@ class StoolContextResponse(BaseModel):
     images_b64: list[str] = Field(min_length=1, max_length=3)
 
 
-def context_available() -> bool:
-    # No approved clinical validator, retention or deployed specialty service.
-    return False
+def context_available(request: Request) -> bool:
+    settings = request.app.state.settings
+    return bool(settings.stool_analysis_enabled and settings.stool_followup_enabled)
 
 
 def get_context_service(

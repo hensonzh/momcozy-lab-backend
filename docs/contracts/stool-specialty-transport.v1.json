@@ -1,8 +1,66 @@
 {
   "contracts": {
+    "analysis_event": {
+      "$defs": {
+        "JsonValue": {}
+      },
+      "additionalProperties": false,
+      "properties": {
+        "analysis_id": {
+          "format": "uuid",
+          "title": "Analysis Id",
+          "type": "string"
+        },
+        "event_type": {
+          "enum": [
+            "stool.card.created",
+            "stool.analysis.started",
+            "stool.field.ready",
+            "stool.analysis.completed",
+            "stool.analysis.failed",
+            "stool.analysis.cancelled"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "schema_version": {
+          "const": "stool.events.v1",
+          "default": "stool.events.v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sequence": {
+          "exclusiveMinimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "analysis_id",
+        "sequence",
+        "event_type"
+      ],
+      "title": "AnalysisEvent",
+      "type": "object"
+    },
     "analysis_input": {
       "$defs": {
-        "SpecialtyBabyContext": {
+        "BabyContext": {
           "additionalProperties": false,
           "properties": {
             "baby_context_snapshot_id": {
@@ -46,10 +104,10 @@
             "feeding_mode",
             "captured_at"
           ],
-          "title": "SpecialtyBabyContext",
+          "title": "BabyContext",
           "type": "object"
         },
-        "SpecialtyPhotoInput": {
+        "PhotoInput": {
           "additionalProperties": false,
           "properties": {
             "jpeg_b64": {
@@ -80,7 +138,7 @@
             "original_sha256",
             "jpeg_b64"
           ],
-          "title": "SpecialtyPhotoInput",
+          "title": "PhotoInput",
           "type": "object"
         }
       },
@@ -92,7 +150,7 @@
           "type": "string"
         },
         "baby_context": {
-          "$ref": "#/$defs/SpecialtyBabyContext"
+          "$ref": "#/$defs/BabyContext"
         },
         "language": {
           "enum": [
@@ -112,7 +170,7 @@
         },
         "photos": {
           "items": {
-            "$ref": "#/$defs/SpecialtyPhotoInput"
+            "$ref": "#/$defs/PhotoInput"
           },
           "maxItems": 3,
           "minItems": 1,
@@ -120,60 +178,22 @@
           "type": "array"
         },
         "schema_version": {
-          "const": "stool.analyze.synthetic.v1",
-          "default": "stool.analyze.synthetic.v1",
+          "const": "stool.analyze.v1",
+          "default": "stool.analyze.v1",
           "title": "Schema Version",
           "type": "string"
         }
       },
       "required": [
         "analysis_id",
-        "baby_context",
         "market",
         "language",
+        "baby_context",
         "photos"
       ],
-      "title": "SpecialtyAnalysisInput",
-      "type": "object"
-    },
-    "nonmedical_event": {
-      "additionalProperties": false,
-      "properties": {
-        "analysis_id": {
-          "format": "uuid",
-          "title": "Analysis Id",
-          "type": "string"
-        },
-        "event_type": {
-          "enum": [
-            "stool.card.created",
-            "stool.analysis.started",
-            "stool.analysis.failed",
-            "stool.analysis.cancelled"
-          ],
-          "title": "Event Type",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": "stool.events.v1",
-          "title": "Schema Version",
-          "type": "string"
-        },
-        "sequence": {
-          "exclusiveMinimum": 0,
-          "title": "Sequence",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "schema_version",
-        "analysis_id",
-        "sequence",
-        "event_type"
-      ],
-      "title": "SpecialtyTransportEvent",
+      "title": "AnalysisInput",
       "type": "object"
     }
   },
-  "status": "synthetic_only_no_medical_result"
+  "status": "structured_stool_result_v1"
 }

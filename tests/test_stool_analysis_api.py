@@ -110,7 +110,7 @@ def test_real_internal_resolver_rechecks_revocation_each_synthetic_request():
             endpoint = '/v1/internal/agent/stool-analyses/context/resolve'
             first = await client.post(endpoint, headers={'X-Service-Key': KEY}, json=payload)
             assert first.status_code == 200 and storage.reads == 1
-            assert first.json()['result'] == {'color': 'synthetic-test-value'}
+            assert first.json()['result']['risk_level'] == 'routine'
             assert base64.b64decode(first.json()['images_b64'][0]).startswith(b'\xff\xd8')
             async with sessions.begin() as session:
                 (await session.get(DeviceSession, device)).status = 'revoked'

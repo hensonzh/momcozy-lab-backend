@@ -35,7 +35,7 @@ def test_postgres_minio_concurrent_prepare_is_one_synthetic_task_and_card():
             async with sessions.begin() as session:
                 session.add(User(id=owner, status="active"))
                 await session.flush()
-                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant"))
+                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant", birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
                 await session.flush()
                 session.add(StoolPhoto(
                     id=photo_id, owner_user_id=owner, object_key=object_key, sha256=digest,
@@ -68,7 +68,7 @@ def test_postgres_minio_concurrent_prepare_is_one_synthetic_task_and_card():
                 assert await session.scalar(select(func.count()).select_from(StoolAnalysisPhoto)) == 1
                 assert await session.scalar(select(func.count()).select_from(StoolAnalysisEvent)) == 1
                 assert await session.scalar(select(func.count()).select_from(AuditLog).where(
-                    AuditLog.action == "stool_analysis.prepare_synthetic",
+                    AuditLog.action == "stool_analysis.submit",
                 )) == 1
                 event = await session.scalar(select(StoolAnalysisEvent))
                 assert event.event_type == "stool.card.created" and event.sequence == 1
@@ -100,7 +100,7 @@ def test_postgres_concurrent_dispatch_claim_has_one_leased_intent():
             async with sessions.begin() as session:
                 session.add(User(id=owner, status="active"))
                 await session.flush()
-                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant"))
+                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant", birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
                 await session.flush()
                 session.add(StoolPhoto(
                     id=photo_id, owner_user_id=owner, object_key=object_key, sha256=digest,

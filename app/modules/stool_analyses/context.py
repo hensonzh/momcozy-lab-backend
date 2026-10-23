@@ -15,7 +15,7 @@ from uuid import UUID
 from ..stool_photos.rules import prepare_model_image
 from ...core.errors import ApiError
 
-RESULT_SCHEMA_VERSION = "stool.result.v1"  # Draft; not a clinical validation schema.
+RESULT_SCHEMA_VERSION = "stool.result.v1"
 
 HANDLING = (
     "The following images are observation material from the same completed "

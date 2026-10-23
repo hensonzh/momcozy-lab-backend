@@ -19,7 +19,7 @@ backend-local-build:
 	$(MAKE) backend-build
 
 backend-build:
-	$(LOCAL_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api stool-photo-review-worker
+	$(LOCAL_COMPOSE) --profile tools build $(BACKEND_BUILD_FLAGS) migrate api stool-photo-review-worker stool-analysis-worker stool-specialty
 
 backend-local-up:
 	$(MAKE) backend-up
@@ -28,7 +28,7 @@ backend-up:
 	$(MAKE) backend-build LOCAL_ENV_FILE=$(LOCAL_ENV_FILE) BACKEND_BUILD_FLAGS="$(BACKEND_BUILD_FLAGS)"
 	$(LOCAL_COMPOSE) up -d postgres redis minio minio-init
 	$(LOCAL_COMPOSE) --profile tools run --rm migrate
-	$(LOCAL_COMPOSE) up -d --force-recreate api stool-photo-review-worker
+	$(LOCAL_COMPOSE) up -d --force-recreate api stool-photo-review-worker stool-specialty stool-analysis-worker
 
 backend-down:
 	$(LOCAL_COMPOSE) down

@@ -1,6 +1,6 @@
 # 看便便：照片审核与专项分析服务契约草案
 
-状态：**分阶段实施中，已接入 App 审核门控，尚无医学专项服务，未获医学/隐私发布批准**。根据 2026-10-22 的新增确认，后续 Agent 对话应同时引用专项分析所用图片与最终结果；相关产品资料包括飞书《PRD - 看便便》（`https://momcozy-in.feishu.cn/docx/ZZTOdOE59o22RXxOgHvcJJ7PnAd`）。本文件记录服务边界、拟议 API/事件及可验证的交付门槛；它不是 OpenAPI、医学判断规则或上线许可。当前实现与剩余门禁见 [交付路线](stool-specialty-delivery-plan.md) 和 [无状态网络边界](stool-specialty-network-contract.md)。医学字段在批准前不得冻结为可用接口。
+状态：**工程链路已实现并默认关闭；尚未获得医学效果与中美儿童图片处理的生产发布批准**。根据 2026-10-22 的新增确认，后续 Agent 对话应同时引用专项分析所用图片与最终结果；相关产品资料包括飞书《PRD - 看便便》（`https://momcozy-in.feishu.cn/docx/ZZTOdOE59o22RXxOgHvcJJ7PnAd`）。本文件记录服务边界、拟议 API/事件及可验证的交付门槛；它不是 OpenAPI、医学判断规则或上线许可。当前实现与剩余门禁见 [交付路线](stool-specialty-delivery-plan.md) 和 [无状态网络边界](stool-specialty-network-contract.md)。医学字段在批准前不得冻结为可用接口。
 
 ## 目标与非目标
 
@@ -26,7 +26,7 @@
 4. App 在任何照片审核中、审核失败/不确定、被删除或审核结果已过期时禁用分析按钮；删除不通过的照片后，只要仍有 1–3 张且**余下全部通过**，可以提交。替换照片产生新的照片 ID 和审核结果；旧审核不得继承。失败重试须有上限/退避，不能因超时默认放行。
 5. 提交分析时 Product Backend 再次以当前 owner/baby 归属、照片可用状态、内容指纹、审核版本及 1–3 张全部通过做原子门控；审核前后文件已删、换图、过期或策略撤销都拒绝。审核通过只表示照片适于分析，**不表示便便正常**；不能因红、黑、灰白或疑似血色本身而拒绝适用照片，医学风险由专项分析服务判定。
 
-### 拟议移动端契约（尚未实现）
+### 已实现移动端契约（能力默认关闭）
 
 - `POST /v1/stool-photos`：**已实现**认证 multipart **原图**，要求 `Idempotency-Key`；返回 `202`，包含 `photo_id`, `review_id`（目前等于 `photo_id`）, `review_status=pending`。服务端校验文件上限、解码类型/尺寸，错误返回稳定代码，不创建可用审核凭证。上传不会启动医学分析。
 - `GET /v1/stool-photos/{photo_id}/review`：**已实现**仅 owner；返回 `photo_id`, `status`, `reason_codes[]`, `policy_version`, `reviewed_at`, `expires_at`。服务端内部保留内容指纹，App 不需要收到敏感元数据。初版 App 可轮询；后续可增加独立状态通知，不影响服务边界。
@@ -40,7 +40,7 @@
 
 医学团队/算法团队定义并版本化必要输入字段、缺失值处理、分层规则及多图冲突处理。候选上下文是宝宝月龄、喂养方式、近 7 天喂养和尿布记录，但 **PRD 未把这些全部定为必填**；必须注明数据来源、观察窗与覆盖范围。“无记录”不可解释为“没有发生”，每日尿便汇总不可与单次记录直接相加。服务端只查询当前用户授权的本次宝宝。
 
-拟议分析状态：`queued -> running -> completed | failed | cancelled`；所有可见字段先通过结构化 schema/医学安全规则再写入持久事件流。风险尚未校验时为空，绝不可先展示“暂未发现明显异常”再事后升级。无法充分判断时返回明确的不可评估结果/追问，不把四级风险默认映射为最低等级。
+已实现分析状态：`queued -> running -> completed | failed | cancelled`；所有可见字段先通过结构化 schema/医学安全规则再写入持久事件流。风险尚未校验时为空，绝不可先展示“暂未发现明显异常”再事后升级。无法充分判断时返回明确的不可评估结果/追问，不把四级风险默认映射为最低等级。
 
 | SSE 事件（拟议） | 用户展示规则 |
 | --- | --- |
@@ -51,13 +51,13 @@
 
 每个事件包含 `analysis_id`, 单调 `sequence`, `schema_version`，持久化后再送出；客户端按 `(analysis_id, sequence)` 幂等归并、忽略重复和乱序、终态不可回退。若医学字段无法在生成过程中逐项完成安全验证，先流出卡片壳/非医学进度，待完整分析核验后再按字段发布；不得为制造流式效果泄露尚待修正的风险结论。敏感内推理只写入受限的分析产物而不发到 App 流。用户字段依据 PRD：颜色（含未知）、性状（含无法判断）、特殊特征（多项/未见明显/无法判断）、**四级**风险、解读、护理建议；年龄和条件不足时应允许“无法评估”，它是**结果状态而不是第五级风险**。风险升级条件、表述与咨询建议须医学团队审定，不由模型自行编造。
 
-### 已确认：图片与专项结果一起进入后续 Agent 模型上下文（仅合成数据联调，未启用）
+### 已实现：图片与专项结果一起进入后续 Agent 模型上下文（生产默认关闭）
 
 用户在 2026-10-22 确认：**用户主动提交并由独立看便便服务完成分析后**，与本次分析关联的图片和最终结果要同时提供给后续 Agent 模型，供其解释结论和回答相关追问。此前“不重看图”的限制在此处废止；它仅表示 Agent **不得把图片重新当成首次医学分析任务、不得自行替代或改写专项结论**。普通聊天图片上传/通用 Agent Run 依然不能绕过审核和专项服务。这不是“分析完成即把图片永久写进每轮系统提示词或全局记忆”。
 
-**拟议上下文封装 `stool_analysis_context.v1`（内部解析 API 已有默认关闭的合成切片，医学结果 schema/Run 接线尚未实现；其余字段名/事件须实现前冻结）：**
+**上下文封装通过 `stool.followup.ref.v1` 引用和 `stool.result.v1` 结果实现：**
 
-阶段性代码切片（2026-10-22）：Product Backend 已有 `stool_analyses`/`stool_analysis_photos` 持久结果与来源指纹表，以及逐次核验账号、设备会话、宝宝、对话、结果状态/保留期和照片的解析服务；仅在测试门控下，内部 `POST /v1/internal/agent/stool-analyses/context/resolve` 才用合成结果返回去 EXIF 图片与结构化数据。Agent Runtime 已有 typed client 和临时多模态组装适配器，每次调用重新请求 Product。**默认内部门控关闭**；不存在真实医学服务写入器、经医学认可的 schema、自动结果保留策略、Agent Run 绑定或向模型真实发送。测试直接种入的 `result_validated_at` 仅模拟“已审核结果”，不得当作临床校验。会话和账户状态在每次内部读取时重新查询；Agent 侧适配器必须在未来从规范签名的 Run principal 构建会话和过期时间，而不是采信 App 传来的字段。分析结果到期后目前仅禁止解析，尚未实现依正式保留政策清理已存结果；原图已取消固定 24 小时自动清理，但分析上下文仍有独立有效期，长期保留政策尚未批准。
+当前代码状态（2026-10-23）：Product Backend 已持久化任务、来源指纹、字段事件和最终结果；独立无状态服务使用可配置的 `gpt-5.4-mini` 生成严格结构化候选结果；App 已实现字段流、完成卡、历史恢复、删除与追问选择；Agent Runtime 每次相关模型调用前重新请求 Product，并把同次图片与完成结果作为低信任上下文。所有真实能力开关默认关闭，医学和隐私验收仍是生产门禁。
 
 - Product Backend 持有权威的 `analysis_id`、`owner_user_id`、`baby_id`、来源照片 ID/指纹/审核策略、最终结构化结果与版本、完成时间、生命周期和关联的授权对话。只有 `status=completed`、最终结果通过 schema/医学安全校验并持久化、照片仍可访问时才生成可用上下文引用。`queued/running/failed/cancelled` 的部分字段、过期审核或被撤销的照片不构成最终结果。不要从 App 传来的结论或普通附件推断“已完成”。
 - App/后续 Run 只传受限的 `analysis_id` 引用，不传原图 URL、对象 key、供应商响应、自由文本医学结论或“已通过审核”布尔值。Product Backend 对每次解析核验当前用户/宝宝/关联对话授权及保留期；Agent Runtime 的内部服务身份不能绕过当前用户权限。参照现有文件资产机制，但必须使用**专项用途的解析边界**，不能把 `stool_photos` 伪装成普通 `model_image` 文件附件。
@@ -101,10 +101,10 @@ PR 级门禁先覆盖确定性规则/权限/事件断言；受限夜间回归覆
 
 ## 与现状的差距及实施切片
 
-- 目前 `app/lib/features/agent_hub/agent_hub_page.dart` 的看便便任务卡已移除旧版选图后通过通用 Agent Run 提交的行为；改为原图 10 MB、格式及本机可解码短边校验，专用私有上传与逐张审核。能力探针当前始终不可用，默认不能选图上传；HEIC 的短边在本机不支持解码时由 Backend 最终验证。
-- **新增** `backend/app/modules/stool_photos` 私有原图上传、像素/格式校验、状态查询、能力探针与撤销；`backend/app/workers/stool_photo_reviews.py` 提供持久审核及清理 worker，已接入本地/CI 的独立 worker，生产尚未部署。默认审核 provider 为 disabled，Decisions 是禁用自动放行的候选适配器。**不包含**正式医学分析；App 审核流程已接入但默认不可用，避免把未校准审核当作正式能力。
+- 目前 `app/lib/features/agent_hub/agent_hub_page.dart` 的看便便任务卡已移除旧版选图后通过通用 Agent Run 提交的行为；改为原图 10 MB、格式及本机可解码短边校验，专用私有上传与逐张审核。能力探针由服务端配置控制且默认关闭；HEIC 的短边在本机不支持解码时由 Backend 最终验证。
+- **新增** `backend/app/modules/stool_photos` 私有原图上传、像素/格式校验、状态查询、能力探针与撤销；`backend/app/workers/stool_photo_reviews.py` 提供持久审核及清理 worker，已接入本地/CI 的独立 worker，生产尚未部署。默认审核 provider 为 disabled；Decisions 适配器按严格阈值输出 passed/rejected/inconclusive。独立分析服务和 App 流式完成卡已接入，但生产默认关闭。
 - `backend/app/modules/files/service.py` 的通用上传只按字节上限拦截；`backend/app/modules/files/vision_providers.py` 的 `general` 是通用描述，`schedule` 是日程提取；不可换名当专项审核。现有文件尚无便便用途隔离或审核凭证。
-- `agent/app/api/agent_runtime/schemas.py` 的图片附件和 `agent/app/agent_runtime/context/attachments.py` 的图片物化支持通用对话，不提供上述结构化医学结果或卡片事件。
+- `agent/app/agent_runtime/context/stool_followup.py` 已实现逐次授权的同源结果与图片物化；不会把图片字节或结果写进普通历史/压缩状态。
 
 按可验证切片推进：
 

@@ -79,6 +79,40 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  stool-analysis-worker:
+    image: momcozy-lab-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m app.workers.stool_analyses
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      stool-specialty:
+        condition: service_healthy
+
+  stool-specialty:
+    image: momcozy-stool-specialty:local
+    build:
+      context: .
+      dockerfile: services/stool_specialty/Dockerfile
+    env_file:
+      - ${MOMCOZY_BACKEND_ENV_FILE:-env/local.env}
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   auth-email-worker:
     image: momcozy-lab-backend:local
     build:

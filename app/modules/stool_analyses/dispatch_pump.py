@@ -1,4 +1,4 @@
-"""Test-only Product processor: one task ledger, one stateless specialty stream."""
+"""Product worker processor: one task ledger, one stateless specialty stream."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -16,8 +16,8 @@ LEASE = timedelta(seconds=30)
 MAX_ATTEMPTS = 5
 
 
-class SyntheticStoolDispatchPump:
-    """Only manually invoked with synthetic data; no real-photo deployment entry point."""
+class StoolAnalysisDispatchPump:
+    """Lease one Product task and persist only validated specialty events."""
 
     def __init__(self, *, sessions: async_sessionmaker[AsyncSession], storage: ObjectStorage,
                  client: SpecialtyClient, market: Literal["CN", "US"]) -> None:
@@ -63,3 +63,6 @@ class SyntheticStoolDispatchPump:
                 else:
                     await queue.retry(lease, now=clock(), delay=timedelta(seconds=min(2 ** lease.attempt, 120)))
         return True
+
+
+SyntheticStoolDispatchPump = StoolAnalysisDispatchPump

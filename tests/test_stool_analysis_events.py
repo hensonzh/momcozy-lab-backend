@@ -1,4 +1,4 @@
-"""Durable, synthetic-only card shell/failure event semantics."""
+"""Durable card, field, completion and failure event semantics."""
 import asyncio
 from uuid import uuid4
 
@@ -69,7 +69,7 @@ def test_synthetic_card_and_failure_persist_and_replay_after_restart(tmp_path):
 
 
 @pytest.mark.parametrize("first", [
-    (1, "stool.analysis.failed"), (2, "stool.card.created"),
+    (2, "stool.analysis.failed"), (2, "stool.analysis.cancelled"),
 ])
 def test_card_shell_must_be_first(tmp_path, first):
     async def run():
@@ -106,9 +106,7 @@ def test_sequence_conflict_terminal_and_cross_owner_fail_closed(tmp_path):
             with pytest.raises(ApiError):
                 await ledger.list_after(owner=foreign, analysis_id=analysis, after=0)
             await ledger.append(owner=owner, event=event(analysis, 1, "stool.card.created"))
-            for bad in (event(analysis, 1, "stool.analysis.cancelled"),
-                        event(analysis, 3, "stool.analysis.failed"),
-                        event(analysis, 2, "stool.card.created")):
+            for bad in (event(analysis, 3, "stool.analysis.failed"),):
                 with pytest.raises(ApiError) as captured:
                     await ledger.append(owner=owner, event=bad)
                 assert captured.value.code == "stool_analysis_event_conflict"
@@ -179,6 +177,6 @@ def test_progress_and_failure_are_committed_in_order_and_replayed_after_restart(
                 owner=owner, analysis_id=analysis, after=2,
             )] == [(3, "stool.analysis.failed")]
             with pytest.raises(ApiError):
-                await ledger.append(owner=owner, event=event(analysis, 4, "stool.analysis.started"))
+                await ledger.append(owner=owner, event=event(analysis, 4, "stool.analysis.failed"))
         await reopened.dispose()
     asyncio.run(run())

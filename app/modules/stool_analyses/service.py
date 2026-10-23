@@ -1,8 +1,4 @@
-"""Read a stored synthetic/approved final result anew for each related model call.
-
-This Product-owned resolver backs a dedicated internal endpoint that is hard-closed
-by default. No clinical result writer, provider, or capability is enabled yet.
-"""
+"""Reauthorize one completed stool result and its source images per model call."""
 from __future__ import annotations
 
 import json
@@ -20,6 +16,7 @@ from ..stool_photos.models import StoolPhoto
 from ..users.models import User
 from .context import CompletedStoolAnalysis, StoolContextPhoto, StoolFollowupContext, build_stool_followup_context
 from .models import StoolAnalysis, StoolAnalysisPhoto
+from .transport_contract import StoolAnalysisResult
 
 
 def _future(value: datetime | None, now: datetime) -> bool:
@@ -65,12 +62,14 @@ class StoolAnalysisContextResolver:
         if (
             analysis is None or analysis.status != "completed" or analysis.deleted_at is not None
             or analysis.revoked_at is not None or analysis.completed_at is None
-            or analysis.result_validated_at is None or not _future(analysis.context_expires_at, at)
+            or analysis.result_validated_at is None
             or not isinstance(analysis.final_result, dict) or not analysis.final_result
         ):
             raise _unavailable()
         try:
-            if len(json.dumps(analysis.final_result, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 16 * 1024:
+            validated_result = StoolAnalysisResult.model_validate(analysis.final_result)
+            if len(json.dumps(validated_result.model_dump(mode="json"), ensure_ascii=False,
+                              allow_nan=False).encode("utf-8")) > 16 * 1024:
                 raise _unavailable()
         except (TypeError, ValueError) as exc:
             raise _unavailable() from exc

@@ -7,7 +7,7 @@ from scripts.export_stool_specialty_openapi import build_schema
 
 def test_independent_stream_snapshot_and_bearer_scope_are_stable():
     root = Path(__file__).resolve().parents[1]
-    path = root / "docs/contracts/stool-specialty.openapi.synthetic.json"
+    path = root / "docs/contracts/stool-specialty.openapi.v1.json"
     schema = build_schema()
     assert schema == json.loads(path.read_text())
     assert schema["components"]["securitySchemes"]["HTTPBearer"] == {"type": "http", "scheme": "bearer"}

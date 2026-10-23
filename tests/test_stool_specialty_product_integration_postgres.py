@@ -18,6 +18,7 @@ from app.modules.stool_photos.models import StoolPhoto
 from app.modules.stool_photos.rules import validate_original
 from app.modules.users.models import User
 from services.stool_specialty.app import create_app
+from services.stool_specialty.contracts import PhotoObservation, StoolAnalysisResult
 from services.stool_specialty.settings import SpecialtySettings
 from test_stool_photo_postgres_integration import DATABASE_URL, ENDPOINT, isolated_storage_and_database
 from test_stool_photo_rules import image_bytes
@@ -26,6 +27,17 @@ from test_stool_specialty_client import SECRET
 import pytest
 
 pytestmark = pytest.mark.skipif(not DATABASE_URL or not ENDPOINT, reason="Requires isolated PostgreSQL and MinIO test profile.")
+
+
+class Analyzer:
+    async def analyze(self, _payload):
+        return StoolAnalysisResult(
+            assessment_status="assessed", color="yellow", consistency="mushy",
+            findings=["none"], risk_level="routine", summary="Common yellow mushy appearance.",
+            care_advice="Continue routine observation.",
+            photo_observations=[PhotoObservation(position=0, image_quality="adequate",
+                color="yellow", consistency="mushy", findings=["none"], note="Clear image.")],
+        )
 
 
 def test_product_owns_durable_task_and_events_after_independent_stateless_stream():
@@ -40,7 +52,7 @@ def test_product_owns_durable_task_and_events_after_independent_stateless_stream
             async with sessions.begin() as session:
                 session.add(User(id=owner, status="active"))
                 await session.flush()
-                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant"))
+                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant", birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
                 await session.flush()
                 session.add(StoolPhoto(
                     id=photo_id, owner_user_id=owner, object_key=key, sha256=digest,
@@ -62,8 +74,8 @@ def test_product_owns_durable_task_and_events_after_independent_stateless_stream
                 )
             service = create_app(SpecialtySettings(
                 app_env="test", market="US", service_shared_secret=SECRET,
-                synthetic_analyze_enabled=True,
-            ))
+                analysis_enabled=True, provider="openai", openai_api_key="test-key",
+            ), analyzer=Analyzer())
             assert not hasattr(service.state, "sessions")
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=service),
                                          base_url="https://specialty.test") as http:
@@ -77,10 +89,14 @@ def test_product_owns_durable_task_and_events_after_independent_stateless_stream
                 events = list((await session.scalars(select(StoolAnalysisEvent).where(
                     StoolAnalysisEvent.analysis_id == analysis.id,
                 ).order_by(StoolAnalysisEvent.sequence))).all())
-                assert stored.status == "failed" and stored.run_attempt == 1
-                assert stored.final_result is None
+                assert stored.status == "completed" and stored.run_attempt == 1
+                assert stored.final_result["risk_level"] == "routine"
                 assert [(e.sequence, e.event_type) for e in events] == [
-                    (1, "stool.card.created"), (2, "stool.analysis.started"), (3, "stool.analysis.failed"),
+                    (1, "stool.card.created"), (2, "stool.analysis.started"),
+                    (3, "stool.field.ready"), (4, "stool.field.ready"),
+                    (5, "stool.field.ready"), (6, "stool.field.ready"),
+                    (7, "stool.field.ready"), (8, "stool.field.ready"),
+                    (9, "stool.analysis.completed"),
                 ]
     asyncio.run(run())
 
@@ -100,7 +116,7 @@ def test_delete_committed_during_input_read_prevents_outbound_image():
             async with sessions.begin() as session:
                 session.add(User(id=owner, status="active"))
                 await session.flush()
-                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant"))
+                session.add(BabyProfile(id=baby, owner_user_id=owner, name="Synthetic infant", birth_date=(datetime.now(timezone.utc).date() - timedelta(days=90))))
                 await session.flush()
                 session.add(StoolPhoto(id=photo_id, owner_user_id=owner, object_key=key, sha256=digest,
                     content_type=metadata.content_type, size_bytes=len(body), width=metadata.width,
