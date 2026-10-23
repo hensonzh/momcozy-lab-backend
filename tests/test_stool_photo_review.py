@@ -92,7 +92,7 @@ def test_review_without_expiry_or_with_purged_original_never_qualifies():
 
 def test_decisions_adapter_applies_strict_suitability_and_privacy_policy():
     async def fake_post(payload):
-        assert payload["model"] == "gpt-6-sol"
+        assert payload["model"] == "gpt-6-luna"
         assert len(payload["questions"]) >= 4
         positive = {"stool_visible", "color_shape_visible", "adequate_lighting"}
         return {"answers": [
