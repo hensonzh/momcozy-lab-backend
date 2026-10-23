@@ -27,10 +27,10 @@ def test_idempotent_upload_is_private_and_agent_claims_one_thread(monkeypatch, a
             async def classify(body, owner, *, endpoint, api_key):
                 assert owner == owners[0]
                 calls.append(body)
-                return {'status': 'done', 'answer': answer}
+                return {'status': 'done', 'answer': answer, 'reason_code': 'no_valid_cry_patterns' if answer == 'no_cry' else 'cry_translated'}
 
             monkeypatch.setattr(cry_router, 'analyze', classify)
-            app = create_app(Settings(app_env='test'))
+            app = create_app(Settings(app_env='test', zoundream_endpoint='https://vendor.example/analyze', zoundream_api_key='synthetic'))
             active_owner = [owners[0]]
 
             async def auth():
@@ -65,6 +65,8 @@ def test_idempotent_upload_is_private_and_agent_claims_one_thread(monkeypatch, a
                 assert [item['id'] for item in listing.json()['items']] == [analysis_id]
                 other_thread_list = await client.get('/v1/cry-analyses', params={'thread_id': str(uuid4())})
                 assert other_thread_list.json()['items'] == []
+                # Existing results remain retrievable when vendor configuration is temporarily absent.
+                app.state.settings = Settings(app_env='test')
                 repeat = await client.post('/v1/cry-analyses', data=fields, files={'file': ('cry.wav', wav(), 'audio/wav')}, headers=headers)
                 assert repeat.json()['id'] == analysis_id and len(calls) == 1
                 changed = await client.post('/v1/cry-analyses', data=fields, files={'file': ('cry.wav', wav(2), 'audio/wav')}, headers=headers)
@@ -73,6 +75,9 @@ def test_idempotent_upload_is_private_and_agent_claims_one_thread(monkeypatch, a
                 payload = {'analysis_id': analysis_id, 'actor_user_id': str(owners[0]), 'thread_id': str(thread)}
                 scoped = await client.post('/v1/internal/agent/cry-analyses/resolve', json=payload)
                 assert scoped.status_code == 200 and scoped.json()['answer'] == answer
+                assert scoped.json()['reason_code'] == ('no_valid_cry_patterns' if answer == 'no_cry' else 'cry_translated')
+                assert first.json()['reason_code'] is None  # 202 is still pending.
+                assert recovered.json()['reason_code'] == scoped.json()['reason_code']
                 other_thread = await client.post('/v1/internal/agent/cry-analyses/resolve', json={**payload, 'thread_id': str(uuid4())})
                 assert other_thread.status_code == 404
                 active_owner[0] = owners[1]
@@ -89,6 +94,40 @@ def test_idempotent_upload_is_private_and_agent_claims_one_thread(monkeypatch, a
 
 
 @postgres
+def test_unconfigured_service_rejects_upload_without_leaving_pending_result() -> None:
+    async def run() -> None:
+        async with database() as (sessions, _, _, _, owners, _):
+            app = create_app(Settings(app_env='test'))
+
+            async def auth():
+                return CurrentUser(user_id=owners[0], subject=str(owners[0]),
+                                   session_id='session', token_id='token',
+                                   roles=frozenset({'user'}), permissions=frozenset())
+
+            async def session():
+                async with sessions() as db:
+                    try:
+                        yield db
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
+                        raise
+
+            app.dependency_overrides[get_session] = session
+            app.dependency_overrides[require_current_user] = auth
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+                upload = await client.post('/v1/cry-analyses',
+                    files={'file': ('cry.wav', wav(), 'audio/wav')},
+                    headers={'Idempotency-Key': 'unconfigured-service'})
+                assert upload.status_code == 503
+                assert upload.json()['error']['code'] == 'cry_service_unconfigured'
+                recovered = await client.get('/v1/cry-analyses/by-key/unconfigured-service')
+                assert recovered.status_code == 404
+
+    asyncio.run(run())
+
+
+@postgres
 def test_pending_result_can_be_recovered_by_key_without_holding_the_database(monkeypatch) -> None:
     async def run() -> None:
         async with database() as (sessions, _, _, _, owners, _):
@@ -100,7 +139,7 @@ def test_pending_result_can_be_recovered_by_key_without_holding_the_database(mon
                 return {'status': 'done', 'answer': 'hungry'}
 
             monkeypatch.setattr(cry_router, 'analyze', classify)
-            app = create_app(Settings(app_env='test'))
+            app = create_app(Settings(app_env='test', zoundream_endpoint='https://vendor.example/analyze', zoundream_api_key='synthetic'))
 
             async def auth():
                 return CurrentUser(user_id=owners[0], subject=str(owners[0]),
@@ -153,7 +192,7 @@ def test_new_jobs_are_admitted_with_per_owner_and_regional_capacity(monkeypatch)
             monkeypatch.setattr(cry_router, 'analyze', classify)
             monkeypatch.setattr(cry_router, 'MAX_ACTIVE_CRY_ANALYSES_PER_OWNER', 1, raising=False)
             monkeypatch.setattr(cry_router, 'MAX_ACTIVE_CRY_ANALYSES', 2, raising=False)
-            app = create_app(Settings(app_env='test'))
+            app = create_app(Settings(app_env='test', zoundream_endpoint='https://vendor.example/analyze', zoundream_api_key='synthetic'))
 
             async def auth():
                 owner = active_owner[0]

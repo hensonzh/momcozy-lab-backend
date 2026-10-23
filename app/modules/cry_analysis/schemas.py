@@ -2,13 +2,14 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CryAnalysisRead(BaseModel):
     id: UUID
     status: Literal['pending', 'done', 'incomplete', 'failed']
     answer: Literal['sleep', 'pain', 'burp', 'uncomfortable', 'hungry', 'no_cry'] | None
+    reason_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$")
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -32,5 +33,6 @@ class CryAnalysisInternalRead(BaseModel):
     id: UUID
     status: Literal['done', 'incomplete']
     answer: Literal['sleep', 'pain', 'burp', 'uncomfortable', 'hungry', 'no_cry'] | None
+    reason_code: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,63}$")
     created_at: datetime
     thread_id: UUID

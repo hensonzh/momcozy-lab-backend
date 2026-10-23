@@ -24,4 +24,5 @@ class CryAnalysis(Base):
     thread_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     answer: Mapped[str | None] = mapped_column(String(20))
+    reason_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

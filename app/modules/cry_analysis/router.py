@@ -19,7 +19,7 @@ from ..audit.service import IdempotencyService, parse_idempotency_response_ref
 from ..auth import CurrentUser, ServiceClient
 from .models import CryAnalysis
 from .schemas import CryAnalysisInternalRead, CryAnalysisListRead, CryAnalysisRead, CryAnalysisResolveRequest
-from .service import MAX_WAV_BYTES, analyze, validate_wav
+from .service import MAX_WAV_BYTES, analyze, validate_cry_service_configuration, validate_wav
 
 router = SurfaceAPIRouter(prefix='/cry-analyses', tags=['cry-analyses'],
                           api_surface_metadata=api_surface('public_app_api', owner='cry-analysis', clients=['flutter']))
@@ -58,6 +58,7 @@ async def _finish_analysis(
         if analysis is not None and analysis.status == 'pending':
             analysis.status = result['status']
             analysis.answer = result.get('answer')
+            analysis.reason_code = result.get('reason_code')
 
 
 async def _read_result(session: AsyncSession, analysis_id: UUID, owner: UUID) -> CryAnalysisRead:
@@ -114,6 +115,8 @@ async def create_cry_analysis(
     )
     if decision.status == 'replay':
         return await _read_result(session, parse_idempotency_response_ref(decision.record.response_ref), user.user_id)
+    settings = request.app.state.settings
+    validate_cry_service_configuration(settings.zoundream_endpoint, settings.zoundream_api_key)
     await _admit_cry_job(session, user.user_id)
     # The App creates a committed Agent thread before uploading. This is only
     # an owner-scoped association; Agent independently verifies thread ownership.
@@ -124,7 +127,6 @@ async def create_cry_analysis(
     result = CryAnalysisRead.model_validate(analysis)
     # Release the DB connection and row locks before contacting the vendor.
     await session.commit()
-    settings = request.app.state.settings
     background_tasks.add_task(
         _finish_analysis, analysis.id, body, user.user_id, endpoint=settings.zoundream_endpoint,
         api_key=settings.zoundream_api_key,
@@ -198,4 +200,5 @@ async def get_cry_analysis_for_agent(
     return CryAnalysisInternalRead.model_validate({
         'id': analysis.id, 'status': analysis.status, 'answer': analysis.answer,
         'created_at': analysis.created_at, 'thread_id': payload.thread_id,
+        'reason_code': analysis.reason_code,
     })

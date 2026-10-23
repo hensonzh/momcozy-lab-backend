@@ -15,6 +15,7 @@ import httpx
 from ...core.errors import ApiError
 
 ANSWERS = frozenset({'sleep', 'pain', 'burp', 'uncomfortable', 'hungry', 'no_cry'})
+REASON_CODES = frozenset({'cry_translated', 'no_valid_cry_patterns'})
 MAX_WAV_BYTES = 1_000_000
 BLOCK_BYTES = 32_000
 
@@ -41,17 +42,22 @@ def normalized_result(value: object) -> dict[str, str]:
         raise ApiError(code='cry_service_invalid', message='Cry service returned an invalid result.', status=502)
     if value['phase'] != 'done':
         return {'status': 'incomplete'}
-    if value.get('reason') in {'activation_already_closed', 'timestamp_out_of_sequence', 'activation_expired'}:
+    reason = value.get('reason')
+    if reason is not None and not isinstance(reason, str):
+        raise ApiError(code='cry_service_invalid', message='Cry service returned an invalid reason code.', status=502)
+    if reason in {'activation_already_closed', 'timestamp_out_of_sequence', 'activation_expired'}:
         raise ApiError(code='cry_service_invalid', message='Cry service protocol failed.', status=502)
     answer = value.get('answer')
     if answer not in ANSWERS:
         raise ApiError(code='cry_service_invalid', message='Cry service returned an unknown category.', status=502)
     if answer == 'no_cry' and value.get('reason') != 'no_valid_cry_patterns':
         return {'status': 'incomplete'}
-    return {'status': 'done', 'answer': answer}
+    if reason is not None and (reason not in REASON_CODES or (reason == 'no_valid_cry_patterns') != (answer == 'no_cry')):
+        raise ApiError(code='cry_service_invalid', message='Cry service returned an invalid reason code.', status=502)
+    return {'status': 'done', 'answer': answer, **({'reason_code': reason} if reason else {})}
 
 
-async def analyze(wav: bytes, owner: UUID, *, endpoint: str, api_key: str) -> dict[str, str]:
+def validate_cry_service_configuration(endpoint: str, api_key: str) -> None:
     parsed = urlsplit(endpoint)
     if (parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password or parsed.fragment
             or not api_key or parsed.hostname in {'localhost', 'host.docker.internal'}):
@@ -62,6 +68,10 @@ async def analyze(wav: bytes, owner: UUID, *, endpoint: str, api_key: str) -> di
         host = None
     if host is not None and not host.is_global:
         raise ApiError(code='cry_service_unconfigured', message='Cry analysis is unavailable.', status=503)
+
+
+async def analyze(wav: bytes, owner: UUID, *, endpoint: str, api_key: str) -> dict[str, str]:
+    validate_cry_service_configuration(endpoint, api_key)
     pcm = validate_wav(wav)
     headers = {
         'Authorization': hmac.new(api_key.encode(), str(owner).encode(), hashlib.sha256).hexdigest(),
@@ -106,7 +116,7 @@ async def analyze(wav: bytes, owner: UUID, *, endpoint: str, api_key: str) -> di
                     else:
                         timestamp += 1000
                 if saw_no_cry:
-                    return {'status': 'done', 'answer': 'no_cry'}
+                    return {'status': 'done', 'answer': 'no_cry', 'reason_code': 'no_valid_cry_patterns'}
     except (httpx.HTTPError, ValueError, TypeError, TimeoutError) as exc:
         raise ApiError(code='cry_service_unavailable', message='Cry analysis is unavailable.', status=502) from exc
     return {'status': 'incomplete'}
