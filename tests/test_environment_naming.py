@@ -28,11 +28,8 @@ def test_release_builds_only_use_main() -> None:
     assert not (ROOT / "env/production.env.example").exists()
 
 
-def test_pull_requests_validate_without_publishing_or_deploying() -> None:
-    workflow = (ROOT / ".github/workflows/backend-pr-verify.yml").read_text()
-    assert "pull_request:\n    branches: [main]" in workflow
-    assert "permissions:\n  contents: read" in workflow
-    for check in ("ruff check", "mypy app scripts", "pytest tests", "alembic", "export_openapi.py"):
-        assert check in workflow
-    for forbidden in ("docker build", "docker push", "packages: write", "workflow_dispatch:", "secrets."):
-        assert forbidden not in workflow
+def test_main_push_ci_remains_without_pr_workflow() -> None:
+    assert not (ROOT / ".github/workflows/backend-pr-verify.yml").exists()
+    workflow = (ROOT / ".github/workflows/backend-ci.yml").read_text()
+    assert "push:" in workflow and "main" in workflow
+    assert "pull_request:" not in workflow
