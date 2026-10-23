@@ -7,7 +7,7 @@ from alembic.script import ScriptDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_BASE_REVISION = "20260727_0001"
-PRODUCT_HEAD_REVISION = "20261023_0035"
+PRODUCT_HEAD_REVISION = "20261023_0036"
 
 
 def test_alembic_has_one_linear_product_migration_chain() -> None:
@@ -21,7 +21,7 @@ def test_alembic_has_one_linear_product_migration_chain() -> None:
     assert head_revision.down_revision is None
     assert script.get_current_head() == PRODUCT_HEAD_REVISION
     assert [revision.revision for revision in script.walk_revisions()] == [
-        PRODUCT_HEAD_REVISION, "20261022_0034", "20261022_0033", "20261022_0032", "20261022_0031", "20261022_0028", "20261022_0027", "20261015_0026", "20260928_0025", "20260927_0024", "20260926_0023", "20260926_0022", "20260920_0021", "20260920_0020", "20260916_0019", "20260910_0018", "20260910_0017", "20260909_0016", "20260909_0015", "20260908_0014", "20260908_0013", "20260908_0012", "20260908_0011", "20260908_0010", "20260908_0009", "20260908_0008", "20260908_0007", "20260908_0006", "20260908_0005", "20260908_0004", "20260908_0003", "20260908_0002", PRODUCT_BASE_REVISION
+        PRODUCT_HEAD_REVISION, "20261023_0035", "20261022_0034", "20261022_0033", "20261022_0032", "20261022_0031", "20261022_0028", "20261022_0027", "20261015_0026", "20260928_0025", "20260927_0024", "20260926_0023", "20260926_0022", "20260920_0021", "20260920_0020", "20260916_0019", "20260910_0018", "20260910_0017", "20260909_0016", "20260909_0015", "20260908_0014", "20260908_0013", "20260908_0012", "20260908_0011", "20260908_0010", "20260908_0009", "20260908_0008", "20260908_0007", "20260908_0006", "20260908_0005", "20260908_0004", "20260908_0003", "20260908_0002", PRODUCT_BASE_REVISION
     ]
 
 
@@ -104,6 +104,9 @@ def test_alembic_offline_upgrade_head_creates_final_product_schema() -> None:
         "ADD COLUMN baby_context_snapshot_id UUID",
         "ADD COLUMN run_attempt INTEGER",
         "CREATE UNIQUE INDEX uq_baby_records_active_daily_status",
+        "INSERT INTO baby_records",
+        "FROM feeding_records feeding",
+        "FROM growth_records growth",
     ]:
         assert phrase in sql
     assert "CREATE TABLE stool_analysis_dispatch_intents" not in sql

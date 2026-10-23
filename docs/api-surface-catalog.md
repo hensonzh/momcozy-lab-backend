@@ -103,6 +103,8 @@ The source of truth is each FastAPI route's OpenAPI extension metadata.
 | GET | `/v1/records/pumping` | records | flutter | stable | List Pumpings |
 | POST | `/v1/records/pumping` | records | flutter | stable | Create Pumping |
 | DELETE | `/v1/records/pumping/{record_id}` | records | flutter | stable | Delete Pumping |
+| PATCH | `/v1/records/pumping/{record_id}` | records | flutter | stable | Update Pumping |
+| POST | `/v1/records/pumping/{record_id}/restore` | records | flutter | stable | Restore Pumping |
 | GET | `/v1/schedule` | schedule | flutter, agent | stable | Read Schedule |
 | POST | `/v1/schedule/personal` | schedule | flutter, agent | stable | Create Personal |
 | DELETE | `/v1/schedule/personal/{task_id}` | schedule | flutter, agent | stable | Delete Personal |

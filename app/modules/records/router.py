@@ -25,6 +25,7 @@ from .schemas import (
     PumpingRecordCreate,
     PumpingRecordListResponse,
     PumpingRecordRead,
+    PumpingRecordUpdate,
 )
 from .service import RecordsService
 
@@ -125,6 +126,23 @@ async def create_pumping(
     return PumpingRecordRead.model_validate(record)
 
 
+@router.patch("/pumping/{record_id}", response_model=PumpingRecordRead)
+async def update_pumping(
+    record_id: UUID,
+    payload: PumpingRecordUpdate,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> PumpingRecordRead:
+    record = await service.update_pumping(
+        owner_user_id=current_user.user_id,
+        record_id=record_id,
+        updates=payload.model_dump(exclude_unset=True),
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return PumpingRecordRead.model_validate(record)
+
+
 @router.get("/pumping", response_model=PumpingRecordListResponse)
 async def list_pumpings(
     start_at: datetime | None = None,
@@ -158,6 +176,21 @@ async def get_milk_trends(
         include_today=include_today,
         timezone_name=timezone_name,
     )
+
+
+@router.post("/pumping/{record_id}/restore", response_model=PumpingRecordRead)
+async def restore_pumping(
+    record_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    service: RecordsService = Depends(get_records_service),
+) -> PumpingRecordRead:
+    record = await service.restore_pumping(
+        owner_user_id=current_user.user_id,
+        record_id=record_id,
+        request_id=str(getattr(request.state, "request_id", "") or ""),
+    )
+    return PumpingRecordRead.model_validate(record)
 
 
 @router.delete("/pumping/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
