@@ -76,6 +76,18 @@ class PumpingRecordCreate(BaseModel):
         return self
 
 
+class PumpingRecordUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plan_task_id: UUID | None = None
+    pump_start_time: datetime | None = None
+    pump_end_time: datetime | None = None
+    milk_volume_ml: float | None = Field(default=None, ge=0)
+    pump_type: str | None = Field(default=None, max_length=32)
+    duration_seconds: int | None = Field(default=None, ge=0)
+    source: str | None = Field(default=None, max_length=32)
+    title: str | None = Field(default=None, max_length=255)
+
+
 class PumpingRecordListResponse(BaseModel):
     items: list[PumpingRecordRead]
 

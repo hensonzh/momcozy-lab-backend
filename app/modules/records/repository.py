@@ -214,12 +214,19 @@ class RecordsRepository:
         await self.session.flush()
         return record
 
-    async def get_pumping_for_owner(self, *, record_id: UUID, owner_user_id: UUID) -> PumpingRecord | None:
+    async def get_pumping_for_owner(
+        self,
+        *,
+        record_id: UUID,
+        owner_user_id: UUID,
+        include_deleted: bool = False,
+    ) -> PumpingRecord | None:
         statement = select(PumpingRecord).where(
             PumpingRecord.id == record_id,
             PumpingRecord.owner_user_id == owner_user_id,
-            PumpingRecord.deleted_at.is_(None),
         )
+        if not include_deleted:
+            statement = statement.where(PumpingRecord.deleted_at.is_(None))
         return cast(PumpingRecord | None, await self.session.scalar(statement))
 
     async def update_pumping(
@@ -270,6 +277,24 @@ class RecordsRepository:
             return None
         record.status = "deleted"
         record.deleted_at = deleted_at
+        await self.session.flush()
+        return record
+
+    async def restore_pumping(
+        self,
+        *,
+        record_id: UUID,
+        owner_user_id: UUID,
+    ) -> PumpingRecord | None:
+        record = await self.get_pumping_for_owner(
+            record_id=record_id,
+            owner_user_id=owner_user_id,
+            include_deleted=True,
+        )
+        if record is None:
+            return None
+        record.status = "active"
+        record.deleted_at = None
         await self.session.flush()
         return record
 

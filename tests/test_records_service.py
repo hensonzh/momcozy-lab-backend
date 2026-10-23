@@ -351,6 +351,66 @@ def test_records_service_updates_pumping_preserving_omitted_fields() -> None:
     assert audit_service.record_kwargs["action"] == "records.pumping.update"
 
 
+def test_records_service_restores_deleted_pumping_and_recompletes_linked_task() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    pumping = _pumping(owner_user_id=owner_user_id, plan_task_id=task_id)
+    pumping.status = "deleted"
+    pumping.deleted_at = _now()
+    repository = FakeRecordsRepository(pumping=pumping)
+    audit_service = FakeAuditService()
+    service = RecordsService(repository=repository, audit_service=audit_service)
+
+    restored = asyncio.run(
+        service.restore_pumping(
+            owner_user_id=owner_user_id,
+            record_id=pumping.id,
+            request_id="req_pumping_restore",
+        )
+    )
+
+    assert restored.status == "active"
+    assert restored.deleted_at is None
+    assert repository.completed_plan_task_id == task_id
+    assert audit_service.record_kwargs["action"] == "records.pumping.restore"
+
+
+def test_records_service_restore_pumping_succeeds_when_legacy_linked_task_is_missing() -> None:
+    owner_user_id = uuid4()
+    task_id = uuid4()
+    pumping = _pumping(owner_user_id=owner_user_id, plan_task_id=task_id)
+    pumping.status = "deleted"
+    pumping.deleted_at = _now()
+    repository = FakeRecordsRepository(pumping=pumping)
+    repository.plan_task_owner_ok = False
+    service = RecordsService(repository=repository)
+
+    restored = asyncio.run(
+        service.restore_pumping(
+            owner_user_id=owner_user_id,
+            record_id=pumping.id,
+        )
+    )
+
+    assert restored.status == "active"
+    assert restored.deleted_at is None
+    assert repository.completed_plan_task_id is None
+
+
+def test_records_service_restore_pumping_rejects_foreign_or_missing_record() -> None:
+    service = RecordsService(repository=FakeRecordsRepository(pumping=None))
+
+    with pytest.raises(ApiError) as exc_info:
+        asyncio.run(
+            service.restore_pumping(
+                owner_user_id=uuid4(),
+                record_id=uuid4(),
+            )
+        )
+
+    assert exc_info.value.code == "not_found"
+
+
 def test_records_service_builds_measured_milk_trends_from_pumping_records() -> None:
     owner_user_id = uuid4()
     first = _pumping(owner_user_id=owner_user_id)
@@ -629,6 +689,7 @@ class FakeRecordsRepository:
         self.list_growth_in_range_kwargs = {}
         self.deleted_feeding = None
         self.deleted_pumping = None
+        self.restored_pumping = None
         self.deleted_growth = None
 
     async def infant_belongs_to_owner(self, *, infant_id: UUID, owner_user_id: UUID):
@@ -684,7 +745,9 @@ class FakeRecordsRepository:
         self.pumping = _pumping(owner_user_id=kwargs["owner_user_id"], plan_task_id=kwargs["plan_task_id"])
         return self.pumping
 
-    async def get_pumping_for_owner(self, *, record_id: UUID, owner_user_id: UUID):
+    async def get_pumping_for_owner(
+        self, *, record_id: UUID, owner_user_id: UUID, include_deleted: bool = False
+    ):
         return self.pumping
 
     async def list_pumpings(self, **kwargs):
@@ -705,6 +768,14 @@ class FakeRecordsRepository:
         self.pumping.status = "deleted"
         self.pumping.deleted_at = kwargs["deleted_at"]
         self.deleted_pumping = self.pumping
+        return self.pumping
+
+    async def restore_pumping(self, **kwargs):
+        if self.pumping is None:
+            return None
+        self.pumping.status = "active"
+        self.pumping.deleted_at = None
+        self.restored_pumping = self.pumping
         return self.pumping
 
     async def create_growth(self, **kwargs):

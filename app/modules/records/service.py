@@ -496,6 +496,39 @@ class RecordsService:
                 request_id=request_id,
             )
 
+    async def restore_pumping(
+        self,
+        *,
+        owner_user_id: UUID,
+        record_id: UUID,
+        request_id: str = "",
+    ) -> PumpingRecord:
+        restored = await self.repository.restore_pumping(
+            owner_user_id=owner_user_id,
+            record_id=record_id,
+        )
+        if restored is None:
+            raise ApiError(code="not_found", message="Pumping record not found.", status=404)
+        if restored.plan_task_id is not None:
+            task = await self.repository.get_plan_task_for_owner(
+                plan_task_id=restored.plan_task_id,
+                owner_user_id=owner_user_id,
+            )
+            if task is not None:
+                await self._complete_linked_plan_task(
+                    plan_task_id=restored.plan_task_id,
+                    owner_user_id=owner_user_id,
+                )
+        if self.audit_service is not None:
+            await self.audit_service.record(
+                actor_user_id=owner_user_id,
+                action="records.pumping.restore",
+                resource_type="pumping_record",
+                resource_id=str(record_id),
+                request_id=request_id,
+            )
+        return restored
+
     async def create_growth(
         self,
         *,

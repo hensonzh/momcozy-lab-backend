@@ -122,6 +122,50 @@ def test_list_and_delete_pumping_use_current_user_scope() -> None:
     assert fake_service.delete_pumping_kwargs["request_id"] == "req_delete"
 
 
+def test_update_pumping_uses_current_user_scope_and_partial_payload() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).patch(
+        f"/v1/records/pumping/{fake_service.record_id}",
+        headers={"X-Request-ID": "req_pump_update"},
+        json={"milk_volume_ml": 135},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["milk_volume_ml"] == 135
+    assert fake_service.update_pumping_kwargs == {
+        "owner_user_id": user_id,
+        "record_id": fake_service.record_id,
+        "updates": {"milk_volume_ml": 135.0},
+        "request_id": "req_pump_update",
+    }
+
+
+def test_restore_pumping_uses_current_user_scope() -> None:
+    user_id = uuid4()
+    fake_service = FakeRecordsService(user_id=user_id)
+    app = create_app(Settings(app_env="test"))
+    _override_current_user(app, user_id)
+    app.dependency_overrides[get_records_service] = lambda: fake_service
+
+    response = TestClient(app).post(
+        f"/v1/records/pumping/{fake_service.record_id}/restore",
+        headers={"X-Request-ID": "req_pump_restore"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(fake_service.record_id)
+    assert fake_service.restore_pumping_kwargs == {
+        "owner_user_id": user_id,
+        "record_id": fake_service.record_id,
+        "request_id": "req_pump_restore",
+    }
+
+
 def test_milk_trends_use_current_user_and_measured_records_only() -> None:
     user_id = uuid4()
     fake_service = FakeRecordsService(user_id=user_id)
@@ -252,6 +296,8 @@ class FakeRecordsService:
         self.create_pumping_kwargs = {}
         self.create_growth_kwargs = {}
         self.update_growth_kwargs = {}
+        self.update_pumping_kwargs = {}
+        self.restore_pumping_kwargs = {}
         self.list_feedings_kwargs = {}
         self.list_pumpings_kwargs = {}
         self.milk_trends_kwargs = {}
@@ -278,6 +324,17 @@ class FakeRecordsService:
     async def list_pumpings(self, **kwargs):
         self.list_pumpings_kwargs = kwargs
         return [self._pumping()]
+
+    async def update_pumping(self, **kwargs):
+        self.update_pumping_kwargs = kwargs
+        pumping = self._pumping()
+        for field, value in kwargs["updates"].items():
+            setattr(pumping, field, value)
+        return pumping
+
+    async def restore_pumping(self, **kwargs):
+        self.restore_pumping_kwargs = kwargs
+        return self._pumping()
 
     async def get_milk_trends(self, **kwargs):
         self.milk_trends_kwargs = kwargs
